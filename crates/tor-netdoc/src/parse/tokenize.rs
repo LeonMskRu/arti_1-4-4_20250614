@@ -156,15 +156,13 @@ impl<'a, K: Keyword> NetDocReaderBase<'a, K> {
             self.advance(cr_pos + 1)?;
             let line = &remainder[..cr_pos];
             Ok(line)
+        } else if let Some(nl_pos) = remainder.find('\n') {
+            self.advance(nl_pos + 1)?;
+            let parsedline = &remainder[..nl_pos];
+            Ok(parsedline)
         } else {
-            if let Some(nl_pos) = remainder.find('\n') {
-                self.advance(nl_pos + 1)?;
-                let parsedline = &remainder[..nl_pos];
-                Ok(parsedline)
-            } else {
-                self.advance(remainder.len())?; // drain everything.
-                Err(EK::TruncatedLine.at_pos(self.pos(self.s.len())))
-            }
+            self.advance(remainder.len())?; // drain everything.
+            Err(EK::TruncatedLine.at_pos(self.pos(self.s.len())))
         }
     }
 
