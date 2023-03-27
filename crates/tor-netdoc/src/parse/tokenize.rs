@@ -152,7 +152,7 @@ impl<'a, K: Keyword> NetDocReaderBase<'a, K> {
     /// remove data if the reader is nonempty.
     fn line(&mut self) -> Result<&'a str> {
         let remainder = &self.s[self.off..];
-        if let Some(cr_pos) = remainder.find('\r') {
+        if let Some(cr_pos) = remainder.find("\r\n") {
             self.advance(cr_pos + 1)?;
             let line = &remainder[..cr_pos];
             Ok(line)
