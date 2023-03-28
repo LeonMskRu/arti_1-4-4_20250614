@@ -44,6 +44,47 @@ impl<R: Runtime> DirProviderBuilder<R> for DirMgrBuilder {
 /// An object for constructing a [`TorClient`].
 ///
 /// Returned by [`TorClient::builder()`].
+///
+/// # Examples
+/// To create a Tor client immediately, without waiting for it to bootstrap.
+/// This method does not require you to use async fn.
+///
+/// ```
+/// # use arti_client::{TorClient, TorClientConfig}; use anyhow::Result; use tor_rtcompat::PreferredRuntime;
+/// pub fn get_tor_client() -> Result<TorClient<PreferredRuntime>> {
+///
+///     let config = TorClientConfig::default();
+///     eprintln!("creating unbootstrapped Tor client");
+///
+///     // Create an unbootstrapped Tor client. Bootstrapping will happen when the client is used,
+///     // since `BootstrapBehavior::OnDemand` is the default.
+///     // For setting it to manual, use TorClient::bootstrap_behaviour(BootStrapBehavior::Manual)
+///     Ok(TorClient::builder()     // Returns TorClientBuilder
+///         .config(config)
+///         .bootstrap_behavior(BootstrapBehavior::OnDemand)
+///         .create_unbootstrapped()?)
+/// }
+/// ```
+///
+/// Another way of returning a builder object. The returned client can be
+/// bootstrapped when it is first used.
+/// ```
+/// # use arti_client::{TorClient, TorClientConfig, TorClientBuilder}; use anyhow::Result;
+/// # use tor_rtcompat::PreferredRuntime;
+///
+/// pub fn get_tor_client() -> Result<TorClientBuilder<PreferredRuntime>> {
+///
+///     let config = TorClientConfig::default();
+///     // Get the current preferred runtime.
+///     let rt = PreferredRuntime::current()?;
+///
+///     eprintln!("connecting to Tor...");
+///     // Pass in our custom runtime using `with_runtime`.
+///     let tor_client = TorClient::with_runtime(rt).config(config);
+///     Ok(tor_client)
+/// }
+/// ```
+///
 #[derive(Clone)]
 #[must_use]
 pub struct TorClientBuilder<R: Runtime> {

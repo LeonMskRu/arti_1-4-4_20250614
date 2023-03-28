@@ -51,6 +51,23 @@ use tracing::{debug, error, info};
 /// Cloning this object makes a new reference to the same underlying
 /// handles: it's usually better to clone the `TorClient` than it is to
 /// create a new one.
+///
+/// # Examples
+/// ```
+/// # use arti_client::{TorClient,TorClientConfig}; use anyhow::Result;
+/// # use tor_rtcompat::PreferredRuntime;
+/// async fn get_tor_client() -> Result<TorClient<PreferredRuntime>> {
+///     // A basic default client configuration using the default method.
+///     let config = TorClientConfig::default();
+///
+///     eprintln!("connecting to Tor...");
+///
+///     // Let the Arti client start and bootstrap a connection to the network.
+///     let tor_client = TorClient::create_bootstrapped(config).await?;
+///     Ok(tor_client)
+/// }
+/// ```
+///
 // TODO(nickm): This type now has 5 Arcs inside it, and 2 types that have
 // implicit Arcs inside them! maybe it's time to replace much of the insides of
 // this with an Arc<TorClientInner>?
