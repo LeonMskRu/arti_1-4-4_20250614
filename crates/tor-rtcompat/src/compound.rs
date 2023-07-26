@@ -1,6 +1,7 @@
 //! Define a [`CompoundRuntime`] part that can be built from several component
 //! pieces.
 
+use std::path::Path;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use crate::traits::*;
@@ -22,16 +23,16 @@ use std::time::{Instant, SystemTime};
 /// new runtime from pieces.
 #[derive(Educe)]
 #[educe(Clone)] // #[derive(Clone)] wrongly infers Clone bounds on the generic parameters
-pub struct CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR> {
+pub struct CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> {
     /// The actual collection of Runtime objects.
     ///
     /// We wrap this in an Arc rather than requiring that each item implement
     /// Clone, though we could change our minds later on.
-    inner: Arc<Inner<SpawnR, SleepR, TcpR, TlsR, UdpR>>,
+    inner: Arc<Inner<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>>,
 }
 
 /// A collection of objects implementing that traits that make up a [`Runtime`]
-struct Inner<SpawnR, SleepR, TcpR, TlsR, UdpR> {
+struct Inner<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> {
     /// A `Spawn` and `BlockOn` implementation.
     spawn: SpawnR,
     /// A `SleepProvider` implementation.
@@ -42,11 +43,15 @@ struct Inner<SpawnR, SleepR, TcpR, TlsR, UdpR> {
     tls: TlsR,
     /// A `UdpProvider` implementation
     udp: UdpR,
+    /// A `UnixProvider` implementation
+    unix: UnixR,
 }
 
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR> {
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
+    CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
+{
     /// Construct a new CompoundRuntime from its components.
-    pub fn new(spawn: SpawnR, sleep: SleepR, tcp: TcpR, tls: TlsR, udp: UdpR) -> Self {
+    pub fn new(spawn: SpawnR, sleep: SleepR, tcp: TcpR, tls: TlsR, udp: UdpR, unix: UnixR) -> Self {
         #[allow(clippy::arc_with_non_send_sync)]
         CompoundRuntime {
             inner: Arc::new(Inner {
@@ -55,12 +60,14 @@ impl<SpawnR, SleepR, TcpR, TlsR, UdpR> CompoundRuntime<SpawnR, SleepR, TcpR, Tls
                 tcp,
                 tls,
                 udp,
+                unix,
             }),
         }
     }
 }
 
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> Spawn for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> Spawn
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 where
     SpawnR: Spawn,
 {
@@ -70,13 +77,15 @@ where
     }
 }
 
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> BlockOn for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> BlockOn
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 where
     SpawnR: BlockOn,
     SleepR: Clone + Send + Sync + 'static,
     TcpR: Clone + Send + Sync + 'static,
     TlsR: Clone + Send + Sync + 'static,
     UdpR: Clone + Send + Sync + 'static,
+    UnixR: Send + Sync + 'static,
 {
     #[inline]
     fn block_on<F: futures::Future>(&self, future: F) -> F::Output {
@@ -84,14 +93,15 @@ where
     }
 }
 
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> SleepProvider
-    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> SleepProvider
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 where
     SleepR: SleepProvider,
     SpawnR: Clone + Send + Sync + 'static,
     TcpR: Clone + Send + Sync + 'static,
     TlsR: Clone + Send + Sync + 'static,
     UdpR: Clone + Send + Sync + 'static,
+    UnixR: Send + Sync + 'static,
 {
     type SleepFuture = SleepR::SleepFuture;
 
@@ -112,8 +122,8 @@ where
 }
 
 #[async_trait]
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> TcpProvider
-    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> TcpProvider
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 where
     TcpR: TcpProvider,
     SpawnR: Send + Sync + 'static,
@@ -121,6 +131,7 @@ where
     TcpR: Send + Sync + 'static,
     TlsR: Send + Sync + 'static,
     UdpR: Send + Sync + 'static,
+    UnixR: Send + Sync + 'static,
 {
     type TcpStream = TcpR::TcpStream;
 
@@ -137,14 +148,15 @@ where
     }
 }
 
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR, S> TlsProvider<S>
-    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR, S> TlsProvider<S>
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 where
     TcpR: TcpProvider,
     TlsR: TlsProvider<S>,
     SleepR: Clone + Send + Sync + 'static,
     SpawnR: Clone + Send + Sync + 'static,
     UdpR: Clone + Send + Sync + 'static,
+    UnixR: Send + Sync + 'static,
 {
     type Connector = TlsR::Connector;
     type TlsStream = TlsR::TlsStream;
@@ -155,8 +167,8 @@ where
     }
 }
 
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> std::fmt::Debug
-    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> std::fmt::Debug
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompoundRuntime").finish_non_exhaustive()
@@ -164,8 +176,8 @@ impl<SpawnR, SleepR, TcpR, TlsR, UdpR> std::fmt::Debug
 }
 
 #[async_trait]
-impl<SpawnR, SleepR, TcpR, TlsR, UdpR> UdpProvider
-    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR>
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> UdpProvider
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
 where
     UdpR: UdpProvider,
     SpawnR: Send + Sync + 'static,
@@ -173,11 +185,32 @@ where
     TcpR: Send + Sync + 'static,
     TlsR: Send + Sync + 'static,
     UdpR: Send + Sync + 'static,
+    UnixR: Send + Sync + 'static,
 {
     type UdpSocket = UdpR::UdpSocket;
 
     #[inline]
     async fn bind(&self, addr: &SocketAddr) -> IoResult<Self::UdpSocket> {
         self.inner.udp.bind(addr).await
+    }
+}
+
+#[async_trait]
+impl<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR> UnixProvider
+    for CompoundRuntime<SpawnR, SleepR, TcpR, TlsR, UdpR, UnixR>
+where
+    TcpR: Send + Sync + 'static,
+    SpawnR: Send + Sync + 'static,
+    SleepR: Send + Sync + 'static,
+    TcpR: Send + Sync + 'static,
+    TlsR: Send + Sync + 'static,
+    UdpR: Send + Sync + 'static,
+    UnixR: UnixProvider,
+{
+    type UnixStream = UnixR::UnixStream;
+
+    #[inline]
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+        self.inner.unix.connect_unix(path).await
     }
 }

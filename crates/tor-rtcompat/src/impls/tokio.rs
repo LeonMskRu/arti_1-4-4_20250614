@@ -10,6 +10,7 @@ pub(crate) mod net {
 
     pub(crate) use tokio_crate::net::{
         TcpListener as TokioTcpListener, TcpStream as TokioTcpStream, UdpSocket as TokioUdpSocket,
+        UnixStream as TokioUnixStream,
     };
 
     use futures::io::{AsyncRead, AsyncWrite};
@@ -128,6 +129,42 @@ pub(crate) mod net {
             self.socket.local_addr()
         }
     }
+
+    /// Wrap a Tokio UnixSocket
+    pub struct UnixStream {
+        /// The underlying UnixStream
+        s: Compat<TokioUnixStream>,
+    }
+    impl From<TokioUnixStream> for UnixStream {
+        fn from(s: TokioUnixStream) -> UnixStream {
+            let s = s.compat();
+            UnixStream { s }
+        }
+    }
+    impl AsyncRead for UnixStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<IoResult<usize>> {
+            Pin::new(&mut self.s).poll_read(cx, buf)
+        }
+    }
+    impl AsyncWrite for UnixStream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<IoResult<usize>> {
+            Pin::new(&mut self.s).poll_write(cx, buf)
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            Pin::new(&mut self.s).poll_flush(cx)
+        }
+        fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            Pin::new(&mut self.s).poll_close(cx)
+        }
+    }
 }
 
 // ==============================
@@ -136,6 +173,7 @@ use crate::traits::*;
 use async_trait::async_trait;
 use futures::Future;
 use std::io::Result as IoResult;
+use std::path::Path;
 use std::time::Duration;
 
 impl SleepProvider for TokioRuntimeHandle {
@@ -166,6 +204,16 @@ impl crate::traits::UdpProvider for TokioRuntimeHandle {
 
     async fn bind(&self, addr: &std::net::SocketAddr) -> IoResult<Self::UdpSocket> {
         net::UdpSocket::bind(*addr).await
+    }
+}
+
+#[async_trait]
+impl crate::traits::UnixProvider for TokioRuntimeHandle {
+    type UnixStream = net::UnixStream;
+
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+        let s = net::TokioUnixStream::connect(path).await?;
+        Ok(s.into())
     }
 }
 

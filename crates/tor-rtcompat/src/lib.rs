@@ -57,7 +57,7 @@ mod traits;
 use std::io;
 pub use traits::{
     BlockOn, CertifiedConn, Runtime, SleepProvider, TcpListener, TcpProvider, TlsProvider,
-    UdpProvider, UdpSocket,
+    UdpProvider, UdpSocket, UnixProvider,
 };
 
 pub use timer::{SleepProviderExt, Timeout, TimeoutError};

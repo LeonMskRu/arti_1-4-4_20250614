@@ -6,6 +6,7 @@ use futures::{AsyncRead, AsyncWrite, Future};
 use std::fmt::Debug;
 use std::io::Result as IoResult;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 /// A runtime that we can use to run Tor as a client.
@@ -54,6 +55,7 @@ pub trait Runtime:
     + TcpProvider
     + TlsProvider<Self::TcpStream>
     + UdpProvider
+    + UnixProvider
     + Debug
     + 'static
 {
@@ -69,6 +71,7 @@ impl<T> Runtime for T where
         + TcpProvider
         + TlsProvider<Self::TcpStream>
         + UdpProvider
+        + UnixProvider
         + Debug
         + 'static
 {
@@ -210,6 +213,23 @@ pub trait UdpSocket {
     async fn send(&self, buf: &[u8], target: &SocketAddr) -> IoResult<usize>;
     /// Return the local address that this socket is bound to.
     fn local_addr(&self) -> IoResult<SocketAddr>;
+}
+
+/// Trait for a runtime that can create and accept unix socket connections.
+///
+/// (In Arti we use the [`AsyncRead`] and [`AsyncWrite`] traits from
+/// [`futures::io`] as more standard, even though the ones from Tokio
+/// can be a bit more efficient.  Let's hope that they converge in the
+/// future.)
+// TODO: Use of async_trait is not ideal, since we have to box with every
+// call.  Still, async_io basically makes that necessary :/
+#[async_trait]
+pub trait UnixProvider: Clone + Send + Sync + 'static {
+    /// The type for the unix socket connections returned by [`Self::connect_unix()`].
+    type UnixStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static;
+
+    /// Launch a unix socket connection to a given socket address.
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream>;
 }
 
 /// An object with a peer certificate: typically a TLS connection.

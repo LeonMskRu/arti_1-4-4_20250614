@@ -9,7 +9,7 @@ use super::io::{stream_pair, LocalStream};
 use super::MockNetRuntime;
 use core::fmt;
 use tor_rtcompat::tls::TlsConnector;
-use tor_rtcompat::{CertifiedConn, Runtime, TcpListener, TcpProvider, TlsProvider};
+use tor_rtcompat::{CertifiedConn, Runtime, TcpListener, TcpProvider, TlsProvider, UnixProvider};
 use tor_rtcompat::{UdpProvider, UdpSocket};
 
 use async_trait::async_trait;
@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{self, Error as IoError, ErrorKind, Result as IoResult};
 use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
@@ -347,6 +348,53 @@ impl UdpSocket for MockUdpSocket {
     }
     fn local_addr(&self) -> IoResult<SocketAddr> {
         void::unreachable(self.void)
+    }
+}
+
+/// A very poor imitation of an unix socket
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct MockUnixStream {
+    /// This is uninhabited.
+    ///
+    /// To implement unix socket support, implement `.bind()`, and abolish this field,
+    /// replacing it with the actual implementation.
+    void: Void,
+}
+
+#[async_trait]
+impl UnixProvider for MockNetProvider {
+    type UnixStream = MockUnixStream;
+
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+        let _ = path;
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+#[allow(clippy::diverging_sub_expression)] // void::unimplemented + async_trait
+impl AsyncRead for MockUnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        void::unreachable((self.void, cx, buf).0)
+    }
+}
+
+#[allow(clippy::diverging_sub_expression)] // void::unimplemented + async_trait
+impl AsyncWrite for MockUnixStream {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
+        void::unreachable((self.void, cx, buf).0)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        void::unreachable((self.void, cx).0)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        void::unreachable((self.void, cx).0)
     }
 }
 

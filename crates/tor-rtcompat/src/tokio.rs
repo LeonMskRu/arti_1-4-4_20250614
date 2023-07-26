@@ -39,7 +39,7 @@ pub struct TokioNativeTlsRuntime {
 
 /// Implementation type for a TokioRuntimeHandle.
 #[cfg(feature = "native-tls")]
-type HandleInner = CompoundRuntime<Handle, Handle, Handle, NativeTlsProvider, Handle>;
+type HandleInner = CompoundRuntime<Handle, Handle, Handle, NativeTlsProvider, Handle, Handle>;
 
 /// A [`Runtime`](crate::Runtime) built around a Handle to a tokio runtime, and `rustls`.
 #[derive(Clone)]
@@ -51,7 +51,7 @@ pub struct TokioRustlsRuntime {
 
 /// Implementation for a TokioRuntimeRustlsHandle
 #[cfg(feature = "rustls")]
-type RustlsHandleInner = CompoundRuntime<Handle, Handle, Handle, RustlsProvider, Handle>;
+type RustlsHandleInner = CompoundRuntime<Handle, Handle, Handle, RustlsProvider, Handle, Handle>;
 
 #[cfg(feature = "native-tls")]
 crate::opaque::implement_opaque_runtime! {
@@ -73,6 +73,7 @@ impl From<tokio_crate::runtime::Handle> for TokioNativeTlsRuntime {
                 h.clone(),
                 h.clone(),
                 NativeTlsProvider::default(),
+                h.clone(),
                 h,
             ),
         }
@@ -89,6 +90,7 @@ impl From<tokio_crate::runtime::Handle> for TokioRustlsRuntime {
                 h.clone(),
                 h.clone(),
                 RustlsProvider::default(),
+                h.clone(),
                 h,
             ),
         }
@@ -111,6 +113,7 @@ impl TokioNativeTlsRuntime {
                 r.clone(),
                 r.clone(),
                 NativeTlsProvider::default(),
+                r.clone(),
                 r,
             ),
         })
@@ -169,6 +172,7 @@ impl TokioRustlsRuntime {
                 r.clone(),
                 r.clone(),
                 RustlsProvider::default(),
+                r.clone(),
                 r,
             ),
         })

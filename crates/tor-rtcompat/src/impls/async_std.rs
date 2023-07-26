@@ -10,11 +10,13 @@ mod net {
     use crate::traits;
 
     use async_std_crate::net::{TcpListener, TcpStream, UdpSocket as StdUdpSocket};
+    use async_std_crate::os::unix::net::UnixStream;
     use async_trait::async_trait;
     use futures::future::Future;
     use futures::stream::Stream;
     use std::io::Result as IoResult;
     use std::net::SocketAddr;
+    use std::path::Path;
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
@@ -139,6 +141,15 @@ mod net {
 
         fn local_addr(&self) -> IoResult<SocketAddr> {
             self.socket.local_addr()
+        }
+    }
+
+    #[async_trait]
+    impl traits::UnixProvider for async_executors::AsyncStd {
+        type UnixStream = UnixStream;
+
+        async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+            Ok(UnixStream::connect(path).await?)
         }
     }
 }
