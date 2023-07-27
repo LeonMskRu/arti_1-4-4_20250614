@@ -70,9 +70,18 @@ macro_rules! implement_opaque_runtime {
     #[async_trait::async_trait]
     impl $crate::traits::UnixProvider for $t {
         type UnixStream = <$mty as $crate::traits::UnixProvider>::UnixStream;
+        type UnixListener = <$mty as $crate::traits::UnixProvider>::UnixListener;
         #[inline]
         async fn connect_unix(&self, path: &std::path::Path) -> std::io::Result<Self::UnixStream> {
             self.$member.connect_unix(path).await
+        }
+        #[inline]
+        async fn listen_unix(&self, path: &std::path::Path) -> std::io::Result<Self::UnixListener> {
+            self.$member.listen_unix(path).await
+        }
+        #[inline]
+        async fn unbound_unix(&self) -> std::io::Result<(Self::UnixStream, Self::UnixStream)> {
+            self.$member.unbound_unix().await
         }
     }
 

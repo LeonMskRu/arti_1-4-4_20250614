@@ -208,9 +208,20 @@ where
     UnixR: UnixProvider,
 {
     type UnixStream = UnixR::UnixStream;
+    type UnixListener = UnixR::UnixListener;
 
     #[inline]
     async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
         self.inner.unix.connect_unix(path).await
+    }
+
+    #[inline]
+    async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+        self.inner.unix.listen_unix(path).await
+    }
+
+    #[inline]
+    async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+        self.inner.unix.unbound_unix().await
     }
 }

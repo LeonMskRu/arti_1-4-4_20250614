@@ -9,7 +9,10 @@ use super::io::{stream_pair, LocalStream};
 use super::MockNetRuntime;
 use core::fmt;
 use tor_rtcompat::tls::TlsConnector;
-use tor_rtcompat::{CertifiedConn, Runtime, TcpListener, TcpProvider, TlsProvider, UnixProvider};
+use tor_rtcompat::{
+    CertifiedConn, Runtime, TcpListener, TcpProvider, TlsProvider, UnixListener, UnixProvider,
+    UnixSocketAddr,
+};
 use tor_rtcompat::{UdpProvider, UdpSocket};
 
 use async_trait::async_trait;
@@ -357,17 +360,62 @@ impl UdpSocket for MockUdpSocket {
 pub struct MockUnixStream {
     /// This is uninhabited.
     ///
-    /// To implement unix socket support, implement `.bind()`, and abolish this field,
+    /// To implement unix socket support, implement `UnixProvider::connect_unix()`, and abolish this field,
     /// replacing it with the actual implementation.
     void: Void,
+}
+/// A very poor imitation of an unix socket listener
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct MockUnixListener {
+    /// This is uninhabited.
+    ///
+    /// To implement unix socket support, implement `UnixProvider::listen_unix()`, and abolish this field,
+    /// replacing it with the actual implementation.
+    _void: Void,
 }
 
 #[async_trait]
 impl UnixProvider for MockNetProvider {
     type UnixStream = MockUnixStream;
+    type UnixListener = MockUnixListener;
 
     async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
         let _ = path;
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+        let _ = path;
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+#[async_trait]
+impl UnixListener for MockUnixListener {
+    /// The type of Unix socket connections returned by [`Self::accept()`].
+    type UnixStream = MockUnixStream;
+
+    /// The type of [`stream::Stream`] returned by [`Self::incoming()`].
+    type Incoming = futures::stream::Empty<IoResult<(Self::UnixStream, UnixSocketAddr)>>;
+
+    /// Wait for an incoming stream; return it along with its address.
+    async fn accept(&self) -> IoResult<(Self::UnixStream, UnixSocketAddr)> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    /// Wrap this listener into a new [`stream::Stream`] that yields
+    /// TCP streams and addresses.
+    fn incoming(self) -> Self::Incoming {
+        futures::stream::empty()
+    }
+
+    /// Return the local address that this listener is bound to.
+    fn local_addr(&self) -> IoResult<UnixSocketAddr> {
         Err(io::ErrorKind::Unsupported.into())
     }
 }

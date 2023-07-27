@@ -10,10 +10,10 @@ mod net {
     use crate::traits;
 
     use async_std_crate::net::{TcpListener, TcpStream, UdpSocket as StdUdpSocket};
-    use async_std_crate::os::unix::net::UnixStream;
+    use async_std_crate::os::unix::net::{UnixListener, UnixStream};
     use async_trait::async_trait;
     use futures::future::Future;
-    use futures::stream::Stream;
+    use futures::stream::{BoxStream, Stream, StreamExt};
     use std::io::Result as IoResult;
     use std::net::SocketAddr;
     use std::path::Path;
@@ -147,9 +147,48 @@ mod net {
     #[async_trait]
     impl traits::UnixProvider for async_executors::AsyncStd {
         type UnixStream = UnixStream;
+        type UnixListener = UnixListener;
 
         async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
             Ok(UnixStream::connect(path).await?)
+        }
+
+        async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+            Ok(UnixListener::bind(path).await?)
+        }
+
+        async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+            Ok(UnixStream::pair()?)
+        }
+    }
+
+    #[async_trait]
+    impl traits::UnixListener for UnixListener {
+        type UnixStream = UnixStream;
+        type Incoming = BoxStream<'static, IoResult<(Self::UnixStream, traits::UnixSocketAddr)>>;
+        async fn accept(&self) -> IoResult<(Self::UnixStream, traits::UnixSocketAddr)> {
+            let (stream, addr) = UnixListener::accept(self).await?;
+            Ok((stream, addr.into()))
+        }
+        fn incoming(self) -> Self::Incoming {
+            let stream = async_stream::try_stream! {
+                loop {
+                    let (stream, address) = self.accept().await?;
+                    yield (stream, address.into());
+                }
+            };
+            stream.boxed()
+        }
+        fn local_addr(&self) -> IoResult<traits::UnixSocketAddr> {
+            UnixListener::local_addr(self).map(Into::into)
+        }
+    }
+
+    impl From<async_std_crate::os::unix::net::SocketAddr> for traits::UnixSocketAddr {
+        fn from(value: async_std_crate::os::unix::net::SocketAddr) -> Self {
+            Self {
+                path: value.as_pathname().map(|p| p.to_owned()),
+            }
         }
     }
 }
