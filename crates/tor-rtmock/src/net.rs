@@ -400,7 +400,7 @@ impl UnixListener for MockUnixListener {
     /// The type of Unix socket connections returned by [`Self::accept()`].
     type UnixStream = MockUnixStream;
 
-    /// The type of [`stream::Stream`] returned by [`Self::incoming()`].
+    /// The type of [`futures::stream::Stream`] returned by [`Self::incoming()`].
     type Incoming = futures::stream::Empty<IoResult<(Self::UnixStream, UnixSocketAddr)>>;
 
     /// Wait for an incoming stream; return it along with its address.
@@ -408,7 +408,7 @@ impl UnixListener for MockUnixListener {
         Err(io::ErrorKind::Unsupported.into())
     }
 
-    /// Wrap this listener into a new [`stream::Stream`] that yields
+    /// Wrap this listener into a new [`futures::stream::Stream`] that yields
     /// TCP streams and addresses.
     fn incoming(self) -> Self::Incoming {
         futures::stream::empty()
