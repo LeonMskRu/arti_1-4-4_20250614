@@ -4872,6 +4872,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "async_executors",
+ "cfg-if",
  "educe",
  "futures",
  "native-tls",

@@ -51,6 +51,7 @@ tokio-crate = { package = "tokio", version = "1.7", optional = true, features = 
 tokio-util = { version = "0.7.0", features = ["compat"], optional = true }
 x509-signature = { version = "0.5.0", optional = true }
 async-stream = "0.3"
+cfg-if = "1"
 
 [dev-dependencies]
 # Used for testing our TLS implementation.
