@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+if [[ $(shfmt -l .) ]]; then
+	echo "Malformatted shell scripts found, run 'shfmt -w .' to fix them"
+	exit 1
+else
+	exit 0
+fi

@@ -20,6 +20,7 @@ BIN=(
 	"rustc"
 	"rustup"
 	"shellcheck"
+	"shfmt"
 )
 
 # List of Cargo commands
