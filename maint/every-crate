@@ -6,14 +6,14 @@ set -euo pipefail
 
 : "${CARGO:=cargo}"
 
-x () {
-    echo ": $*"
-    "$@"
+x() {
+	echo ": $*"
+	"$@"
 }
 
 for crate in $(maint/list_crates); do
-    echo ==================== "$crate" ====================
-    # allow $CARGO to contain multiple words
-    # shellcheck disable=SC2086
-    x $CARGO test -p "$crate" --all-targets
+	echo ==================== "$crate" ====================
+	# allow $CARGO to contain multiple words
+	# shellcheck disable=SC2086
+	x $CARGO test -p "$crate" --all-targets
 done

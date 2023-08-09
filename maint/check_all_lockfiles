@@ -13,7 +13,7 @@
 set -eu
 
 for subdir in $(git ls-files | sed -n 's/^/.\//;s/Cargo.lock$//p'); do
-    echo
-    echo "---- Checking $subdir"
-    (cd "$subdir" && cargo tree --locked > /dev/null)
+	echo
+	echo "---- Checking $subdir"
+	(cd "$subdir" && cargo tree --locked >/dev/null)
 done

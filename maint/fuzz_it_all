@@ -9,29 +9,28 @@ echo "Using toolchain +${RUST_FUZZ_TOOLCHAIN:=nightly}. (Override with \$RUST_FU
 cargo "+${RUST_FUZZ_TOOLCHAIN}" -h >/dev/null
 
 for d in ./crates/*/fuzz; do
-    pushd "$(dirname "$d")"
-    for fuzzer in $(cargo fuzz list); do
-	echo "$fuzzer"
-	cargo "+${RUST_FUZZ_TOOLCHAIN}" fuzz build "$fuzzer"
-    done
-    popd
+	pushd "$(dirname "$d")"
+	for fuzzer in $(cargo fuzz list); do
+		echo "$fuzzer"
+		cargo "+${RUST_FUZZ_TOOLCHAIN}" fuzz build "$fuzzer"
+	done
+	popd
 done
-
 
 #JOBS=4
 #SEED=0
 DURATION=20
 
 while true; do
-    for d in ./crates/*/fuzz; do
-	pushd "$(dirname "$d")"
-	for fuzzer in $(cargo fuzz list); do
-	    cargo "+${RUST_FUZZ_TOOLCHAIN}" fuzz run "$fuzzer" -- \
-		-jobs="${JOBS:-0}" \
-		-workers="${JOBS:-0}" \
-		-max_total_time=$((DURATION * 60)) \
-		-seed="${SEED:-0}"
+	for d in ./crates/*/fuzz; do
+		pushd "$(dirname "$d")"
+		for fuzzer in $(cargo fuzz list); do
+			cargo "+${RUST_FUZZ_TOOLCHAIN}" fuzz run "$fuzzer" -- \
+				-jobs="${JOBS:-0}" \
+				-workers="${JOBS:-0}" \
+				-max_total_time=$((DURATION * 60)) \
+				-seed="${SEED:-0}"
+		done
+		popd
 	done
-	popd
-    done
 done

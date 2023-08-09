@@ -30,4 +30,3 @@ xz -9 -k arti
 
 du -sb arti arti.gz arti.xz | sed -e 's/\(\S*\)\s\(\S*\)/  "\2": \1,/;'
 echo "}"
-

@@ -4,9 +4,8 @@ set -xeuo pipefail
 
 SCRIPT_NAME=$(basename "$0")
 
-function usage()
-{
-    cat <<EOF
+function usage() {
+	cat <<EOF
 ${SCRIPT_NAME}: Launch a chutney network to test arti
 
 Usage:
@@ -23,52 +22,57 @@ EOF
 
 PROXY=no
 NETWORK="basic"
-while getopts "hn:" opt ; do
-    case "$opt" in
-	h) usage
-	   exit 0
-	   ;;
-	n) NETWORK="$OPTARG"
-	   ;;
-	*) echo "Unknown option. (Run $0 -h for usage)"
-	   exit 1
-	   ;;
-    esac
+while getopts "hn:" opt; do
+	case "$opt" in
+	h)
+		usage
+		exit 0
+		;;
+	n)
+		NETWORK="$OPTARG"
+		;;
+	*)
+		echo "Unknown option. (Run $0 -h for usage)"
+		exit 1
+		;;
+	esac
 done
 
 # Remove the parsed flags
-shift $((OPTIND-1))
+shift $((OPTIND - 1))
 
 for module in "$@"; do
-    case "$module" in
-	proxy) PROXY=yes
-	       ;;
-	*) echo "Unrecognized module. (Run $0 -h for usage)"
-	   ;;
-    esac
+	case "$module" in
+	proxy)
+		PROXY=yes
+		;;
+	*)
+		echo "Unrecognized module. (Run $0 -h for usage)"
+		;;
+	esac
 done
 
 target="networks/$NETWORK"
 cd "$(git rev-parse --show-toplevel)"
-echo "target=$target" > tests/chutney/arti.run
+echo "target=$target" >tests/chutney/arti.run
 
 if [ -z "${CHUTNEY_PATH:-}" ]; then
-    # CHUTNEY_PATH isn't set; try cloning or updating a local chutney.
-    if [ -d chutney ]; then
-	(cd ./chutney && git pull)
-    else
-	git clone https://gitlab.torproject.org/tpo/core/chutney
-    fi
-    CHUTNEY_PATH="$(pwd)/chutney"
-    export CHUTNEY_PATH
+	# CHUTNEY_PATH isn't set; try cloning or updating a local chutney.
+	if [ -d chutney ]; then
+		(cd ./chutney && git pull)
+	else
+		git clone https://gitlab.torproject.org/tpo/core/chutney
+	fi
+	CHUTNEY_PATH="$(pwd)/chutney"
+	export CHUTNEY_PATH
 else
-    # CHUTNEY_PATH is set; tell the user so.
-    echo "CHUTNEY_PATH is ${CHUTNEY_PATH}; using your local copy of chutney."
+	# CHUTNEY_PATH is set; tell the user so.
+	echo "CHUTNEY_PATH is ${CHUTNEY_PATH}; using your local copy of chutney."
 fi
 
 if [ ! -e "${CHUTNEY_PATH}/${target}" ]; then
-    echo "Target network description ${CHUTNEY_PATH}/${target} not found."
-    exit 1
+	echo "Target network description ${CHUTNEY_PATH}/${target} not found."
+	exit 1
 fi
 
 "${CHUTNEY_PATH}/chutney" configure "${CHUTNEY_PATH}/$target"
@@ -76,15 +80,15 @@ fi
 CHUTNEY_START_TIME=180 "${CHUTNEY_PATH}"/chutney wait_for_bootstrap "${CHUTNEY_PATH}/$target"
 "${CHUTNEY_PATH}"/chutney verify "${CHUTNEY_PATH}/$target"
 
-if [ "$PROXY" = "no" ] ; then
-    exit 0
+if [ "$PROXY" = "no" ]; then
+	exit 0
 fi
 
 ARTI_FLAGS=()
-if [ "$(id -u)" = "0" ] ; then
-    # If we are root, then we're probably running from CI.  Tell Arti
-    # that's okay.
-    ARTI_FLAGS+=("-o" "application.allow_running_as_root=true")
+if [ "$(id -u)" = "0" ]; then
+	# If we are root, then we're probably running from CI.  Tell Arti
+	# that's okay.
+	ARTI_FLAGS+=("-o" "application.allow_running_as_root=true")
 fi
 
 if [ -x ./target/x86_64-unknown-linux-gnu/debug/arti ]; then
@@ -97,33 +101,34 @@ fi
 (
 	set +e
 	"$cmd" proxy -c "${CHUTNEY_PATH}/net/nodes/arti.toml" -d 35353 \
-	       "${ARTI_FLAGS[@]}" &
+		"${ARTI_FLAGS[@]}" &
 	arti_pid=$!
-	echo "pid=$arti_pid" >> tests/chutney/arti.run
+	echo "pid=$arti_pid" >>tests/chutney/arti.run
 	wait "$arti_pid"
-	echo "result=$?" >> tests/chutney/arti.run
-) & disown
+	echo "result=$?" >>tests/chutney/arti.run
+) &
+disown
 
 # Wait for arti to start listening (it does so "immediately", but we don't want to get there first)
 # Really there should be a proper daemon startup protocol here, but arti doesn't have one yet.
 for idx in $(seq 30); do
-    if : >&/dev/null </dev/tcp/127.0.0.1/9150 ; then
-	echo "Port 9150 seems open."
-	break
-    elif [ "$idx" == 30 ]; then
-	echo "Waited 30 seconds without result; giving up on port 9150."
-	exit 1
-    else
-	echo "waiting for port 9150..."
-	sleep 1
-    fi
-    # verify Arti did not fail early
-    # shellcheck disable=SC1091
-    source tests/chutney/arti.run
-    pid="${pid:?}"
-    if ! kill -0 "$pid"; then
-	result="${result:?}"
-        echo "Arti failed to start with code $result"
-	exit 1
-    fi
+	if : >&/dev/null </dev/tcp/127.0.0.1/9150; then
+		echo "Port 9150 seems open."
+		break
+	elif [ "$idx" == 30 ]; then
+		echo "Waited 30 seconds without result; giving up on port 9150."
+		exit 1
+	else
+		echo "waiting for port 9150..."
+		sleep 1
+	fi
+	# verify Arti did not fail early
+	# shellcheck disable=SC1091
+	source tests/chutney/arti.run
+	pid="${pid:?}"
+	if ! kill -0 "$pid"; then
+		result="${result:?}"
+		echo "Arti failed to start with code $result"
+		exit 1
+	fi
 done

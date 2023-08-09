@@ -4,9 +4,8 @@ set -euo pipefail
 
 SCRIPT_NAME=$(basename "$0")
 
-function usage()
-{
-    cat <<EOF
+function usage() {
+	cat <<EOF
 ${SCRIPT_NAME}: Generate coverage using grcov.
 
 Usage:
@@ -33,36 +32,43 @@ skip_report=no
 format=html
 output=coverage
 
-while getopts "chisf:o:" opt ; do
-    case "$opt" in
-	c) remove_data=no
-	   ;;
-	h) usage
-	   exit 0
-	   ;;
-	i) interactive=yes
-	   ;;
-	s) skip_report=yes
-	   ;;
-	f) format="$OPTARG"
-	   ;;
-	o) output="$OPTARG"
-	   ;;
-	*) echo "Unknown option."
-	   exit 1
-	   ;;
-    esac
+while getopts "chisf:o:" opt; do
+	case "$opt" in
+	c)
+		remove_data=no
+		;;
+	h)
+		usage
+		exit 0
+		;;
+	i)
+		interactive=yes
+		;;
+	s)
+		skip_report=yes
+		;;
+	f)
+		format="$OPTARG"
+		;;
+	o)
+		output="$OPTARG"
+		;;
+	*)
+		echo "Unknown option."
+		exit 1
+		;;
+	esac
 done
 
 # Remove the flags we parsed.
-shift $((OPTIND-1))
+shift $((OPTIND - 1))
 
 # Make sure that we'll be doing _something_.
 if [ $# -eq 0 ] && [ $interactive = "no" ]; then
-    echo "No command specified: Use the -i flag if you want a shell."
-    echo
-    echo "Run ${SCRIPT_NAME} -h for help."
-    exit 1
+	echo "No command specified: Use the -i flag if you want a shell."
+	echo
+	echo "Run ${SCRIPT_NAME} -h for help."
+	exit 1
 fi
 default_toolchain=$(rustup show active-toolchain | cut -d' ' -f1)
 echo "Using toolchain +${RUST_COVERAGE_TOOLCHAIN:=${default_toolchain}}. (Override with \$RUST_COVERAGE_TOOLCHAIN)"
@@ -73,14 +79,14 @@ cargo "+${RUST_COVERAGE_TOOLCHAIN}" -h >/dev/null
 
 # Validate that grcov is installed.
 if [ "$(command -v grcov 2>/dev/null)" = "" ]; then
-    echo "grcov appears not to be installed.  Try 'cargo install grcov'." >&2
-    exit 1
+	echo "grcov appears not to be installed.  Try 'cargo install grcov'." >&2
+	exit 1
 fi
 
 # Validate that llvm-tools is installed.
 if [ "$(rustup "+${RUST_COVERAGE_TOOLCHAIN}" component list --installed | grep llvm-tools)" = "" ]; then
-   echo "llvm-tools appears not to be installed. Try 'rustup +${RUST_COVERAGE_TOOLCHAIN} component add llvm-tools'." >&2
-   exit 1
+	echo "llvm-tools appears not to be installed. Try 'rustup +${RUST_COVERAGE_TOOLCHAIN} component add llvm-tools'." >&2
+	exit 1
 fi
 
 COVERAGE_BASEDIR=$(git rev-parse --show-toplevel)
@@ -91,34 +97,34 @@ export RUSTUP_TOOLCHAIN="${RUST_COVERAGE_TOOLCHAIN}"
 # Using :? here to ensure that the script exits the path would
 # otherwise be /
 if [ -d "${COVERAGE_BASEDIR:?}/${output:?}" ]; then
-    rm -r "${COVERAGE_BASEDIR:?}/${output:?}" || true
+	rm -r "${COVERAGE_BASEDIR:?}/${output:?}" || true
 fi
 if [ -d "$COVERAGE_BASEDIR/coverage_meta" ] && [ "$remove_data" = "yes" ]; then
-    echo "Removing data from previous runs. (Use -c to suppress this behavior.)"
-    rm -r "$COVERAGE_BASEDIR/coverage_meta" || true
+	echo "Removing data from previous runs. (Use -c to suppress this behavior.)"
+	rm -r "$COVERAGE_BASEDIR/coverage_meta" || true
 fi
 
 mkdir -p "$COVERAGE_BASEDIR/coverage_meta"
 
-if [ ! -e "$COVERAGE_BASEDIR/coverage_meta/commands" ] ; then
-    echo "REVISION: $(git rev-parse HEAD) $(git diff --quiet || echo "[dirty]")" >  "$COVERAGE_BASEDIR/coverage_meta/commands"
+if [ ! -e "$COVERAGE_BASEDIR/coverage_meta/commands" ]; then
+	echo "REVISION: $(git rev-parse HEAD) $(git diff --quiet || echo "[dirty]")" >"$COVERAGE_BASEDIR/coverage_meta/commands"
 fi
 
 if [ $# -ne 0 ]; then
-    echo "$@" >> "$COVERAGE_BASEDIR/coverage_meta/commands"
-    "$@"
+	echo "$@" >>"$COVERAGE_BASEDIR/coverage_meta/commands"
+	"$@"
 fi
 
-if [ $interactive = "yes" ] ; then
-    echo "Launching a bash shell."
-    echo "Exit this shell when you are ready to genate a coverage report."
-    echo "# BASH SHELL" >> "$COVERAGE_BASEDIR/coverage_meta/commands"
-    # when run interactivelly, don't die on error
-    bash || true
+if [ $interactive = "yes" ]; then
+	echo "Launching a bash shell."
+	echo "Exit this shell when you are ready to genate a coverage report."
+	echo "# BASH SHELL" >>"$COVERAGE_BASEDIR/coverage_meta/commands"
+	# when run interactivelly, don't die on error
+	bash || true
 fi
 
 if [ "$skip_report" = "yes" ]; then
-    exit 0
+	exit 0
 fi
 
 echo "Generating report..."
@@ -152,10 +158,10 @@ fi
 cp "$COVERAGE_BASEDIR/$output/index.html" "$COVERAGE_BASEDIR/$output/index_orig.html"
 
 if [ "$(command -v python3 2>/dev/null)" = "" ]; then
-    echo "python3 not installed; not post-processing the index file."
+	echo "python3 not installed; not post-processing the index file."
 else
-    echo "Postprocessing..."
-    python3 "$COVERAGE_BASEDIR/maint/postprocess_coverage_html" "$COVERAGE_BASEDIR/coverage_meta/commands" "$COVERAGE_BASEDIR/$output/index.html" "$COVERAGE_BASEDIR/$output/index.html"
+	echo "Postprocessing..."
+	python3 "$COVERAGE_BASEDIR/maint/postprocess_coverage_html" "$COVERAGE_BASEDIR/coverage_meta/commands" "$COVERAGE_BASEDIR/$output/index.html" "$COVERAGE_BASEDIR/$output/index.html"
 fi
 
 echo "Full report: $COVERAGE_BASEDIR/$output/index.html"

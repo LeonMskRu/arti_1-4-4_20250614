@@ -62,9 +62,8 @@ SUPPORTTARGETED_PLATFORMS=(
 	"x86_64-unknown-linux-musl"
 )
 
-function usage()
-{
-    cat <<EOF
+function usage() {
+	cat <<EOF
 ${SCRIPT_NAME}: Check arti for many targets, with parameters minimizing dependencies
 on platform dependent tooling.
    Usage:
@@ -80,19 +79,23 @@ EOF
 install=no
 to_build=("${SUPPORTTARGETED_PLATFORMS[@]}")
 
-while getopts "hil" opt ; do
-    case "$opt" in
-        h) usage
-	   exit 0
-	   ;;
-	i) install=yes
-	   ;;
-	l) to_build=("${MAINTAINED_PLATFORMS[@]}")
-	   ;;
-	*) echo "Unknown option."
-           exit 1
-           ;;
-    esac
+while getopts "hil" opt; do
+	case "$opt" in
+	h)
+		usage
+		exit 0
+		;;
+	i)
+		install=yes
+		;;
+	l)
+		to_build=("${MAINTAINED_PLATFORMS[@]}")
+		;;
+	*)
+		echo "Unknown option."
+		exit 1
+		;;
+	esac
 done
 
 if [ "$install" = "yes" ]; then
@@ -101,7 +104,7 @@ fi
 
 CC=$(realpath "$(dirname "$0")")/stunt/fake-cc
 export CC
-for target in "${to_build[@]}" ; do
+for target in "${to_build[@]}"; do
 	echo "Testing $target"
 	# don't include "compression" as it requires a C compiler for the given target
 	PKG_CONFIG_ALLOW_CROSS=1 cargo check -p arti --no-default-features --features tokio,native-tls,dns-proxy,harden --target "$target"
