@@ -11,11 +11,9 @@ if [ "$1" = "-u" ]; then
 	mv "$PREFIX/"* .
 	exit 0
 else
-	for path in "$@"
-	do
+	for path in "$@"; do
 		DIR=$(dirname "$path")
 		mkdir -p "$PREFIX/$DIR"
 		cp -al "$path" "$PREFIX/$path"
 	done
 fi
-

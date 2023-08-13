@@ -9,10 +9,9 @@ set -euo pipefail
 set -x
 
 for feat in '' bridge-client pt-client; do
-    feat_args=(--no-default-features "--features=tokio,native-tls,$feat")
+	feat_args=(--no-default-features "--features=tokio,native-tls,$feat")
 
-    $CARGO check "${feat_args[@]}" -p arti-client
-    $CARGO check "${feat_args[@]}" -p arti
-    $CARGO test "${feat_args[@]}" -p arti -- cfg
+	$CARGO check "${feat_args[@]}" -p arti-client
+	$CARGO check "${feat_args[@]}" -p arti
+	$CARGO test "${feat_args[@]}" -p arti -- cfg
 done
-

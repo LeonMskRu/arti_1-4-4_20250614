@@ -13,30 +13,30 @@ set -euo pipefail
 # interesting license combinations that involve AND may need to be given
 # in quotes.
 RECOGNIZED_LICENSES=(
-    Apache-2.0
-    BSD-2-Clause
-    BSD-3-Clause
-    CC0-1.0
-    ISC
-    MIT
-    Unicode-DFS-2016
-    Unlicense
-    Zlib
-    "(MIT OR Apache-2.0) AND Unicode-DFS-2016"
+	Apache-2.0
+	BSD-2-Clause
+	BSD-3-Clause
+	CC0-1.0
+	ISC
+	MIT
+	Unicode-DFS-2016
+	Unlicense
+	Zlib
+	"(MIT OR Apache-2.0) AND Unicode-DFS-2016"
 )
 
 # List of packages that don't list a license.
 NO_LICENSE=(
-    # The license for "ring" is something like "ISC AND openssl AND
-    # ssleay AND MIT"; the openssl license is not up-to-date with
-    # modern openssl.  It includes an advertising clause. :P
-    #
-    # See https://gitlab.torproject.org/tpo/core/arti/-/issues/493 for
-    # our related ticket.
-    ring
-    # License appears to be ISC.
-    webpki
-    rustls-webpki
+	# The license for "ring" is something like "ISC AND openssl AND
+	# ssleay AND MIT"; the openssl license is not up-to-date with
+	# modern openssl.  It includes an advertising clause. :P
+	#
+	# See https://gitlab.torproject.org/tpo/core/arti/-/issues/493 for
+	# our related ticket.
+	ring
+	# License appears to be ISC.
+	webpki
+	rustls-webpki
 )
 
 # List of packages which we allow to use the MPL-2.0 license.
@@ -48,11 +48,11 @@ NO_LICENSE=(
 #
 # (See https://gitlab.torproject.org/tpo/core/arti/-/issues/845)
 MPL_20_OK=(
-    # This one is pending: See https://github.com/soc/option-ext/pull/4
-    option-ext
-    generational-arena
-    dynasm
-    dynasmrt
+	# This one is pending: See https://github.com/soc/option-ext/pull/4
+	option-ext
+	generational-arena
+	dynasm
+	dynasmrt
 )
 
 # List of packages allowed to use the LGPL-3.0-only license.
@@ -61,25 +61,25 @@ MPL_20_OK=(
 # just meant to be a limited whitelist which allows some of our own crates
 # we are developing under the LGPL.
 LGPL_30_ONLY_OK=(
-    equix
-    hashx
+	equix
+	hashx
 )
 
-containsElement () {
-  local e match="$1"
-  shift
-  for e; do
-      [[ "$e" == "$match" ]] && return 0;
-  done
-  return 1
+containsElement() {
+	local e match="$1"
+	shift
+	for e; do
+		[[ "$e" == "$match" ]] && return 0
+	done
+	return 1
 }
 
 if ! $CARGO license --help >/dev/null; then
-    echo "cargo-license is not installed!"
-    echo
-    echo "For reasonable results, run:"
-    echo "    cargo install cargo-license"
-    exit 2
+	echo "cargo-license is not installed!"
+	echo
+	echo "For reasonable results, run:"
+	echo "    cargo install cargo-license"
+	exit 2
 fi
 
 cd "$(dirname "$0")/.."
@@ -91,63 +91,63 @@ output=$($CARGO license --all-features -t)
 problems=0
 IFS=$'\n'
 for line in $output; do
-    package=$(echo "$line" | cut -f1)
-    licenses=$(echo "$line" | cut -f5)
+	package=$(echo "$line" | cut -f1)
+	licenses=$(echo "$line" | cut -f5)
 
-    # skip the first line.
-    if test "$package" = "name" && test "$licenses" = "license"; then
-	continue;
-    fi
-    if test -z "$licenses"; then
-	if ! containsElement "$package" "${NO_LICENSE[@]}"; then
-	    echo "$package has no license"
-	    problems=1
+	# skip the first line.
+	if test "$package" = "name" && test "$licenses" = "license"; then
+		continue
 	fi
-	continue
-    fi
-
-    if test "$licenses" = "MPL-2.0"; then
-	if ! containsElement "$package" "${MPL_20_OK[@]}"; then
-	    echo "$package uses MPL-2.0 but has not been allow-listed."
-	    problems=1
+	if test -z "$licenses"; then
+		if ! containsElement "$package" "${NO_LICENSE[@]}"; then
+			echo "$package has no license"
+			problems=1
+		fi
+		continue
 	fi
-	continue
-    fi
 
-    if test "$licenses" = "LGPL-3.0-only"; then
-	if ! containsElement "$package" "${LGPL_30_ONLY_OK[@]}"; then
-	    echo "$package uses LGPL-3.0-only but has not been allow-listed."
-	    problems=1
+	if test "$licenses" = "MPL-2.0"; then
+		if ! containsElement "$package" "${MPL_20_OK[@]}"; then
+			echo "$package uses MPL-2.0 but has not been allow-listed."
+			problems=1
+		fi
+		continue
 	fi
-	continue
-    fi
 
-    found_ok=0
-    if containsElement "$licenses" "${RECOGNIZED_LICENSES[@]}"; then
-	found_ok=1
-    else
-        # TODO: By Splitting on "OR" without parsing, this can give bogus
-        # elements in the output if the license is something like "(A OR
-        # B) AND C".  Fortunately the parenthesis will save us from false
-        # negatives here, but in the end we should probably switch to a
-        # real parser.
-        for lic in ${licenses// OR /$'\n'}; do
-    	    if containsElement "$lic" "${RECOGNIZED_LICENSES[@]}"; then
+	if test "$licenses" = "LGPL-3.0-only"; then
+		if ! containsElement "$package" "${LGPL_30_ONLY_OK[@]}"; then
+			echo "$package uses LGPL-3.0-only but has not been allow-listed."
+			problems=1
+		fi
+		continue
+	fi
+
+	found_ok=0
+	if containsElement "$licenses" "${RECOGNIZED_LICENSES[@]}"; then
 		found_ok=1
-    		break
-	    fi
-	done
-    fi
-    if test $found_ok = "0"; then
-	echo "$package does not advertise any supported license!"
-	echo "   ($package: $licenses)"
-	problems=1
-    fi
+	else
+		# TODO: By Splitting on "OR" without parsing, this can give bogus
+		# elements in the output if the license is something like "(A OR
+		# B) AND C".  Fortunately the parenthesis will save us from false
+		# negatives here, but in the end we should probably switch to a
+		# real parser.
+		for lic in ${licenses// OR /$'\n'}; do
+			if containsElement "$lic" "${RECOGNIZED_LICENSES[@]}"; then
+				found_ok=1
+				break
+			fi
+		done
+	fi
+	if test $found_ok = "0"; then
+		echo "$package does not advertise any supported license!"
+		echo "   ($package: $licenses)"
+		problems=1
+	fi
 done
 
 if test "$problems" = 1; then
-    echo "You can suppress the above warnings by editing $0..."
-    echo "but only do so if we are actually okay with all the licenses!"
+	echo "You can suppress the above warnings by editing $0..."
+	echo "but only do so if we are actually okay with all the licenses!"
 fi
 
 exit "$problems"

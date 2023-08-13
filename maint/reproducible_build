@@ -5,8 +5,8 @@
 #
 set -xeuo pipefail
 if [ ! -f /.dockerenv ]; then
-    echo Not running inside Docker, build will probably not be reproducible
-    echo Use docker_reproducible_build instead to get the right environment
+	echo Not running inside Docker, build will probably not be reproducible
+	echo Use docker_reproducible_build instead to get the right environment
 fi
 if [ $# -eq 0 ]; then
 	echo usage : "$0" '<linux|windows|macos...>'
@@ -20,12 +20,13 @@ windows=""
 macos=""
 while [ "$#" -ne 0 ]; do
 	case "$1" in
-	linux)   linux=1;;
-	windows) windows=1;;
-	macos)   macos=1;;
+	linux) linux=1 ;;
+	windows) windows=1 ;;
+	macos) macos=1 ;;
 	*)
 		echo "unknown target : $1" >&2
-		exit 1;;
+		exit 1
+		;;
 	esac
 	shift
 done
@@ -44,10 +45,10 @@ export RUSTFLAGS="-C target-cpu=westmere"
 cp -a "$here" /arti
 cd /arti
 
-cargo_build () {
+cargo_build() {
 	$CARGO build --locked "$@"
 }
-cargo_build_arti () {
+cargo_build_arti() {
 	cargo_build -p arti --release --features static "$@"
 }
 
@@ -77,7 +78,7 @@ if [ -n "$macos" ]; then
 
 	mkdir -p .cargo
 	# (note: "ar" seems to be unused here. We could probably remove it?)
-	cat > .cargo/config << EOF
+	cat >.cargo/config <<EOF
 [target.x86_64-apple-darwin]
 linker = "x86_64-apple-darwin16-clang"
 ar = "x86_64-apple-darwin16-ar"
@@ -92,7 +93,7 @@ EOF
 		git clone https://github.com/tpoechtrager/osxcross
 		cd osxcross
 		wget -nc "${OSX_SDK_URL}" -O tarballs/${OSX_SDK}
-		echo "${OSX_SDK_SHA256}  tarballs/${OSX_SDK}" > ./sdk-checksum
+		echo "${OSX_SDK_SHA256}  tarballs/${OSX_SDK}" >./sdk-checksum
 		sha256sum -c ./sdk-checksum
 		UNATTENDED=yes OSX_VERSION_MIN=10.7 ./build.sh
 		# copy it to gitlab build-dir so it may get cached
@@ -112,6 +113,6 @@ git config --global --add safe.directory /arti
 set +x
 echo "branch       :" "$(git rev-parse --abbrev-ref HEAD)"
 echo "commit       :" "$(git rev-parse HEAD)"
-[ -z "$linux" ]   || echo "Linux hash   :" "$(sha256sum "$here"/arti-linux       | cut -d " " -f 1)"
+[ -z "$linux" ] || echo "Linux hash   :" "$(sha256sum "$here"/arti-linux | cut -d " " -f 1)"
 [ -z "$windows" ] || echo "Windows hash :" "$(sha256sum "$here"/arti-windows.exe | cut -d " " -f 1)"
-[ -z "$macos" ]   || echo "MacOS hash   :" "$(sha256sum "$here"/arti-macos       | cut -d " " -f 1)"
+[ -z "$macos" ] || echo "MacOS hash   :" "$(sha256sum "$here"/arti-macos | cut -d " " -f 1)"

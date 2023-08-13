@@ -15,7 +15,7 @@ fi
 LAST_VERSION="$1"
 
 cargo semver-checks \
-      --only-explicit-features \
-      --workspace \
-      --features full \
-      --baseline-rev "$LAST_VERSION"
+	--only-explicit-features \
+	--workspace \
+	--features full \
+	--baseline-rev "$LAST_VERSION"

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-if git grep -rnI "^#\!/" :/ | grep -v "#\!/usr/bin/env"
-then
+if git grep -rnI "^#\!/" :/ | grep -v "#\!/usr/bin/env"; then
 	echo "Absolute shebangs found, replace them with \"#!/usr/bin/env\""
 	exit 1
 else
