@@ -5,9 +5,15 @@
 
 /// Types used for networking (tokio implementation)
 pub(crate) mod net {
-    use crate::traits;
+    use crate::traits::{self, UnixSocketAddr};
     use async_trait::async_trait;
 
+    use cfg_if::cfg_if;
+    #[cfg(unix)]
+    pub(crate) use tokio_crate::net::{
+        unix::SocketAddr as TokioUnixSocketAddr, UnixListener as TokioUnixListener,
+        UnixStream as TokioUnixStream,
+    };
     pub(crate) use tokio_crate::net::{
         TcpListener as TokioTcpListener, TcpStream as TokioTcpStream, UdpSocket as TokioUdpSocket,
     };
@@ -128,14 +134,185 @@ pub(crate) mod net {
             self.socket.local_addr()
         }
     }
+
+    /// Wrap a Tokio UnixSocket
+    pub struct UnixStream {
+        /// The underlying UnixStream
+        #[cfg(unix)]
+        s: Compat<TokioUnixStream>,
+
+        /// Unit, so that this struct can't be constructed on non-unix platforms.
+        #[cfg(not(unix))]
+        _void: (),
+    }
+    #[cfg(unix)]
+    impl From<TokioUnixStream> for UnixStream {
+        fn from(s: TokioUnixStream) -> UnixStream {
+            let s = s.compat();
+            UnixStream { s }
+        }
+    }
+    impl AsyncRead for UnixStream {
+        #[allow(unused_mut)]
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<IoResult<usize>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_read(cx, buf)
+                }
+                else {
+                    let _ = (cx, buf);
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+    }
+    impl AsyncWrite for UnixStream {
+        #[allow(unused_mut)]
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<IoResult<usize>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_write(cx, buf)
+                }
+                else {
+                    let _ = (cx, buf);
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+        #[allow(unused_mut)]
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_flush(cx)
+                }
+                else {
+                    let _ = cx;
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+        #[allow(unused_mut)]
+        fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_close(cx)
+                }
+                else {
+                    let _ = cx;
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+    }
+
+    /// Wrap a Tokio UnixListener
+    pub struct UnixListener {
+        /// The underlying listener.
+        #[cfg(unix)]
+        pub(super) lis: TokioUnixListener,
+
+        /// Unit, so that this struct can't be constructed on non-unix platforms.
+        #[cfg(not(unix))]
+        _void: (),
+    }
+
+    /// Asynchronous stream that yields incoming connections from a
+    /// UnixListener.
+    ///
+    /// This is analogous to async_std::net::Incoming.
+    pub struct IncomingUnixStreams {
+        /// The underlying listener.
+        #[cfg(unix)]
+        pub(super) lis: TokioUnixListener,
+
+        /// Unit, so that this struct can't be constructed on non-unix platforms.
+        #[cfg(not(unix))]
+        _void: (),
+    }
+
+    impl futures::stream::Stream for IncomingUnixStreams {
+        type Item = IoResult<(UnixStream, UnixSocketAddr)>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    match self.lis.poll_accept(cx) {
+                        Poll::Ready(Ok((s, a))) => Poll::Ready(Some(Ok((s.into(), a.into())))),
+                        Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+                        Poll::Pending => Poll::Pending,
+                    }
+                }
+                else {
+                    let _ = cx;
+                    Poll::Ready(Some(Err(std::io::ErrorKind::Unsupported.into())))
+                }
+            }
+        }
+    }
+
+    #[async_trait]
+    impl traits::UnixListener for UnixListener {
+        type UnixStream = UnixStream;
+        type Incoming = IncomingUnixStreams;
+        async fn accept(&self) -> IoResult<(Self::UnixStream, UnixSocketAddr)> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    let (stream, addr) = self.lis.accept().await?;
+                    Ok((stream.into(), addr.into()))
+                }
+                else {
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+        fn incoming(self) -> Self::Incoming {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    IncomingUnixStreams { lis: self.lis }
+                }
+                else {
+                    IncomingUnixStreams { _void: () }
+                }
+            }
+        }
+        fn local_addr(&self) -> IoResult<UnixSocketAddr> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    self.lis.local_addr().map(Into::into)
+                }
+                else {
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl From<TokioUnixSocketAddr> for UnixSocketAddr {
+        fn from(value: TokioUnixSocketAddr) -> Self {
+            UnixSocketAddr {
+                path: value.as_pathname().map(|p| p.to_owned()),
+            }
+        }
+    }
 }
 
 // ==============================
 
 use crate::traits::*;
 use async_trait::async_trait;
+use cfg_if::cfg_if;
 use futures::Future;
 use std::io::Result as IoResult;
+use std::path::Path;
 use std::time::Duration;
 
 impl SleepProvider for TokioRuntimeHandle {
@@ -166,6 +343,50 @@ impl crate::traits::UdpProvider for TokioRuntimeHandle {
 
     async fn bind(&self, addr: &std::net::SocketAddr) -> IoResult<Self::UdpSocket> {
         net::UdpSocket::bind(*addr).await
+    }
+}
+
+#[async_trait]
+impl crate::traits::UnixProvider for TokioRuntimeHandle {
+    type UnixStream = net::UnixStream;
+    type UnixListener = net::UnixListener;
+
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+        cfg_if! {
+            if #[cfg(unix)] {
+                let s = net::TokioUnixStream::connect(path).await?;
+                Ok(s.into())
+            }
+            else {
+                let _ = path;
+                Err(std::io::ErrorKind::Unsupported.into())
+            }
+        }
+    }
+
+    async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+        cfg_if! {
+            if #[cfg(unix)] {
+                let lis = net::TokioUnixListener::bind(path)?;
+                Ok(net::UnixListener { lis })
+            }
+            else {
+                let _ = path;
+                Err(std::io::ErrorKind::Unsupported.into())
+            }
+        }
+    }
+
+    async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+        cfg_if! {
+            if #[cfg(unix)] {
+                let pair = net::TokioUnixStream::pair()?;
+                Ok((pair.0.into(), pair.1.into()))
+            }
+            else {
+                Err(std::io::ErrorKind::Unsupported.into())
+            }
+        }
     }
 }
 

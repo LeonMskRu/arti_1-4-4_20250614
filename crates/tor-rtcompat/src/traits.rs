@@ -6,6 +6,7 @@ use futures::{AsyncRead, AsyncWrite, Future};
 use std::fmt::Debug;
 use std::io::Result as IoResult;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 /// A runtime that we can use to run Tor as a client.
@@ -54,6 +55,7 @@ pub trait Runtime:
     + TcpProvider
     + TlsProvider<Self::TcpStream>
     + UdpProvider
+    + UnixProvider
     + Debug
     + 'static
 {
@@ -69,6 +71,7 @@ impl<T> Runtime for T where
         + TcpProvider
         + TlsProvider<Self::TcpStream>
         + UdpProvider
+        + UnixProvider
         + Debug
         + 'static
 {
@@ -210,6 +213,76 @@ pub trait UdpSocket {
     async fn send(&self, buf: &[u8], target: &SocketAddr) -> IoResult<usize>;
     /// Return the local address that this socket is bound to.
     fn local_addr(&self) -> IoResult<SocketAddr>;
+}
+
+/// Trait for a runtime that can create and accept unix socket connections.
+///
+/// (In Arti we use the [`AsyncRead`] and [`AsyncWrite`] traits from
+/// [`futures::io`] as more standard, even though the ones from Tokio
+/// can be a bit more efficient.  Let's hope that they converge in the
+/// future.)
+// TODO: Use of async_trait is not ideal, since we have to box with every
+// call.  Still, async_io basically makes that necessary :/
+#[async_trait]
+pub trait UnixProvider: Clone + Send + Sync + 'static {
+    /// The type for the Unix socket connections returned by [`Self::connect_unix()`].
+    type UnixStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static;
+    /// The type for the Unix socket listeners returned by [`Self::listen_unix()`].
+    type UnixListener: UnixListener<UnixStream = Self::UnixStream> + Send + Sync + Unpin + 'static;
+
+    /// Launch a unix socket connection to a given socket address.
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream>;
+
+    /// Open a TCP listener on a given socket address.
+    async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener>;
+
+    /// Opens two unbound unix sockets connected to each other
+    async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)>;
+}
+
+/// Trait for a local socket that accepts incoming Unix socket streams.
+///
+/// These objects are returned by instances of [`UnixProvider`].  To use
+/// one, either call `accept` to accept a single connection, or
+/// use `incoming` to wrap this object as a [`stream::Stream`].
+// TODO: Use of async_trait is not ideal here either.
+#[async_trait]
+pub trait UnixListener {
+    /// The type of Unix socket connections returned by [`Self::accept()`].
+    type UnixStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static;
+
+    /// The type of [`stream::Stream`] returned by [`Self::incoming()`].
+    type Incoming: stream::Stream<Item = IoResult<(Self::UnixStream, UnixSocketAddr)>>
+        + Send
+        + Unpin;
+
+    /// Wait for an incoming stream; return it along with its address.
+    async fn accept(&self) -> IoResult<(Self::UnixStream, UnixSocketAddr)>;
+
+    /// Wrap this listener into a new [`stream::Stream`] that yields
+    /// TCP streams and addresses.
+    fn incoming(self) -> Self::Incoming;
+
+    /// Return the local address that this listener is bound to.
+    fn local_addr(&self) -> IoResult<UnixSocketAddr>;
+}
+
+/// Socket address for an Unix socket.
+pub struct UnixSocketAddr {
+    /// The path to the unix socket file or `None` for unbound sockets.
+    pub(crate) path: Option<PathBuf>,
+}
+
+impl UnixSocketAddr {
+    /// Returns whether is is an unnamed/unbound socket.
+    pub fn is_unnamed(&self) -> bool {
+        self.path.is_none()
+    }
+
+    /// Returns the path for the socket if possible.
+    pub fn as_path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
 }
 
 /// An object with a peer certificate: typically a TLS connection.

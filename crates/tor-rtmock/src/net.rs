@@ -9,7 +9,10 @@ use super::io::{stream_pair, LocalStream};
 use super::MockNetRuntime;
 use core::fmt;
 use tor_rtcompat::tls::TlsConnector;
-use tor_rtcompat::{CertifiedConn, Runtime, TcpListener, TcpProvider, TlsProvider};
+use tor_rtcompat::{
+    CertifiedConn, Runtime, TcpListener, TcpProvider, TlsProvider, UnixListener, UnixProvider,
+    UnixSocketAddr,
+};
 use tor_rtcompat::{UdpProvider, UdpSocket};
 
 use async_trait::async_trait;
@@ -23,6 +26,7 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{self, Error as IoError, ErrorKind, Result as IoResult};
 use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
@@ -347,6 +351,98 @@ impl UdpSocket for MockUdpSocket {
     }
     fn local_addr(&self) -> IoResult<SocketAddr> {
         void::unreachable(self.void)
+    }
+}
+
+/// A very poor imitation of an unix socket
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct MockUnixStream {
+    /// This is uninhabited.
+    ///
+    /// To implement unix socket support, implement `UnixProvider::connect_unix()`, and abolish this field,
+    /// replacing it with the actual implementation.
+    void: Void,
+}
+/// A very poor imitation of an unix socket listener
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct MockUnixListener {
+    /// This is uninhabited.
+    ///
+    /// To implement unix socket support, implement `UnixProvider::listen_unix()`, and abolish this field,
+    /// replacing it with the actual implementation.
+    _void: Void,
+}
+
+#[async_trait]
+impl UnixProvider for MockNetProvider {
+    type UnixStream = MockUnixStream;
+    type UnixListener = MockUnixListener;
+
+    async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+        let _ = path;
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+        let _ = path;
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+#[async_trait]
+impl UnixListener for MockUnixListener {
+    /// The type of Unix socket connections returned by [`Self::accept()`].
+    type UnixStream = MockUnixStream;
+
+    /// The type of [`futures::stream::Stream`] returned by [`Self::incoming()`].
+    type Incoming = futures::stream::Empty<IoResult<(Self::UnixStream, UnixSocketAddr)>>;
+
+    /// Wait for an incoming stream; return it along with its address.
+    async fn accept(&self) -> IoResult<(Self::UnixStream, UnixSocketAddr)> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    /// Wrap this listener into a new [`futures::stream::Stream`] that yields
+    /// TCP streams and addresses.
+    fn incoming(self) -> Self::Incoming {
+        futures::stream::empty()
+    }
+
+    /// Return the local address that this listener is bound to.
+    fn local_addr(&self) -> IoResult<UnixSocketAddr> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+#[allow(clippy::diverging_sub_expression)] // void::unimplemented + async_trait
+impl AsyncRead for MockUnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<IoResult<usize>> {
+        void::unreachable((self.void, cx, buf).0)
+    }
+}
+
+#[allow(clippy::diverging_sub_expression)] // void::unimplemented + async_trait
+impl AsyncWrite for MockUnixStream {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
+        void::unreachable((self.void, cx, buf).0)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        void::unreachable((self.void, cx).0)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        void::unreachable((self.void, cx).0)
     }
 }
 

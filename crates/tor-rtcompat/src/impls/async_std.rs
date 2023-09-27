@@ -10,11 +10,18 @@ mod net {
     use crate::traits;
 
     use async_std_crate::net::{TcpListener, TcpStream, UdpSocket as StdUdpSocket};
+    #[cfg(unix)]
+    use async_std_crate::os::unix::net::{
+        UnixListener as AsyncStdUnixListener, UnixStream as AsyncStdUnixStream,
+    };
     use async_trait::async_trait;
+    use cfg_if::cfg_if;
     use futures::future::Future;
-    use futures::stream::Stream;
+    use futures::io::{AsyncRead, AsyncWrite};
+    use futures::stream::{BoxStream, Stream, StreamExt};
     use std::io::Result as IoResult;
     use std::net::SocketAddr;
+    use std::path::Path;
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
@@ -139,6 +146,194 @@ mod net {
 
         fn local_addr(&self) -> IoResult<SocketAddr> {
             self.socket.local_addr()
+        }
+    }
+
+    /// Wrap a async-std UnixSocket
+    pub struct UnixStream {
+        /// The underlying UnixStream
+        #[cfg(unix)]
+        s: AsyncStdUnixStream,
+
+        /// Unit, so that this struct can't be constructed on non-unix platforms.
+        #[cfg(not(unix))]
+        _void: (),
+    }
+    #[cfg(unix)]
+    impl From<AsyncStdUnixStream> for UnixStream {
+        fn from(s: AsyncStdUnixStream) -> UnixStream {
+            UnixStream { s }
+        }
+    }
+    impl AsyncRead for UnixStream {
+        #[allow(unused_mut)]
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<IoResult<usize>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_read(cx, buf)
+                }
+                else {
+                    let _ = (cx, buf);
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+    }
+    impl AsyncWrite for UnixStream {
+        #[allow(unused_mut)]
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<IoResult<usize>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_write(cx, buf)
+                }
+                else {
+                    let _ = (cx, buf);
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+        #[allow(unused_mut)]
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_flush(cx)
+                }
+                else {
+                    let _ = cx;
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+        #[allow(unused_mut)]
+        fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    Pin::new(&mut self.s).poll_close(cx)
+                }
+                else {
+                    let _ = cx;
+                    Poll::Ready(Err(std::io::ErrorKind::Unsupported.into()))
+                }
+            }
+        }
+    }
+
+    /// Wrap a async-std UnixListener
+    pub struct UnixListener {
+        /// The underlying listener.
+        #[cfg(unix)]
+        pub(super) lis: AsyncStdUnixListener,
+
+        /// Unit, so that this struct can't be constructed on non-unix platforms.
+        #[cfg(not(unix))]
+        _void: (),
+    }
+    #[cfg(unix)]
+    impl From<AsyncStdUnixListener> for UnixListener {
+        fn from(lis: AsyncStdUnixListener) -> Self {
+            Self { lis }
+        }
+    }
+    #[async_trait]
+    impl traits::UnixListener for UnixListener {
+        type UnixStream = UnixStream;
+        type Incoming = BoxStream<'static, IoResult<(Self::UnixStream, traits::UnixSocketAddr)>>;
+        async fn accept(&self) -> IoResult<(Self::UnixStream, traits::UnixSocketAddr)> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    let (stream, addr) = self.lis.accept().await?;
+                    Ok((stream.into(), addr.into()))
+                }
+                else {
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+        fn incoming(self) -> Self::Incoming {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    async_stream::try_stream! {
+                        loop {
+                            let (stream, address) = self.accept().await?;
+                            yield (stream, address);
+                        }
+                    }.boxed()
+                }
+                else {
+                    futures::stream::once(async { Err(std::io::ErrorKind::Unsupported.into()) } ).boxed()
+                }
+            }
+        }
+        fn local_addr(&self) -> IoResult<traits::UnixSocketAddr> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    self.lis.local_addr().map(Into::into)
+                }
+                else {
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+    }
+
+    #[async_trait]
+    impl traits::UnixProvider for async_executors::AsyncStd {
+        type UnixStream = UnixStream;
+        type UnixListener = UnixListener;
+
+        async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    let s = AsyncStdUnixStream::connect(path).await?;
+                    Ok(s.into())
+                }
+                else {
+                    let _ = path;
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+
+        async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    let lis = AsyncStdUnixListener::bind(path).await?;
+                    Ok(lis.into())
+                }
+                else {
+                    let _ = path;
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+
+        async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+            cfg_if! {
+                if #[cfg(unix)] {
+                    let pair = AsyncStdUnixStream::pair()?;
+                    Ok((pair.0.into(), pair.1.into()))
+                }
+                else {
+                    Err(std::io::ErrorKind::Unsupported.into())
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl From<async_std_crate::os::unix::net::SocketAddr> for traits::UnixSocketAddr {
+        fn from(value: async_std_crate::os::unix::net::SocketAddr) -> Self {
+            Self {
+                path: value.as_pathname().map(|p| p.to_owned()),
+            }
         }
     }
 }

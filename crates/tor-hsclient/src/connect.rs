@@ -1624,6 +1624,7 @@ mod test {
             mock_sp,
             runtime.clone(),
             runtime.clone(),
+            runtime.clone(),
             runtime,
         );
         let time_period = netdir.hs_time_period();

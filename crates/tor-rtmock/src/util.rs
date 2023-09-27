@@ -76,6 +76,25 @@ define_derive_adhoc! {
         }
     }
 
+    #[async_trait]
+    impl <$tgens> UnixProvider for $ttype {
+        type UnixStream = <$ftype as UnixProvider>::UnixStream;
+        type UnixListener = <$ftype as UnixProvider>::UnixListener;
+
+        #[inline]
+        async fn connect_unix(&self, path: &Path) -> IoResult<Self::UnixStream> {
+            self.$fname.connect_unix(path).await
+        }
+        #[inline]
+        async fn listen_unix(&self, path: &Path) -> IoResult<Self::UnixListener> {
+            self.$fname.listen_unix(path).await
+        }
+        #[inline]
+        async fn unbound_unix(&self) -> IoResult<(Self::UnixStream, Self::UnixStream)> {
+            self.$fname.unbound_unix().await
+        }
+    }
+
  )
  $(
   ${when fmeta(mock(sleep))}
@@ -130,8 +149,9 @@ pub(crate) mod impl_runtime_prelude {
     pub(crate) use futures::Future;
     pub(crate) use std::io::Result as IoResult;
     pub(crate) use std::net::SocketAddr;
+    pub(crate) use std::path::Path;
     pub(crate) use std::time::{Duration, Instant, SystemTime};
     pub(crate) use tor_rtcompat::{
-        BlockOn, Runtime, SleepProvider, TcpProvider, TlsProvider, UdpProvider,
+        BlockOn, Runtime, SleepProvider, TcpProvider, TlsProvider, UdpProvider, UnixProvider,
     };
 }
