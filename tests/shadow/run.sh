@@ -14,13 +14,15 @@ chmod 700 shadow.data.template/hosts/fileserver-onion/hs
 chmod 700 shadow.data.template/hosts/fileserver-onion-auth/hs
 
 # Run the simulation
+#  --use-worker-spinning=false \
 shadow \
-  --log-level=debug \
+  --heartbeat-interval=30m \
+  --host-heartbeat-interval=30m \
+  --log-level=info \
   --strace-logging-mode=standard \
   --template-directory=./shadow.data.template \
   --progress=true \
   --use-memory-manager=false \
-  --use-worker-spinning=false \
   shadow.yaml \
   > shadow.log
 

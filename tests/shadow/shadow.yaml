@@ -1,5 +1,5 @@
 general:
-  stop_time: 30 min
+  stop_time: 5h
 network:
   graph:
     type: gml
@@ -29,20 +29,6 @@ hosts:
       args: ../../../conf/tgen.server.graphml.xml
       start_time: 1
       expected_final_state: running
-  fileserver-onion:
-    network_node_id: 0
-    processes:
-    - path: tgen
-      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
-      environment: { OPENBLAS_NUM_THREADS: "1" }
-      args: ../../../conf/tgen.onionserver.graphml.xml
-      start_time: 1
-      expected_final_state: running
-    - path: tor
-      args: --Address fileserver-onion --Nickname fileserveronion
-            --defaults-torrc torrc-defaults -f torrc
-      start_time: 900
-      expected_final_state: running
   fileserver-onion-arti:
     network_node_id: 0
     processes:
@@ -66,20 +52,6 @@ hosts:
         RUST_BACKTRACE: "1"
         HOME: ./home
       start_time: 15m
-      expected_final_state: running
-  fileserver-onion-auth:
-    network_node_id: 0
-    processes:
-    - path: tgen
-      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
-      environment: { OPENBLAS_NUM_THREADS: "1" }
-      args: ../../../conf/tgen.onionserver.graphml.xml
-      start_time: 1
-      expected_final_state: running
-    - path: tor
-      args: --Address fileserver-onion-auth --Nickname fileserveronionauth
-            --defaults-torrc torrc-defaults -f torrc
-      start_time: 900
       expected_final_state: running
   4uthority:
     network_node_id: 0
@@ -138,161 +110,137 @@ hosts:
             --defaults-torrc torrc-defaults -f torrc
       start_time: 60
       expected_final_state: running
-  bridge:
-    ip_addr: 100.0.0.2
-    network_node_id: 0
-    processes:
-    - path: tor
-      args: --Address bridge --Nickname bridge
-            --defaults-torrc torrc-defaults -f torrc
-      start_time: 60
-      expected_final_state: running
-  articlient:
-    network_node_id: 0
-    host_options:
-    processes:
-    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
-      args:
-      - proxy
-      - -c=./arti.d/arti.common.toml
-      - -o=proxy.socks_listen="127.0.0.1:9000"
-      - --disable-fs-permission-checks
-      - -l debug,tor_proto=trace
-      environment:
-        RUST_BACKTRACE: "1"
-        HOME: ./home
-      start_time: 15m
-      expected_final_state: running
-    - path: tgen
-      environment:
-        OPENBLAS_NUM_THREADS: "1"
-      args: ../../../conf/tgen.torclient.graphml.xml
-      start_time: 25m
-      expected_final_state: {exited: 0}
-  # same as articlient, but uses arti-extra binary, which has experimental features enabled.
-  articlient-extra:
-    network_node_id: 0
-    host_options:
-    processes:
-    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti-extra
-      args:
-      - proxy
-      - -c=./arti.d/arti.common.toml
-      - -o=proxy.socks_listen="127.0.0.1:9000"
-      - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
-      environment:
-        RUST_BACKTRACE: "1"
-        HOME: ./home
-      start_time: 15m
-      expected_final_state: running
-    - path: tgen
-      environment:
-        OPENBLAS_NUM_THREADS: "1"
-      args: ../../../conf/tgen.torclient.graphml.xml
-      start_time: 25m
-      expected_final_state: {exited: 0}
-  articlient-bridge:
-    network_node_id: 0
-    host_options:
-      # Enable pcap capture so we can check for leaks
-      pcap_enabled: true
-    processes:
-    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
-      args:
-      - proxy
-      - -c=./arti.d/arti.common.toml
-      - -c=./arti.d/arti.bridge.toml
-      - -o=proxy.socks_listen="127.0.0.1:9000"
-      - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
-      environment:
-        RUST_BACKTRACE: "1"
-        HOME: ./home
-      start_time: 15m
-      expected_final_state: running
-    - path: tgen
-      environment:
-        OPENBLAS_NUM_THREADS: "1"
-      args: ../../../conf/tgen.torclient.graphml.xml
-      start_time: 25m
-      expected_final_state: {exited: 0}
-  articlient-onion:
-    network_node_id: 0
-    processes:
-    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
-      args:
-      - proxy
-      - -c=./arti.d/arti.common.toml
-      - -c=./arti.d/arti.onion.toml
-      - -o=proxy.socks_listen="127.0.0.1:9000"
-      - --disable-fs-permission-checks
-      - -l debug,tor_proto=trace
-      environment:
-        RUST_BACKTRACE: "1"
-        HOME: ./home
-      start_time: 15m
-      expected_final_state: running
-    - path: tgen
-      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
-      environment: { OPENBLAS_NUM_THREADS: "1" }
-      args: ../../../conf/tgen.toronionclient.graphml.xml
-      start_time: 1500
   # arti client connecting to the arti onion service
-  articlient-onion-artiserver:
+  articlient-onion-artiserver-0:
     network_node_id: 0
     processes:
     - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
       args:
       - proxy
-      - -c=./arti.d/arti.common.toml
-      - -c=./arti.d/arti.onion.toml
+      - -c=../../../conf/arti.common.toml
+      - -c=../../../conf/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
       - -l debug,tor_proto=trace
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
-      start_time: 15m
-      expected_final_state: running
+      start_time: 15m 
+      shutdown_time: 1h
+      expected_final_state: {signaled: SIGTERM }
     - path: tgen
       # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
       environment: { OPENBLAS_NUM_THREADS: "1" }
       args: ../../../conf/tgen.artionionclient.graphml.xml
-      start_time: 1500
-  articlient-onion-auth:
+      start_time: 20m
+  articlient-onion-artiserver-1:
     network_node_id: 0
     processes:
-    # Use the version of arti built with keymgr and experimental-api support:
-    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti-extra
+    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
       args:
       - proxy
-      - -c=./arti.d/arti.common.toml
-      - -c=./arti.d/arti.onion.toml
+      - -c=../../../conf/arti.common.toml
+      - -c=../../../conf/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l debug,tor_proto=trace
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
-      start_time: 15m
-      expected_final_state: running
-    - path: tgen
-      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
-      environment: { OPENBLAS_NUM_THREADS: "1" }
-      args: ../../../conf/tgen.toronionclient-auth.graphml.xml
-      start_time: 1500
-  torclient-onion-artiserver:
-    network_node_id: 0
-    processes:
-    - path: tor
-      args: --Address tconionas --Nickname tconionas
-            --defaults-torrc torrc-defaults -f torrc
-      start_time: 15m
-      expected_final_state: running
+      start_time: 60m
+      shutdown_time: 75m
+      expected_final_state: {signaled: SIGTERM }
     - path: tgen
       # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
       environment: { OPENBLAS_NUM_THREADS: "1" }
       args: ../../../conf/tgen.artionionclient.graphml.xml
-      start_time: 25m
-
+      start_time: 65m
+  articlient-onion-artiserver-2:
+    network_node_id: 0
+    processes:
+    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
+      args:
+      - proxy
+      - -c=../../../conf/arti.common.toml
+      - -c=../../../conf/arti.onion.toml
+      - -o=proxy.socks_listen="127.0.0.1:9000"
+      - --disable-fs-permission-checks
+      - -l debug,tor_proto=trace
+      environment:
+        RUST_BACKTRACE: "1"
+        HOME: ./home
+      start_time: 120m
+      shutdown_time: 135m
+      expected_final_state: {signaled: SIGTERM }
+    - path: tgen
+      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
+      environment: { OPENBLAS_NUM_THREADS: "1" }
+      args: ../../../conf/tgen.artionionclient.graphml.xml
+      start_time: 125m
+#  articlient-onion-artiserver-5:
+#    network_node_id: 0
+#    processes:
+#    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
+#      args:
+#      - proxy
+#      - -c=../../../conf/arti.common.toml
+#      - -c=../../../conf/arti.onion.toml
+#      - -o=proxy.socks_listen="127.0.0.1:9000"
+#      - --disable-fs-permission-checks
+#      - -l debug,tor_proto=trace
+#      environment:
+#        RUST_BACKTRACE: "1"
+#        HOME: ./home
+#      start_time: 5h
+#      shutdown_time: 7h
+#      expected_final_state: {signaled: SIGTERM }
+#    - path: tgen
+#      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
+#      environment: { OPENBLAS_NUM_THREADS: "1" }
+#      args: ../../../conf/tgen.artionionclient.graphml.xml
+#      start_time: 6h
+#  articlient-onion-artiserver-10:
+#    network_node_id: 0
+#    processes:
+#    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
+#      args:
+#      - proxy
+#      - -c=../../../conf/arti.common.toml
+#      - -c=../../../conf/arti.onion.toml
+#      - -o=proxy.socks_listen="127.0.0.1:9000"
+#      - --disable-fs-permission-checks
+#      - -l debug,tor_proto=trace
+#      environment:
+#        RUST_BACKTRACE: "1"
+#        HOME: ./home
+#      start_time: 10h
+#      shutdown_time: 12h
+#      expected_final_state: {signaled: SIGTERM }
+#    - path: tgen
+#      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
+#      environment: { OPENBLAS_NUM_THREADS: "1" }
+#      args: ../../../conf/tgen.artionionclient.graphml.xml
+#      start_time: 11h
+#  articlient-onion-artiserver-15:
+#    network_node_id: 0
+#    processes:
+#    - path: ../../target/x86_64-unknown-linux-gnu/debug/arti
+#      args:
+#      - proxy
+#      - -c=../../../conf/arti.common.toml
+#      - -c=../../../conf/arti.onion.toml
+#      - -o=proxy.socks_listen="127.0.0.1:9000"
+#      - --disable-fs-permission-checks
+#      - -l debug,tor_proto=trace
+#      environment:
+#        RUST_BACKTRACE: "1"
+#        HOME: ./home
+#      start_time: 15h
+#      shutdown_time: 17h
+#      expected_final_state: {signaled: SIGTERM }
+#    - path: tgen
+#      # See https://shadow.github.io/docs/guide/compatibility_notes.html#libopenblas
+#      environment: { OPENBLAS_NUM_THREADS: "1" }
+#      args: ../../../conf/tgen.artionionclient.graphml.xml
+#      start_time: 16h
+#
