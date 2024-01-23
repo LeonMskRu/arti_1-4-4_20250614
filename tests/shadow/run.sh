@@ -13,12 +13,20 @@ export RUST_BACKTRACE=1
 chmod 700 shadow.data.template/hosts/fileserver-onion/hs
 chmod 700 shadow.data.template/hosts/fileserver-onion-auth/hs
 
+# Try "debug" or "trace" when debugging a shadow issue. These can generate
+# fairly large files though and slow the simulation down.
+SHADOW_LOG_LEVEL=info
+
+# Set to "standard" to get strace logs for all processes. This can generate
+# large logs.
+SHADOW_STRACE_LOGGING_MODE=off
+
 # Run the simulation
 shadow \
   --heartbeat-interval=5m \
   --host-heartbeat-interval=5m \
-  --log-level=debug \
-  --strace-logging-mode=standard \
+  --log-level="$SHADOW_LOG_LEVEL" \
+  --strace-logging-mode="$SHADOW_STRACE_LOGGING_MODE" \
   --template-directory=./shadow.data.template \
   --progress=true \
   --use-memory-manager=false \
