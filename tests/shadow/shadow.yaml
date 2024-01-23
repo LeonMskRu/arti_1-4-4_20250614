@@ -1,5 +1,6 @@
 general:
-  stop_time: 30 min
+  # Run for hsdir_interval(=120m) * 3
+  stop_time: 6 hours
 network:
   graph:
     type: gml
