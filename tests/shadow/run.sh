@@ -15,6 +15,8 @@ chmod 700 shadow.data.template/hosts/fileserver-onion-auth/hs
 
 # Run the simulation
 shadow \
+  --heartbeat-interval=5m \
+  --host-heartbeat-interval=5m \
   --log-level=debug \
   --strace-logging-mode=standard \
   --template-directory=./shadow.data.template \
