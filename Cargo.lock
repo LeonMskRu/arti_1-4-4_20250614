@@ -5447,6 +5447,7 @@ dependencies = [
  "tor-units",
  "tracing",
  "tracing-test",
+ "two-rusty-forks",
  "void",
 ]
 
@@ -5987,6 +5988,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "two-rusty-forks"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21ad7c05d9d393a945f0320da5bc22906e58b90f1f5ac0163f92778a4f4dbbe6"
+dependencies = [
+ "fnv",
+ "quick-error",
+ "tempfile",
+ "two-rusty-forks-macro",
+ "wait-timeout",
+]
+
+[[package]]
+name = "two-rusty-forks-macro"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01501f347478154f86c21e38a4f9f7ad325eb7e776f8c671b58fb87bfb7f29e3"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "typed-index-collections"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6128,6 +6152,15 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f200f5b12eb75f8c1ed65abd4b2db8a6e1b138a20de009dacee265a2498f3f6"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "waker-fn"
