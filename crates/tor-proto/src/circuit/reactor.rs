@@ -1462,10 +1462,11 @@ impl Reactor {
     ) -> Result<()> {
         let cmd = msg.cmd();
         let stream_id = msg.stream_id();
-        let mut cells = msg
+        let cells = msg
             .encode(&mut rand::thread_rng())
             .map_err(|e| Error::from_cell_enc(e, "relay cell body"))?;
         for cell in cells {
+            // FIXME: ok to discard remaining cells on error here?
             self.send_relay_cell(cx, hop, early, cmd, stream_id, cell.into())?;
         }
         Ok(())

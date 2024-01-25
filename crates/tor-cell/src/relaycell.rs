@@ -305,6 +305,7 @@ enum UnparsedRelayCellInternal {
 //
 // TODO prop340: Further discussion is necessary about standardizing names for
 // all of the pieces of our cells.
+// FIXME: rename to `UnparsedRelayMsg` ?
 #[derive(Clone, Debug)]
 pub struct UnparsedRelayCell {
     internal: UnparsedRelayCellInternal,
