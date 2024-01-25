@@ -39,7 +39,9 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use tor_cell::chancell::msg::{AnyChanMsg, HandshakeType, Relay};
 use tor_cell::relaycell::msg::{AnyRelayMsg, End, Sendme};
-use tor_cell::relaycell::{AnyRelayMsgOuter, RelayCellVersion, RelayCmd, StreamId, UnparsedRelayCell, RelayCellAccumulator};
+use tor_cell::relaycell::{
+    AnyRelayMsgOuter, RelayCellAccumulator, RelayCellVersion, RelayCmd, StreamId, UnparsedRelayCell,
+};
 #[cfg(feature = "hs-service")]
 use {
     crate::stream::{DataCmdChecker, IncomingStreamRequest},
@@ -345,7 +347,7 @@ impl CircHop {
             recvwindow: sendme::CircRecvWindow::new(1000),
             sendwindow: sendme::CircSendWindow::new(initial_window),
             outbound: VecDeque::new(),
-            relay_cell_accumulator: RelayCellAccumulator::new(RelayCellVersion::V0)
+            relay_cell_accumulator: RelayCellAccumulator::new(RelayCellVersion::V0),
         }
     }
 }
@@ -901,7 +903,8 @@ impl Reactor {
                         // If we can, drain our queue of things we tried to send earlier, but
                         // couldn't due to congestion control.
                         if self.hops[i].sendwindow.window() > 0 {
-                            'hop: while let Some((early, cmd, stream_id, cell)) = self.hops[i].outbound.pop_front()
+                            'hop: while let Some((early, cmd, stream_id, cell)) =
+                                self.hops[i].outbound.pop_front()
                             {
                                 trace!(
                                     "{}: sending from hop-{}-enqueued: {cmd:?}:{stream_id:?}",
@@ -1492,7 +1495,8 @@ impl Reactor {
                     "{}: having to use onto hop {} queue for cell of cmd:{:?} stream:{:?}",
                     self.unique_id,
                     hop.display(),
-                    cmd, stream_id
+                    cmd,
+                    stream_id
                 );
                 circhop.outbound.push_back((early, cmd, stream_id, cell));
                 return Ok(());
@@ -1534,7 +1538,6 @@ impl Reactor {
         }
         self.send_msg_direct(cx, msg)
     }
-
 
     /// Try to install a given meta-cell handler to receive any unusual cells on
     /// this circuit, along with a result channel to notify on completion.
@@ -1854,7 +1857,9 @@ impl Reactor {
             hop.relay_cell_accumulator.push(body.into());
 
             // See https://gitlab.torproject.org/tpo/core/torspec/-/issues/216#note_2936109
-            hop.relay_cell_accumulator.commands().any(sendme::cmd_counts_towards_windows)
+            hop.relay_cell_accumulator
+                .commands()
+                .any(sendme::cmd_counts_towards_windows)
         };
 
         // Decrement the circuit sendme windows, and see if we need to
@@ -1890,18 +1895,17 @@ impl Reactor {
         // Handle any complete messages that are now ready.
         let mut status = CellStatus::Continue;
         loop {
-            let option_msg = 
-                self
-                    .hop_mut(hopnum)
-                    .ok_or_else(|| {
-                        Error::from(internal!(
-                            "Hop {:?} disappeared while handling messages from it",
-                            hopnum
-                        ))
-                    })?.relay_cell_accumulator.pop();
-            let Some(msg) = option_msg else {
-                break
-            };
+            let option_msg = self
+                .hop_mut(hopnum)
+                .ok_or_else(|| {
+                    Error::from(internal!(
+                        "Hop {:?} disappeared while handling messages from it",
+                        hopnum
+                    ))
+                })?
+                .relay_cell_accumulator
+                .pop();
+            let Some(msg) = option_msg else { break };
             // FIXME: what should we do with remaining messages if handling one results in an error?
             // Returning here when there are still messages ready to be popped will result in errors
             // later if we try to push more cells into the accumulator.
@@ -1916,7 +1920,12 @@ impl Reactor {
     }
 
     /// React to a relay message
-    fn handle_relay_msg(&mut self, cx: &mut Context<'_>, msg: UnparsedRelayCell, hopnum: HopNum) -> Result<CellStatus> {
+    fn handle_relay_msg(
+        &mut self,
+        cx: &mut Context<'_>,
+        msg: UnparsedRelayCell,
+        hopnum: HopNum,
+    ) -> Result<CellStatus> {
         // If this cell wants/refuses to have a Stream ID, does it
         // have/not have one?
         let cmd = msg.cmd();

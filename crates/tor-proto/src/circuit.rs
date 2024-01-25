@@ -1323,7 +1323,9 @@ mod test {
     fn rmsg_to_ccmsg(id: Option<StreamId>, msg: relaymsg::AnyRelayMsg) -> ClientCircChanMsg {
         let (body,): (BoxedCellBody,) = AnyRelayMsgOuter::new(id, msg)
             .encode(&mut testing_rng())
-            .unwrap().collect_tuple().unwrap();
+            .unwrap()
+            .collect_tuple()
+            .unwrap();
         let chanmsg = chanmsg::Relay::from(body);
         ClientCircChanMsg::Relay(chanmsg)
     }
@@ -1630,7 +1632,12 @@ mod test {
             let rcvd = rx.next().await.unwrap();
             assert_eq!(rcvd.circid(), CircId::new(128));
             let (m,) = match rcvd.into_circid_and_msg().1 {
-                AnyChanMsg::Relay(r) => AnyRelayMsgOuter::decode_cells(RelayCellVersion::V0, [r.into_relay_body()].into_iter()).collect_tuple().unwrap(),
+                AnyChanMsg::Relay(r) => AnyRelayMsgOuter::decode_cells(
+                    RelayCellVersion::V0,
+                    [r.into_relay_body()].into_iter(),
+                )
+                .collect_tuple()
+                .unwrap(),
                 _ => panic!(),
             };
             let m = m.unwrap();
