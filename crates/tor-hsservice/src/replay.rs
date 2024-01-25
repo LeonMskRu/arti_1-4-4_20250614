@@ -361,6 +361,7 @@ mod test {
     use crate::test_temp_dir;
     use crate::test_temp_dir::{TestTempDir, TestTempDirGuard};
     use rand::Rng;
+    use two_rusty_forks::test_fork;
 
     fn rand_h<R: Rng>(rng: &mut R) -> H {
         H(rng.gen())
@@ -490,37 +491,10 @@ mod test {
     }
 
     /// Test for a partial write
-    #[test]
     #[cfg(target_family = "unix")] // no idea how to do elsewhere, hopefully this is enough
+    #[test_fork]
+    #[test]
     fn test_partial_write() {
-        use std::env;
-        use std::os::unix::process::ExitStatusExt;
-        use std::process::Command;
-
-        // TODO this contraption should perhaps be productised and put somewhere else
-
-        const ENV_NAME: &str = "TOR_HSSERVICE_TEST_PARTIAL_WRITE_SUBPROCESS";
-        // for a wait status different from any of libtest's
-        const GOOD_SIGNAL: i32 = libc::SIGUSR2;
-
-        match env::var(ENV_NAME) {
-            Err(env::VarError::NotPresent) => {
-                eprintln!("in test runner process, forking..,");
-                let st = Command::new(env::current_exe().unwrap())
-                    .args(["--nocapture", "replay::test::test_partial_write"])
-                    .env(ENV_NAME, "1")
-                    .status()
-                    .unwrap();
-                eprintln!("reaped actual test process {st:?} (expecting signal {GOOD_SIGNAL})");
-                assert_eq!(st.signal(), Some(GOOD_SIGNAL));
-                return;
-            }
-            Ok(y) if y == "1" => {}
-            other => panic!("bad env var {ENV_NAME:?} {other:?}"),
-        };
-
-        // Now we are in our own process, and can mess about with ulimit etc.
-
         use std::fs;
         use std::mem::MaybeUninit;
         use std::ptr;
@@ -656,10 +630,5 @@ mod test {
 
             eprintln!("recovered file contents checked, all good");
         });
-
-        unsafe {
-            libc::raise(libc::SIGUSR2);
-        }
-        panic!("we survived raise SIGUSR2");
     }
 }
