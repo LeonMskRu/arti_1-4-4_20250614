@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::num::NonZeroU16;
 
 use crate::chancell::{BoxedCellBody, CELL_DATA_LEN};
+use smallvec::SmallVec;
 use tor_bytes::{EncodeError, EncodeResult, Error, Result};
 use tor_bytes::{Reader, Writer};
 use tor_error::internal;
@@ -210,22 +211,33 @@ pub enum RelayCellVersion {
 
 /// A buffer of RelayCells. This helps handle packing (one cell -> multiple
 /// messages) and fragmentation (multiple cells -> one message).
-pub struct UnparsedRelayCells {
+pub struct RelayCellAccumulator {
     version: RelayCellVersion,
     cells: VecDeque<BoxedCellBody>,
 }
 
-impl UnparsedRelayCells {
+impl RelayCellAccumulator {
     pub fn new(version: RelayCellVersion) -> Self {
         Self {
             version,
-            // In the common case that no fragmentation is used, and the caller
-            // pops whenever it can, we'll only ever need to hold 1 cell.
             cells: VecDeque::with_capacity(1)
         }
     }
 
+    /// Whether `self` has complete message(s) that can be popped.
+    fn ready(&self) -> bool {
+        match self.version {
+            RelayCellVersion::V0 => self.cells.len() > 0,
+        }
+    }
+
+    /// Panics if `self` already contains one or more complete messages
+    /// that are ready to be `pop`'d.
+    // FIXME: return a Result instead?
     pub fn push(&mut self, body: BoxedCellBody) {
+        if self.ready() {
+            panic!("Tried to push a new cell to a full accumulator");
+        }
         self.cells.push_back(body)
     }
 
@@ -238,11 +250,28 @@ impl UnparsedRelayCells {
         }
     }
 
-    pub fn from_cells(version: RelayCellVersion, cells: impl IntoIterator<Item=BoxedCellBody>) -> Self {
-        Self {
-            version,
-            cells: VecDeque::from_iter(cells.into_iter())
+    /// Command(s) contained in `self`.
+    pub fn commands(&self) -> impl Iterator<Item=RelayCmd> {
+        let mut rv = SmallVec::<[RelayCmd; 1]>::new();
+        match self.version {
+            RelayCellVersion::V0 => {
+                if let Some(body) = self.cells.back() {
+                    let cmd = body[CMD_OFFSET].into();
+                    rv.push(cmd)
+                }
+            },
         }
+        rv.into_iter()
+    }
+
+    /// Panics if the `cells` contains extra cells.
+    // FIXME: return a Result instead?
+    pub fn from_cells(version: RelayCellVersion, cells: impl Iterator<Item=BoxedCellBody>) -> Self {
+        let mut s = Self::new(version);
+        for cell in cells {
+            s.push(cell);
+        }
+        s
     }
 
     pub fn into_msgs(self) -> impl IntoIterator<Item=UnparsedRelayCell> {
@@ -279,6 +308,8 @@ pub struct UnparsedRelayCell {
 }
 /// Position of the stream ID within the cell body.
 const STREAM_ID_OFFSET: usize = 3;
+/// Position of the command within the cell body.
+const CMD_OFFSET: usize = 0;
 
 impl UnparsedRelayCell {
     /// Wrap a BoxedCellBody as an UnparsedRelayCell.
@@ -289,8 +320,6 @@ impl UnparsedRelayCell {
     pub fn cmd(&self) -> RelayCmd {
         match &self.internal {
             UnparsedRelayCellInternal::V0(body) => {
-                /// Position of the command within the cell body.
-                const CMD_OFFSET: usize = 0;
                 body[CMD_OFFSET].into()
             },
         }
@@ -310,9 +339,12 @@ impl UnparsedRelayCell {
     pub fn decode<M: RelayMsg>(self) -> Result<RelayMsgOuter<M>> {
         match self.internal {
             UnparsedRelayCellInternal::V0(body) => {
-                let mut reader = Reader::from_slice(body.as_ref());
-                RelayMsgOuter::decode_from_reader(&mut reader)
-            },
+                let mut iter = RelayMsgOuter::decode_cells(RelayCellVersion::V0, [body].into_iter());
+                let res = iter.next().expect("Should have returned at least one result");
+                // A V0 cell contains exactly one message.
+                debug_assert!(iter.next().is_none());
+                res
+            }
         }
     }
 }
@@ -387,7 +419,7 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
     }
     /// Consume this relay message and encode it as a 509-byte padded cell
     /// body.
-    pub fn encode<R: Rng + CryptoRng>(self, rng: &mut R) -> crate::Result<impl IntoIterator<Item=BoxedCellBody>> {
+    pub fn encode<R: Rng + CryptoRng>(self, rng: &mut R) -> crate::Result<impl Iterator<Item=BoxedCellBody>> {
         /// We skip this much space before adding any random padding to the
         /// end of the cell
         const MIN_SPACE_BEFORE_PADDING: usize = 4;
@@ -399,7 +431,7 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
         }
 
         // FIXME: maybe use SmallVec here to optimize for the common case of 1 cell?
-        Ok(vec![body])
+        Ok(vec![body].into_iter())
     }
 
     /// Consume a relay cell and return its contents, encoded for use
@@ -459,13 +491,14 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
     }
 
     /// Decode this unparsed cell into a given cell type.
-    pub fn decode_cells(version: RelayCellVersion, cells: impl Iterator<Item=BoxedCellBody>) -> impl IntoIterator<Item=Result<RelayMsgOuter<M>>> {
+    pub fn decode_cells(version: RelayCellVersion, cells: impl Iterator<Item=BoxedCellBody>) -> impl Iterator<Item=Result<Self>> {
         match version {
             RelayCellVersion::V0 => {
                 // cells map 1:1 to messages
-                cells.map(|cell| {
-                    let mut reader = Reader::from_slice(cell.as_ref());
-                    RelayMsgOuter::decode_from_reader(&mut reader)
+                cells.map(move |cell| {
+                    let reader = Reader::from_slice(cell.as_ref());
+                    let (msg, _reader) = RelayMsgOuter::decode_next_from_reader(version, reader)?;
+                    Ok(msg)
                 })
             },
         }
@@ -475,19 +508,26 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
     ///
     /// Requires that the cryptographic checks on the message have already been
     /// performed
-    pub fn decode_from_reader(r: &mut Reader<'_>) -> Result<Self> {
-        let cmd = r.take_u8()?.into();
-        r.advance(2)?; // "recognized"
-        let streamid = StreamId::new(r.take_u16()?);
-        r.advance(4)?; // digest
-        let len = r.take_u16()? as usize;
-        if r.remaining() < len {
-            return Err(Error::InvalidMessage(
-                "Insufficient data in relay cell".into(),
-            ));
+    /// 
+    /// On success returns the reader, whose position should now be at the
+    /// beginning of the next message, if any.
+    // FIXME: determine and document semantics expected of a reader over multiple cells. Probably
+    // cells concatenated together with inter-cell padding cut out?
+    fn decode_next_from_reader(version: RelayCellVersion, mut r: Reader<'_>) -> Result<(Self, Reader<'_>)> {
+        match version {
+            RelayCellVersion::V0 => {
+                let cmd = r.take_u8()?.into();
+                r.advance(2)?; // "recognized"
+                let streamid = StreamId::new(r.take_u16()?);
+                r.advance(4)?; // digest
+                let len = r.take_u16()? as usize;
+                let msg_start_pos = r.cursor();
+                r.advance(len)?;
+                let msg_end_pos = r.cursor();
+                let mut msg_reader = Reader::from_slice(r.range(msg_start_pos, msg_end_pos));
+                let msg = M::decode_from_reader(cmd, &mut msg_reader)?;
+                Ok((Self { streamid, msg }, r))
+            }
         }
-        r.truncate(len);
-        let msg = M::decode_from_reader(cmd, r)?;
-        Ok(Self { streamid, msg })
     }
 }

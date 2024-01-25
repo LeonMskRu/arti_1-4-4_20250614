@@ -39,7 +39,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use tor_cell::chancell::msg::{AnyChanMsg, HandshakeType, Relay};
 use tor_cell::relaycell::msg::{AnyRelayMsg, End, Sendme};
-use tor_cell::relaycell::{AnyRelayMsgOuter, RelayCmd, StreamId, UnparsedRelayCell};
+use tor_cell::relaycell::{AnyRelayMsgOuter, RelayCellVersion, RelayCmd, StreamId, UnparsedRelayCell, RelayCellAccumulator};
 #[cfg(feature = "hs-service")]
 use {
     crate::stream::{DataCmdChecker, IncomingStreamRequest},
@@ -323,7 +323,9 @@ pub(super) struct CircHop {
     ///
     /// NOTE: Control messages could potentially add unboundedly to this, although that's
     ///       not likely to happen (and isn't triggereable from the network, either).
-    outbound: VecDeque<(bool, AnyRelayMsgOuter)>,
+    outbound: VecDeque<(bool, RelayCmd, Option<StreamId>, RelayCellBody)>,
+    /// Accumulator for incoming relay cells.
+    relay_cell_accumulator: RelayCellAccumulator,
 }
 
 /// An indicator on what we should do when we receive a cell for a circuit.
@@ -343,6 +345,7 @@ impl CircHop {
             recvwindow: sendme::CircRecvWindow::new(1000),
             sendwindow: sendme::CircSendWindow::new(initial_window),
             outbound: VecDeque::new(),
+            relay_cell_accumulator: RelayCellAccumulator::new(RelayCellVersion::V0)
         }
     }
 }
@@ -491,7 +494,7 @@ where
             let cell = AnyRelayMsgOuter::new(None, extend_msg.into());
 
             // Send the message to the last hop...
-            reactor.send_relay_cell(
+            reactor.send_relay_msg(
                 cx, hop, true, // use a RELAY_EARLY cell
                 cell,
             )?;
@@ -898,15 +901,14 @@ impl Reactor {
                         // If we can, drain our queue of things we tried to send earlier, but
                         // couldn't due to congestion control.
                         if self.hops[i].sendwindow.window() > 0 {
-                            'hop: while let Some((early, cell)) = self.hops[i].outbound.pop_front()
+                            'hop: while let Some((early, cmd, stream_id, cell)) = self.hops[i].outbound.pop_front()
                             {
                                 trace!(
-                                    "{}: sending from hop-{}-enqueued: {:?}",
+                                    "{}: sending from hop-{}-enqueued: {cmd:?}:{stream_id:?}",
                                     self.unique_id,
                                     i,
-                                    cell
                                 );
-                                self.send_relay_cell(cx, hop_num, early, cell)?;
+                                self.send_relay_cell(cx, hop_num, early, cmd, stream_id, cell)?;
                                 if !self.channel.poll_ready(cx)? {
                                     break 'outer;
                                 }
@@ -964,7 +966,7 @@ impl Reactor {
             }
             // Send messages we said we'd send.
             for (hopn, rc) in stream_relaycells {
-                self.send_relay_cell(cx, hopn, false, rc)?;
+                self.send_relay_msg(cx, hopn, false, rc)?;
                 did_things = true;
             }
 
@@ -1445,18 +1447,37 @@ impl Reactor {
         Ok(())
     }
 
-    /// Encode the relay cell `cell`, encrypt it, and send it to the 'hop'th hop.
+    /// Encode the relay message `msg`, encrypt it, and send it to the 'hop'th hop.
     ///
     /// Does not check whether the cell is well-formed or reasonable.
+    fn send_relay_msg(
+        &mut self,
+        cx: &mut Context<'_>,
+        hop: HopNum,
+        early: bool,
+        msg: AnyRelayMsgOuter,
+    ) -> Result<()> {
+        let cmd = msg.cmd();
+        let stream_id = msg.stream_id();
+        let mut cells = msg
+            .encode(&mut rand::thread_rng())
+            .map_err(|e| Error::from_cell_enc(e, "relay cell body"))?;
+        for cell in cells {
+            self.send_relay_cell(cx, hop, early, cmd, stream_id, cell.into())?;
+        }
+        Ok(())
+    }
+
     fn send_relay_cell(
         &mut self,
         cx: &mut Context<'_>,
         hop: HopNum,
         early: bool,
-        cell: AnyRelayMsgOuter,
+        cmd: RelayCmd,
+        stream_id: Option<StreamId>,
+        mut cell: RelayCellBody,
     ) -> Result<()> {
-        let c_t_w = sendme::cmd_counts_towards_windows(cell.cmd());
-        let stream_id = cell.stream_id();
+        let c_t_w = sendme::cmd_counts_towards_windows(cmd);
         // Check whether the hop send window is empty, if this cell counts towards windows.
         // NOTE(eta): It is imperative this happens *before* calling encrypt() below, otherwise
         //            we'll have cells rejected due to a protocol violation! (Cells have to be
@@ -1468,23 +1489,19 @@ impl Reactor {
                 // Send window is empty! Push this cell onto the hop's outbound queue, and it'll
                 // get sent later.
                 trace!(
-                    "{}: having to use onto hop {} queue for cell: {:?}",
+                    "{}: having to use onto hop {} queue for cell of cmd:{:?} stream:{:?}",
                     self.unique_id,
                     hop.display(),
-                    cell
+                    cmd, stream_id
                 );
-                circhop.outbound.push_back((early, cell));
+                circhop.outbound.push_back((early, cmd, stream_id, cell));
                 return Ok(());
             }
         }
-        let mut body: RelayCellBody = cell
-            .encode(&mut rand::thread_rng())
-            .map_err(|e| Error::from_cell_enc(e, "relay cell body"))?
-            .into();
-        let tag = self.crypto_out.encrypt(&mut body, hop)?;
+        let tag = self.crypto_out.encrypt(&mut cell, hop)?;
         // NOTE(eta): Now that we've encrypted the cell, we *must* either send it or abort
         //            the whole circuit (e.g. by returning an error).
-        let msg = chancell::msg::Relay::from(BoxedCellBody::from(body));
+        let msg = chancell::msg::Relay::from(BoxedCellBody::from(cell));
         let msg = if early {
             AnyChanMsg::RelayEarly(msg.into())
         } else {
@@ -1517,6 +1534,7 @@ impl Reactor {
         }
         self.send_msg_direct(cx, msg)
     }
+
 
     /// Try to install a given meta-cell handler to receive any unusual cells on
     /// this circuit, along with a result channel to notify on completion.
@@ -1663,7 +1681,7 @@ impl Reactor {
             CtrlMsg::SendSendme { stream_id, hop_num } => {
                 let sendme = Sendme::new_empty();
                 let cell = AnyRelayMsgOuter::new(Some(stream_id), sendme.into());
-                self.send_relay_cell(cx, hop_num, false, cell)?;
+                self.send_relay_msg(cx, hop_num, false, cell)?;
             }
             #[cfg(feature = "send-control-msg")]
             CtrlMsg::SendMsg {
@@ -1672,7 +1690,7 @@ impl Reactor {
                 sender,
             } => {
                 let cell = AnyRelayMsgOuter::new(None, msg);
-                let outcome = self.send_relay_cell(cx, hop_num, false, cell);
+                let outcome = self.send_relay_msg(cx, hop_num, false, cell);
                 let _ = sender.send(outcome.clone()); // don't care if receiver goes away.
                 outcome?;
             }
@@ -1688,7 +1706,7 @@ impl Reactor {
                             .as_ref()
                             .or(self.meta_handler.as_ref())
                             .ok_or_else(|| internal!("tried to use an ended Conversation"))?;
-                        self.send_relay_cell(cx, handler.expected_hop(), false, msg)?;
+                        self.send_relay_msg(cx, handler.expected_hop(), false, msg)?;
                     }
                     if let Some(handler) = handler {
                         self.set_meta_handler(handler)?;
@@ -1718,7 +1736,7 @@ impl Reactor {
             }
             #[cfg(test)]
             CtrlMsg::SendRelayCell { hop, early, cell } => {
-                self.send_relay_cell(cx, hop, early, cell)?;
+                self.send_relay_msg(cx, hop, early, cell)?;
             }
         }
         Ok(())
@@ -1741,7 +1759,7 @@ impl Reactor {
         let send_window = StreamSendWindow::new(SEND_WINDOW_INIT);
         let r = hop.map.add_ent(sender, rx, send_window, cmd_checker)?;
         let cell = AnyRelayMsgOuter::new(Some(r), message);
-        self.send_relay_cell(cx, hopnum, false, cell)?;
+        self.send_relay_msg(cx, hopnum, false, cell)?;
         Ok(r)
     }
 
@@ -1780,7 +1798,7 @@ impl Reactor {
             (should_send_end, message)
         {
             let end_cell = AnyRelayMsgOuter::new(Some(id), end_message.into());
-            self.send_relay_cell(cx, hopnum, false, end_cell)?;
+            self.send_relay_msg(cx, hopnum, false, end_cell)?;
         }
         Ok(())
     }
@@ -1825,10 +1843,19 @@ impl Reactor {
             tag_copy.copy_from_slice(tag);
             tag_copy
         };
-        // Put the cell into a format where we can make sense of it.
-        let msg = UnparsedRelayCell::from_body(body.into());
 
-        let c_t_w = sendme::cell_counts_towards_windows(&msg);
+        let c_t_w = {
+            let hop = self
+                .hop_mut(hopnum)
+                .ok_or_else(|| Error::CircProto("Sendme from nonexistent hop".into()))?;
+
+            // This cell may be multiple relay messages, or part of a single
+            // relay message.
+            hop.relay_cell_accumulator.push(body.into());
+
+            // See https://gitlab.torproject.org/tpo/core/torspec/-/issues/216#note_2936109
+            hop.relay_cell_accumulator.commands().any(sendme::cmd_counts_towards_windows)
+        };
 
         // Decrement the circuit sendme windows, and see if we need to
         // send a sendme cell.
@@ -1848,7 +1875,7 @@ impl Reactor {
             // become incorrect.  (Higher numbers are not currently defined.)
             let sendme = Sendme::new_tag(tag);
             let cell = AnyRelayMsgOuter::new(None, sendme.into());
-            self.send_relay_cell(cx, hopnum, false, cell)?;
+            self.send_relay_msg(cx, hopnum, false, cell)?;
             self.hop_mut(hopnum)
                 .ok_or_else(|| {
                     Error::from(internal!(
@@ -1860,6 +1887,36 @@ impl Reactor {
                 .put();
         }
 
+        // Handle any complete messages that are now ready.
+        let mut status = CellStatus::Continue;
+        loop {
+            let option_msg = 
+                self
+                    .hop_mut(hopnum)
+                    .ok_or_else(|| {
+                        Error::from(internal!(
+                            "Hop {:?} disappeared while handling messages from it",
+                            hopnum
+                        ))
+                    })?.relay_cell_accumulator.pop();
+            let Some(msg) = option_msg else {
+                break
+            };
+            // FIXME: what should we do with remaining messages if handling one results in an error?
+            // Returning here when there are still messages ready to be popped will result in errors
+            // later if we try to push more cells into the accumulator.
+            match self.handle_relay_msg(cx, msg, hopnum)? {
+                CellStatus::Continue => (),
+                // FIXME: should we stop processing messages here?
+                CellStatus::CleanShutdown => status = CellStatus::CleanShutdown,
+            }
+        }
+
+        Ok(status)
+    }
+
+    /// React to a relay message
+    fn handle_relay_msg(&mut self, cx: &mut Context<'_>, msg: UnparsedRelayCell, hopnum: HopNum) -> Result<CellStatus> {
         // If this cell wants/refuses to have a Stream ID, does it
         // have/not have one?
         let cmd = msg.cmd();
@@ -1914,11 +1971,12 @@ impl Reactor {
                             sv(streamid),
                         )));
                     }
-                    if e.is_disconnected() && c_t_w {
+                    if e.is_disconnected() && sendme::cmd_counts_towards_windows(cmd) {
                         // the other side of the stream has gone away; remember
                         // that we received a cell that we couldn't queue for it.
                         //
                         // Later this value will be recorded in a half-stream.
+                        // FIXME: In the case of a multi-cell message, should this be the cell count?
                         *dropped += 1;
                     }
                 }
@@ -2050,7 +2108,7 @@ impl Reactor {
                     Some(stream_id),
                     End::new_with_reason(EndReason::RESOURCELIMIT).into(),
                 );
-                self.send_relay_cell(cx, hop_num, false, end_msg)?;
+                self.send_relay_msg(cx, hop_num, false, end_msg)?;
             } else if e.is_disconnected() {
                 // The IncomingStreamRequestHandler's stream has been dropped.
                 // In the Tor protocol as it stands, this always means that the
@@ -2112,7 +2170,7 @@ impl ConversationInHandler<'_, '_, '_> {
         let msg = tor_cell::relaycell::AnyRelayMsgOuter::new(None, msg);
 
         self.reactor
-            .send_relay_cell(self.cx, self.hop_num, false, msg)
+            .send_relay_msg(self.cx, self.hop_num, false, msg)
     }
 }
 
