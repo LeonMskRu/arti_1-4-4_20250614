@@ -256,7 +256,7 @@ hosts:
         do
           /home/jnewsome/.local/bin/tgen ../../../conf/tgen.toronionclient.graphml.xml > tgen.$i.stdout &
           i=$(($i+1))
-          sleep 30m
+          sleep 10m
         done
       start_time: 25m
       expected_final_state: running
@@ -289,7 +289,7 @@ hosts:
         do
           /home/jnewsome/.local/bin/tgen ../../../conf/tgen.artionionclient.graphml.xml > tgen.$i.stdout &
           i=$(($i+1))
-          sleep 30m
+          sleep 10m
         done
       start_time: 25m
       expected_final_state: running
@@ -322,7 +322,7 @@ hosts:
         do
           /home/jnewsome/.local/bin/tgen ../../../conf/tgen.toronionclient-auth.graphml.xml > tgen.$i.stdout &
           i=$(($i+1))
-          sleep 30m
+          sleep 10m
         done
       start_time: 25m
       expected_final_state: running
@@ -347,7 +347,7 @@ hosts:
         do
           /home/jnewsome/.local/bin/tgen ../../../conf/tgen.artionionclient.graphml.xml > tgen.$i.stdout &
           i=$(($i+1))
-          sleep 30m
+          sleep 10m
         done
       start_time: 25m
       expected_final_state: running
