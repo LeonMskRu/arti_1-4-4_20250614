@@ -20,7 +20,7 @@ PathBiasCircThreshold 10000
 DoSCircuitCreationEnabled 0
 DoSConnectionEnabled 0
 DoSRefuseSingleHopClientRendezvous 0
-CircuitPriorityHalflife 30
+#CircuitPriorityHalflife 30
 ControlPort 9051
 LearnCircuitBuildTimeout 0
 
@@ -28,18 +28,18 @@ LearnCircuitBuildTimeout 0
 DirAllowPrivateAddresses 1
 EnforceDistinctSubnets 0
 AuthDirMaxServersPerAddr 0
-ClientBootstrapConsensusAuthorityDownloadInitialDelay 0
-ClientBootstrapConsensusFallbackDownloadInitialDelay 0
-ClientBootstrapConsensusAuthorityOnlyDownloadInitialDelay 0
+#ClientBootstrapConsensusAuthorityDownloadInitialDelay 0
+#ClientBootstrapConsensusFallbackDownloadInitialDelay 0
+#ClientBootstrapConsensusAuthorityOnlyDownloadInitialDelay 0
 ClientDNSRejectInternalAddresses 0
 ClientRejectInternalAddresses 0
 CountPrivateBandwidth 1
 ExitPolicyRejectPrivate 0
 ExtendAllowPrivateAddresses 1
-V3AuthVotingInterval 5 minutes
-V3AuthVoteDelay 20 seconds
-V3AuthDistDelay 20 seconds
-MinUptimeHidServDirectoryV2 0 minutes
+#V3AuthVotingInterval 5 minutes
+#V3AuthVoteDelay 20 seconds
+#V3AuthDistDelay 20 seconds
+#MinUptimeHidServDirectoryV2 0 minutes
 #TestingV3AuthInitialVotingInterval 150 seconds
 #TestingV3AuthInitialVoteDelay 20 seconds
 #TestingV3AuthInitialDistDelay 20 seconds
@@ -54,3 +54,7 @@ MinUptimeHidServDirectoryV2 0 minutes
 #TestingDirConnectionMaxStall 30 seconds
 #TestingEnableConnBwEvent 1
 #TestingEnableCellStatsEvent 1
+
+MinUptimeHidServDirectoryV2 0 hours
+AuthDirVoteStableGuaranteeMinUptime 0 hours
+AuthDirVoteStableGuaranteeMTBF 0 hours
