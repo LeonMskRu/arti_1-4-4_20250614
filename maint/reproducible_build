@@ -44,11 +44,9 @@ export RUSTFLAGS="-C target-cpu=westmere"
 cp -a "$here" /arti
 cd /arti
 
-cargo_build () {
-	$CARGO build --locked "$@"
-}
 cargo_build_arti () {
-	cargo_build -p arti --release --features static "$@"
+	$CARGO check --locked --features static --tests "$@"
+	$CARGO build --locked -p arti --release --features static "$@"
 }
 
 ## add missing dependencies
