@@ -31,6 +31,7 @@ shadow \
   --progress=true \
   --use-memory-manager=false \
   --use-worker-spinning=false \
+  --use-new-tcp=true \
   shadow.yaml \
   > shadow.log
 
