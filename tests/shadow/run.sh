@@ -15,7 +15,7 @@ chmod 700 shadow.data.template/hosts/fileserver-onion-auth/hs
 
 # Try "debug" or "trace" when debugging a shadow issue. These can generate
 # fairly large files though and slow the simulation down.
-SHADOW_LOG_LEVEL=debug
+SHADOW_LOG_LEVEL=info
 
 # Set to "standard" to get strace logs for all processes. This can generate
 # large logs.
