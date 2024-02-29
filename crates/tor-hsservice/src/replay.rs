@@ -653,6 +653,13 @@ mod test {
                     sa_sigaction: libc::SIG_IGN,
                     sa_mask: sigemptyset(),
                     sa_flags: 0,
+                    #[cfg(any(
+                        target_os = "linux",
+                        target_os = "l4re",
+                        target_os = "android",
+                        target_os = "emscripten",
+                        target_os = "redox"
+                    ))]
                     sa_restorer: None,
                 };
                 let r = libc::sigaction(libc::SIGXFSZ, (&sa) as _, ptr::null_mut());
