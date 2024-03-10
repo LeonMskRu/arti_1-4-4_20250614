@@ -1,8 +1,10 @@
 //! Implementation for parsing and encoding relay cells
 
+use std::collections::VecDeque;
 use std::num::NonZeroU16;
 
 use crate::chancell::{BoxedCellBody, CELL_DATA_LEN};
+use smallvec::SmallVec;
 use tor_bytes::{EncodeError, EncodeResult, Error, Result};
 use tor_bytes::{Reader, Writer};
 use tor_error::internal;
@@ -193,47 +195,163 @@ impl StreamId {
     }
 }
 
-/// A relay cell that has not yet been fully parsed, but where we have access to
-/// the command and stream ID, for dispatching purposes.
+/// Specifies a version of the network format for RelayCell.
+#[derive(Copy, Clone, Debug)]
+// FIXME: clippy wants non_exhaustive here since this is a pub enum. Maybe better
+// to make this exhausive and just add a clippy exception here?
 //
-// TODO prop340: Further discussion is necessary about standardizing names for
-// all of the pieces of our cells.
+// This lets us add new versions without it being a semver breaking change, but
+// the down-side is that it may be more difficult to statically ensure that a
+// down-stream crate has been fully updated to support a new version.
+#[non_exhaustive]
+pub enum RelayCellVersion {
+    /// "Legacy" format implicitly supported by all relays.
+    V0,
+}
+
+/// A buffer of RelayCells. This helps handle packing (one cell -> multiple
+/// messages) and fragmentation (multiple cells -> one message).
+pub struct RelayCellAccumulator {
+    version: RelayCellVersion,
+    cells: VecDeque<BoxedCellBody>,
+}
+
+impl RelayCellAccumulator {
+    pub fn new(version: RelayCellVersion) -> Self {
+        Self {
+            version,
+            cells: VecDeque::with_capacity(1),
+        }
+    }
+
+    /// Whether `self` has complete message(s) that can be popped.
+    fn ready(&self) -> bool {
+        match self.version {
+            RelayCellVersion::V0 => self.cells.len() > 0,
+        }
+    }
+
+    /// Panics if `self` already contains one or more complete messages
+    /// that are ready to be `pop`'d.
+    // FIXME: return a Result instead?
+    pub fn push(&mut self, body: BoxedCellBody) {
+        if self.ready() {
+            panic!("Tried to push a new cell to a full accumulator");
+        }
+        self.cells.push_back(body)
+    }
+
+    pub fn pop(&mut self) -> Option<UnparsedRelayCell> {
+        match self.version {
+            RelayCellVersion::V0 => {
+                let body = self.cells.pop_front()?;
+                Some(UnparsedRelayCell::from_v0_body(body))
+            }
+        }
+    }
+
+    /// Command(s) contained in `self`.
+    pub fn commands(&self) -> impl Iterator<Item = RelayCmd> {
+        let mut rv = SmallVec::<[RelayCmd; 1]>::new();
+        match self.version {
+            RelayCellVersion::V0 => {
+                if let Some(body) = self.cells.back() {
+                    let cmd = body[CMD_OFFSET].into();
+                    rv.push(cmd)
+                }
+            }
+        }
+        rv.into_iter()
+    }
+
+    /// Panics if the `cells` contains extra cells.
+    // FIXME: return a Result instead?
+    pub fn from_cells(
+        version: RelayCellVersion,
+        cells: impl Iterator<Item = BoxedCellBody>,
+    ) -> Self {
+        let mut s = Self::new(version);
+        for cell in cells {
+            s.push(cell);
+        }
+        s
+    }
+
+    pub fn into_msgs(self) -> impl IntoIterator<Item = UnparsedRelayCell> {
+        match self.version {
+            RelayCellVersion::V0 => {
+                let msgs = self.cells.into_iter().map(UnparsedRelayCell::from_v0_body);
+                // FIXME: use SmallVec?
+                Vec::<UnparsedRelayCell>::from_iter(msgs)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct UnparsedRelayCell {
-    /// The body of the cell.
-    body: BoxedCellBody,
+enum UnparsedRelayCellInternal {
+    /// V0 RelayCells have a 1:1 mapping with messages, so we just store the cell.
     // NOTE: we could also have a separate command and stream ID field here, but
     // we expect to be working with a TON of these, so we will be mildly
     // over-optimized and just peek into the body.
     //
     // It *is* a bit ugly to have to encode so much knowledge about the format in
     // different functions here, but that information shouldn't leak out of this module.
+    V0(BoxedCellBody),
+}
+
+/// A relay cell that has not yet been fully parsed, but where we have access to
+/// the command and stream ID, for dispatching purposes.
+//
+// TODO prop340: Further discussion is necessary about standardizing names for
+// all of the pieces of our cells.
+// FIXME: rename to `UnparsedRelayMsg` ?
+#[derive(Clone, Debug)]
+pub struct UnparsedRelayCell {
+    internal: UnparsedRelayCellInternal,
 }
 /// Position of the stream ID within the cell body.
 const STREAM_ID_OFFSET: usize = 3;
+/// Position of the command within the cell body.
+const CMD_OFFSET: usize = 0;
 
 impl UnparsedRelayCell {
     /// Wrap a BoxedCellBody as an UnparsedRelayCell.
-    pub fn from_body(body: BoxedCellBody) -> Self {
-        Self { body }
+    fn from_v0_body(body: BoxedCellBody) -> Self {
+        Self {
+            internal: UnparsedRelayCellInternal::V0(body),
+        }
     }
     /// Return the command for this cell.
     pub fn cmd(&self) -> RelayCmd {
-        /// Position of the command within the cell body.
-        const CMD_OFFSET: usize = 0;
-        self.body[CMD_OFFSET].into()
+        match &self.internal {
+            UnparsedRelayCellInternal::V0(body) => body[CMD_OFFSET].into(),
+        }
     }
     /// Return the stream ID for the stream that this cell corresponds to, if any.
     pub fn stream_id(&self) -> Option<StreamId> {
-        StreamId::new(u16::from_be_bytes(
-            self.body[STREAM_ID_OFFSET..STREAM_ID_OFFSET + 2]
-                .try_into()
-                .expect("two-byte slice was not two bytes long!?"),
-        ))
+        match &self.internal {
+            UnparsedRelayCellInternal::V0(body) => StreamId::new(u16::from_be_bytes(
+                body[STREAM_ID_OFFSET..STREAM_ID_OFFSET + 2]
+                    .try_into()
+                    .expect("two-byte slice was not two bytes long!?"),
+            )),
+        }
     }
     /// Decode this unparsed cell into a given cell type.
     pub fn decode<M: RelayMsg>(self) -> Result<RelayMsgOuter<M>> {
-        RelayMsgOuter::decode(self.body)
+        match self.internal {
+            UnparsedRelayCellInternal::V0(body) => {
+                let mut iter =
+                    RelayMsgOuter::decode_cells(RelayCellVersion::V0, [body].into_iter());
+                let res = iter
+                    .next()
+                    .expect("Should have returned at least one result");
+                // A V0 cell contains exactly one message.
+                debug_assert!(iter.next().is_none());
+                res
+            }
+        }
     }
 }
 
@@ -307,7 +425,10 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
     }
     /// Consume this relay message and encode it as a 509-byte padded cell
     /// body.
-    pub fn encode<R: Rng + CryptoRng>(self, rng: &mut R) -> crate::Result<BoxedCellBody> {
+    pub fn encode<R: Rng + CryptoRng>(
+        self,
+        rng: &mut R,
+    ) -> crate::Result<impl Iterator<Item = BoxedCellBody>> {
         /// We skip this much space before adding any random padding to the
         /// end of the cell
         const MIN_SPACE_BEFORE_PADDING: usize = 4;
@@ -318,7 +439,8 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
             rng.fill_bytes(&mut body[enc_len + MIN_SPACE_BEFORE_PADDING..]);
         }
 
-        Ok(body)
+        // FIXME: maybe use SmallVec here to optimize for the common case of 1 cell?
+        Ok(vec![body].into_iter())
     }
 
     /// Consume a relay cell and return its contents, encoded for use
@@ -377,32 +499,50 @@ impl<M: RelayMsg> RelayMsgOuter<M> {
         Ok((body.0, written))
     }
 
-    /// Parse a RELAY or RELAY_EARLY cell body into a RelayMsgOuter.
-    ///
-    /// Requires that the cryptographic checks on the message have already been
-    /// performed
-    #[allow(clippy::needless_pass_by_value)] // TODO this will go away soon.
-    pub fn decode(body: BoxedCellBody) -> Result<Self> {
-        let mut reader = Reader::from_slice(body.as_ref());
-        Self::decode_from_reader(&mut reader)
+    /// Decode this unparsed cell into a given cell type.
+    pub fn decode_cells(
+        version: RelayCellVersion,
+        cells: impl Iterator<Item = BoxedCellBody>,
+    ) -> impl Iterator<Item = Result<Self>> {
+        match version {
+            RelayCellVersion::V0 => {
+                // cells map 1:1 to messages
+                cells.map(move |cell| {
+                    let reader = Reader::from_slice(cell.as_ref());
+                    let (msg, _reader) = RelayMsgOuter::decode_next_from_reader(version, reader)?;
+                    Ok(msg)
+                })
+            }
+        }
     }
+
     /// Parse a RELAY or RELAY_EARLY cell body into a RelayMsgOuter from a reader.
     ///
     /// Requires that the cryptographic checks on the message have already been
     /// performed
-    pub fn decode_from_reader(r: &mut Reader<'_>) -> Result<Self> {
-        let cmd = r.take_u8()?.into();
-        r.advance(2)?; // "recognized"
-        let streamid = StreamId::new(r.take_u16()?);
-        r.advance(4)?; // digest
-        let len = r.take_u16()? as usize;
-        if r.remaining() < len {
-            return Err(Error::InvalidMessage(
-                "Insufficient data in relay cell".into(),
-            ));
+    ///
+    /// On success returns the reader, whose position should now be at the
+    /// beginning of the next message, if any.
+    // FIXME: determine and document semantics expected of a reader over multiple cells. Probably
+    // cells concatenated together with inter-cell padding cut out?
+    fn decode_next_from_reader(
+        version: RelayCellVersion,
+        mut r: Reader<'_>,
+    ) -> Result<(Self, Reader<'_>)> {
+        match version {
+            RelayCellVersion::V0 => {
+                let cmd = r.take_u8()?.into();
+                r.advance(2)?; // "recognized"
+                let streamid = StreamId::new(r.take_u16()?);
+                r.advance(4)?; // digest
+                let len = r.take_u16()? as usize;
+                let msg_start_pos = r.cursor();
+                r.advance(len)?;
+                let msg_end_pos = r.cursor();
+                let mut msg_reader = Reader::from_slice(r.range(msg_start_pos, msg_end_pos));
+                let msg = M::decode_from_reader(cmd, &mut msg_reader)?;
+                Ok((Self { streamid, msg }, r))
+            }
         }
-        r.truncate(len);
-        let msg = M::decode_from_reader(cmd, r)?;
-        Ok(Self { streamid, msg })
     }
 }

@@ -1315,18 +1315,21 @@ mod test {
     use futures::stream::StreamExt;
     use futures::task::SpawnExt;
     use hex_literal::hex;
+    use itertools::Itertools;
     use std::time::Duration;
     use tor_basic_utils::test_rng::testing_rng;
     use tor_cell::chancell::{msg as chanmsg, AnyChanCell, BoxedCellBody};
     use tor_cell::relaycell::extend::NtorV3Extension;
-    use tor_cell::relaycell::{msg as relaymsg, AnyRelayMsgOuter, StreamId};
+    use tor_cell::relaycell::{msg as relaymsg, AnyRelayMsgOuter, RelayCellVersion, StreamId};
     use tor_linkspec::OwnedCircTarget;
     use tor_rtcompat::{Runtime, SleepProvider};
     use tracing::trace;
 
     fn rmsg_to_ccmsg(id: Option<StreamId>, msg: relaymsg::AnyRelayMsg) -> ClientCircChanMsg {
-        let body: BoxedCellBody = AnyRelayMsgOuter::new(id, msg)
+        let (body,): (BoxedCellBody,) = AnyRelayMsgOuter::new(id, msg)
             .encode(&mut testing_rng())
+            .unwrap()
+            .collect_tuple()
             .unwrap();
         let chanmsg = chanmsg::Relay::from(body);
         ClientCircChanMsg::Relay(chanmsg)
@@ -1633,10 +1636,16 @@ mod test {
             // we're using dummy relay crypto for testing convenience.
             let rcvd = rx.next().await.unwrap();
             assert_eq!(rcvd.circid(), CircId::new(128));
-            let m = match rcvd.into_circid_and_msg().1 {
-                AnyChanMsg::Relay(r) => AnyRelayMsgOuter::decode(r.into_relay_body()).unwrap(),
+            let (m,) = match rcvd.into_circid_and_msg().1 {
+                AnyChanMsg::Relay(r) => AnyRelayMsgOuter::decode_cells(
+                    RelayCellVersion::V0,
+                    [r.into_relay_body()].into_iter(),
+                )
+                .collect_tuple()
+                .unwrap(),
                 _ => panic!(),
             };
+            let m = m.unwrap();
             assert!(matches!(m.msg(), AnyRelayMsg::BeginDir(_)));
         });
     }
