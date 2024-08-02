@@ -8,7 +8,7 @@ pub(crate) mod async_std;
 #[cfg(feature = "tokio")]
 pub(crate) mod tokio;
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 pub(crate) mod rustls;
 
 #[cfg(feature = "native-tls")]

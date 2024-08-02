@@ -5,7 +5,7 @@ use std::io::Result as IoResult;
 
 #[cfg(feature = "native-tls")]
 use crate::impls::native_tls::NativeTlsProvider;
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 use crate::impls::rustls::RustlsProvider;
 
 use async_executors::AsyncStd;
@@ -22,7 +22,10 @@ use async_executors::AsyncStd;
 #[cfg(feature = "native-tls")]
 pub use AsyncStdNativeTlsRuntime as PreferredRuntime;
 
-#[cfg(all(feature = "rustls", not(feature = "native-tls")))]
+#[cfg(all(
+    any(feature = "rustls-ring", feature = "rustls-aws-lc"),
+    not(feature = "native-tls")
+))]
 pub use AsyncStdRustlsRuntime as PreferredRuntime;
 
 /// A [`Runtime`](crate::Runtime) powered by `async_std` and `native_tls`.
@@ -49,7 +52,7 @@ crate::opaque::implement_opaque_runtime! {
     AsyncStdNativeTlsRuntime { inner : NativeTlsInner }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 /// A [`Runtime`](crate::Runtime) powered by `async_std` and `rustls`.
 #[derive(Clone)]
 pub struct AsyncStdRustlsRuntime {
@@ -58,11 +61,11 @@ pub struct AsyncStdRustlsRuntime {
 }
 
 /// Implementation type for AsyncStdRustlsRuntime.
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 type RustlsInner =
     CompoundRuntime<AsyncStd, AsyncStd, RealCoarseTimeProvider, AsyncStd, RustlsProvider, AsyncStd>;
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 crate::opaque::implement_opaque_runtime! {
     AsyncStdRustlsRuntime { inner: RustlsInner }
 }
@@ -112,7 +115,7 @@ impl AsyncStdNativeTlsRuntime {
     }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 impl AsyncStdRustlsRuntime {
     /// Return a new [`AsyncStdRustlsRuntime`]
     ///
@@ -183,7 +186,7 @@ mod test {
             #[cfg(feature = "native-tls")]
             assert!(AsyncStdNativeTlsRuntime::current().is_ok());
 
-            #[cfg(feature = "rustls")]
+            #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
             assert!(AsyncStdRustlsRuntime::current().is_ok());
         });
     }
@@ -195,7 +198,7 @@ mod test {
             format!("{:?}", AsyncStdNativeTlsRuntime::create().unwrap()),
             "AsyncStdNativeTlsRuntime { .. }"
         );
-        #[cfg(feature = "rustls")]
+        #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
         assert_eq!(
             format!("{:?}", AsyncStdRustlsRuntime::create().unwrap()),
             "AsyncStdRustlsRuntime { .. }"

@@ -258,7 +258,11 @@ impl<R: SleepProvider> Stream for TaskSchedule<R> {
 // test_with_all_runtimes! only exists if these features are satisfied.
 #[cfg(all(
     test,
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "tokio", feature = "async-std"),
 ))]
 mod test {

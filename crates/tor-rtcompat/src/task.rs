@@ -40,7 +40,11 @@ impl Future for YieldFuture {
 
 #[cfg(all(
     test,
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "tokio", feature = "async-std")
 ))]
 mod test {

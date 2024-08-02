@@ -28,7 +28,11 @@ use tor_persist::{FsStateMgr, StateMgr};
 use tor_proto::circuit::ClientCirc;
 use tor_proto::stream::{DataStream, IpVersionPreference, StreamParameters};
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 use tor_rtcompat::PreferredRuntime;
@@ -475,7 +479,11 @@ impl StreamPrefs {
 }
 
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 impl TorClient<PreferredRuntime> {
