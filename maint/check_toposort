@@ -3,7 +3,7 @@
 # Helper script: makes sure that the crates as listed in Cargo.toml are
 # topologically sorted from lowest-level to highest level.
 
-import toml.decoder
+import tomllib
 import sys
 import os.path
 import os
@@ -25,7 +25,7 @@ def strip_prefix(s, prefix):
 
 
 def crate_list():
-    t = toml.decoder.load(WORKSPACE_TOML)
+    t = tomllib.load(open(WORKSPACE_TOML, "rb"))
     return list(strip_prefix(name, "crates/") for name in t['workspace']['members']
                 if not (name.startswith("examples/") or name.startswith("maint/")))
 
@@ -53,7 +53,7 @@ def get_path(dep):
 
 def get_dependencies(cratename):
     fname = os.path.join(CRATEDIR, cratename, "Cargo.toml")
-    t = toml.decoder.load(fname)
+    t = tomllib.load(open(fname, "rb"))
     deps = set()
     for secname in ['dependencies', 'dev-dependencies']:
         sec = t.get(secname)

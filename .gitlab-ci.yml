@@ -71,7 +71,7 @@ python3-mypy:
 maint-checks:
   stage: check
   script:
-    - maint/common/apt-install git python3-toml python3-requests python-is-python3
+    - maint/common/apt-install git python3-requests python-is-python3
     - ./maint/check_toposort
     - ./maint/add_warning --check
     - ./maint/common/forbid-absolute-shebangs
@@ -90,7 +90,7 @@ maint-check-ownership:
   stage: test
   allow_failure: true
   script:
-    - maint/common/apt-install python3-toml curl jq
+    - maint/common/apt-install curl jq
     - ./maint/cargo-crate-owners
   rules:
     # Don't impede MR work when this goes wrong.
@@ -104,7 +104,6 @@ maint-check-cbindgen:
   # cbindgen needs nightly rust to do macro expansion
   image: rustlang/rust:nightly
   script:
-    - ./maint/common/apt-install python3-toml
     - ./maint/common/via-cargo-install-in-ci cbindgen
     - ./maint/cbindgen --check
 
@@ -115,7 +114,7 @@ doc-features:
   stage: check
   allow_failure: true
   script:
-    - maint/common/apt-install python3-toml python-is-python3
+    - maint/common/apt-install python-is-python3
     - ./maint/check_doc_features
 
 # This should always be in the last testing stage, so that if it fails all the other steps still run
@@ -470,7 +469,7 @@ every-crate:
   image: $RECENT_RUST_IMAGE
   needs: ["rust-checks", "rust-recent-async-std-rustls"]
   script:
-    - maint/common/apt-install python3-toml python-is-python3
+    - maint/common/apt-install python-is-python3
     - ./maint/every-crate
 
 # TODO: we should rename this to matrix_check for clarity,
@@ -482,7 +481,7 @@ matrix-test:
   image: $RECENT_RUST_IMAGE
   needs: ["rust-checks", "rust-recent-async-std-rustls"]
   script:
-    - maint/common/apt-install python3-toml python-is-python3
+    - maint/common/apt-install python-is-python3
     - ./maint/matrix_test
 
 matrix-test-cfg:
