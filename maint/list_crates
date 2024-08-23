@@ -3,7 +3,10 @@
 # List our crates as they appear in Cargo.toml.
 
 import argparse
-import toml.decoder
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore
 import sys
 import os.path
 
@@ -26,9 +29,9 @@ def list_crates() -> Iterator[Crate]:
     '''
     Iterator over all the crates in the workspace.
     '''
-    t = toml.decoder.load(WORKSPACE_TOML)
+    t = tomllib.load(open(WORKSPACE_TOML, "rb"))
     for subdir in t['workspace']['members']:
-        pt = toml.decoder.load(subdir + "/Cargo.toml")
+        pt = tomllib.load(open(subdir + "/Cargo.toml", "rb"))
         package = pt["package"]["name"]
         publish = pt["package"].get("publish")
         version = pt["package"]["version"]
