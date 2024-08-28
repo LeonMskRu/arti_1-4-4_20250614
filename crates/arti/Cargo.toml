@@ -68,10 +68,13 @@ vanguards = ["arti-client/vanguards"]
 pt-client = ["bridge-client", "arti-client/pt-client"]
 relay = ["arti-relay", "__is_experimental"]
 
-# This is not nonadditive from a software POV, but we mark it as such because it
-# includes code licensed under the old OpenSSL license (which was 4-clause BSD),
-# which in turn introduces a GPL-incompatibility.
-rustls = ["arti-client/rustls", "tor-rtcompat/rustls", "rustls-crate", "__is_nonadditive"]
+# These are not nonadditive from a software POV, but we mark it as such because both
+# ring and aws-lc-rs include code licensed under the old OpenSSL license
+# (which was 4-clause BSD), which in turn introduces a GPL-incompatibility.
+rustls-ring = ["arti-client/rustls", "tor-rtcompat/rustls-ring", "rustls-crate/ring", "__is_nonadditive"]
+rustls-aws-lc = ["arti-client/rustls", "tor-rtcompat/rustls-aws-lc", "rustls-crate/aws-lc-rs", "__is_nonadditive"]
+# For backwards-compatibility
+rustls = ["rustls-ring"]
 
 # depends directly on arti-client/static so native-tls doesn't get automatically included
 static = ["arti-client/static", "__is_nonadditive"]
@@ -113,7 +116,7 @@ libc = "0.2"
 notify = { version = "6.0", default-features = false, features = ["macos_kqueue"] }
 paste = "1"
 rlimit = "0.10.1"
-rustls-crate = { package = "rustls", version = "0.23.5", optional = true, default-features = false, features = ["tls12", "logging", "ring"] }
+rustls-crate = { package = "rustls", version = "0.23.5", optional = true, default-features = false, features = ["tls12", "logging"] }
 safelog = { path = "../safelog", version = "0.3.6" }
 secmem-proc = { version = "0.3.0", optional = true }
 serde = { version = "1.0.103", features = ["derive"] }

@@ -27,10 +27,13 @@ tokio = [
 static = ["native-tls-crate?/vendored", "__is_nonadditive"]
 native-tls = ["native-tls-crate", "async-native-tls"]
 
-# This is not nonadditive from a software POV, but we mark it as such because it
-# includes code licensed under the old OpenSSL license (which was 4-clause BSD),
-# which in turn introduces a GPL-incompatibility.
-rustls = ["futures-rustls", "rustls-pki-types", "x509-signature", "__is_nonadditive"]
+# These are not nonadditive from a software POV, but we mark it as such because both
+# ring and aws-lc-rs include code licensed under the old OpenSSL license
+# (which was 4-clause BSD), which in turn introduces a GPL-incompatibility.
+rustls-ring = ["futures-rustls/ring", "rustls-pki-types", "x509-signature", "__is_nonadditive"]
+rustls-aws-lc = ["futures-rustls/aws-lc-rs", "rustls-pki-types", "x509-signature", "__is_nonadditive"]
+# For backwards-compatibility
+rustls = ["rustls-ring"]
 
 __is_nonadditive = []
 
@@ -44,7 +47,7 @@ coarsetime = "0.1.20"
 derive_more = "0.99.3"
 educe = "0.4.6"
 futures = "0.3.14"
-futures-rustls = { version = "0.26.0", optional = true, default-features = false, features = ["tls12", "logging", "ring"] }
+futures-rustls = { version = "0.26.0", optional = true, default-features = false, features = ["tls12", "logging"] }
 native-tls-crate = { package = "native-tls", version = "0.2", optional = true }
 paste = "1"
 pin-project = "1"

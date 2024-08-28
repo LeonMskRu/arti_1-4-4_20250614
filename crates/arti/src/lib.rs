@@ -134,24 +134,38 @@ fn create_runtime() -> std::io::Result<impl Runtime> {
             use tor_rtcompat::PreferredRuntime as ChosenRuntime;
         } else if #[cfg(all(feature="tokio", feature="native-tls"))] {
             use tor_rtcompat::tokio::TokioNativeTlsRuntime as ChosenRuntime;
-        } else if #[cfg(all(feature="tokio", feature="rustls"))] {
+        } else if #[cfg(all(feature="tokio", any(feature="rustls-ring", feature="rustls-aws-lc")))] {
             use tor_rtcompat::tokio::TokioRustlsRuntime as ChosenRuntime;
             let _idempotent_ignore = rustls_crate::crypto::CryptoProvider::install_default(
-                rustls_crate::crypto::ring::default_provider(),
-
+                default_rustls_provider()
             );
         } else if #[cfg(all(feature="async-std", feature="native-tls"))] {
             use tor_rtcompat::async_std::AsyncStdNativeTlsRuntime as ChosenRuntime;
-        } else if #[cfg(all(feature="async-std", feature="rustls"))] {
+        } else if #[cfg(all(feature="async-std", any(feature="rustls-ring", feature="rustls-aws-lc")))] {
             use tor_rtcompat::async_std::AsyncStdRustlsRuntime as ChosenRuntime;
             let _idempotent_ignore = rustls_crate::crypto::CryptoProvider::install_default(
-                rustls_crate::crypto::ring::default_provider(),
+                default_rustls_provider()
             );
         } else {
             compile_error!("You must configure both an async runtime and a TLS stack. See doc/TROUBLESHOOTING.md for more.");
         }
     }
     ChosenRuntime::create()
+}
+
+/// Return the default rustls provider based on features, defaulting to ring if both are enabled.
+#[cfg(all(
+    any(feature = "rustls-ring", feature = "rustls-aws-lc"),
+    not(feature = "native-tls")
+))]
+fn default_rustls_provider() -> rustls_crate::crypto::CryptoProvider {
+    cfg_if::cfg_if! {
+        if #[cfg(feature="rustls-ring")] {
+            rustls_crate::crypto::ring::default_provider()
+        } else {
+            rustls_crate::crypto::aws_lc_rs::default_provider()
+        }
+    }
 }
 
 /// Return a (non-exhaustive) array of enabled Cargo features, for version printing purposes.

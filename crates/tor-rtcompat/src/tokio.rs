@@ -6,7 +6,7 @@ use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 
 #[cfg(feature = "native-tls")]
 use crate::impls::native_tls::NativeTlsProvider;
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 use crate::impls::rustls::RustlsProvider;
 
 /// An alias for the Tokio runtime that we prefer to use, based on whatever TLS
@@ -20,7 +20,10 @@ use crate::impls::rustls::RustlsProvider;
 /// future.
 #[cfg(feature = "native-tls")]
 pub use TokioNativeTlsRuntime as PreferredRuntime;
-#[cfg(all(feature = "rustls", not(feature = "native-tls")))]
+#[cfg(all(
+    any(feature = "rustls-ring", feature = "rustls-aws-lc"),
+    not(feature = "native-tls")
+))]
 pub use TokioRustlsRuntime as PreferredRuntime;
 
 /// A [`Runtime`](crate::Runtime) built around a Handle to a tokio runtime, and `native_tls`.
@@ -44,14 +47,14 @@ type HandleInner =
 
 /// A [`Runtime`](crate::Runtime) built around a Handle to a tokio runtime, and `rustls`.
 #[derive(Clone)]
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 pub struct TokioRustlsRuntime {
     /// The actual [`CompoundRuntime`] that implements this.
     inner: RustlsHandleInner,
 }
 
 /// Implementation for a TokioRuntimeRustlsHandle
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 type RustlsHandleInner =
     CompoundRuntime<Handle, Handle, RealCoarseTimeProvider, Handle, RustlsProvider, Handle>;
 
@@ -60,7 +63,7 @@ crate::opaque::implement_opaque_runtime! {
     TokioNativeTlsRuntime { inner : HandleInner }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 crate::opaque::implement_opaque_runtime! {
     TokioRustlsRuntime { inner : RustlsHandleInner }
 }
@@ -82,7 +85,7 @@ impl From<tokio_crate::runtime::Handle> for TokioNativeTlsRuntime {
     }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 impl From<tokio_crate::runtime::Handle> for TokioRustlsRuntime {
     fn from(h: tokio_crate::runtime::Handle) -> Self {
         let h = Handle::new(h);
@@ -158,7 +161,7 @@ impl TokioNativeTlsRuntime {
     }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
 impl TokioRustlsRuntime {
     /// Create a new [`TokioRustlsRuntime`].
     ///
@@ -218,7 +221,11 @@ impl TokioRustlsRuntime {
 }
 
 /// As `Handle::try_current()`, but return an IoError on failure.
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(any(
+    feature = "native-tls",
+    feature = "rustls-ring",
+    feature = "rustls-aws-lc"
+))]
 fn current_handle() -> std::io::Result<tokio_crate::runtime::Handle> {
     tokio_crate::runtime::Handle::try_current().map_err(|e| IoError::new(ErrorKind::Other, e))
 }
@@ -247,7 +254,7 @@ mod test {
         #[cfg(feature = "native-tls")]
         assert!(TokioNativeTlsRuntime::current().is_err());
 
-        #[cfg(feature = "rustls")]
+        #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
         assert!(TokioRustlsRuntime::current().is_err());
     }
 
@@ -259,7 +266,7 @@ mod test {
             #[cfg(feature = "native-tls")]
             assert!(TokioNativeTlsRuntime::current().is_ok());
 
-            #[cfg(feature = "rustls")]
+            #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
             assert!(TokioRustlsRuntime::current().is_ok());
         });
     }
@@ -271,7 +278,7 @@ mod test {
             format!("{:?}", TokioNativeTlsRuntime::create().unwrap()),
             "TokioNativeTlsRuntime { .. }"
         );
-        #[cfg(feature = "rustls")]
+        #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc"))]
         assert_eq!(
             format!("{:?}", TokioRustlsRuntime::create().unwrap()),
             "TokioRustlsRuntime { .. }"

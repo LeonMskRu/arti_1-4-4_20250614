@@ -26,6 +26,8 @@ RECOGNIZED_LICENSES=(
     Zlib
     "MIT AND BSD-3-Clause"
     "(MIT OR Apache-2.0) AND Unicode-DFS-2016"
+    "ISC AND (Apache-2.0 OR ISC)"
+    "ISC AND (Apache-2.0 OR ISC) AND OpenSSL"
 )
 
 # List of packages that don't list a license.

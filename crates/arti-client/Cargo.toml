@@ -65,10 +65,13 @@ tokio = ["tor-rtcompat/tokio", "tor-proto/tokio"]
 native-tls = ["tor-rtcompat/native-tls"]
 pt-client = ["bridge-client", "tor-chanmgr/pt-client", "tor-guardmgr/pt-client", "tor-ptmgr"]
 
-# This is not nonadditive from a software POV, but we mark it as such because it
-# includes code licensed under the old OpenSSL license (which was 4-clause BSD),
-# which in turn introduces a GPL-incompatibility.
-rustls = ["tor-rtcompat/rustls", "__is_nonadditive"]
+# These are not nonadditive from a software POV, but we mark it as such because both
+# ring and aws-lc-rs include code licensed under the old OpenSSL license
+# (which was 4-clause BSD), which in turn introduces a GPL-incompatibility.
+rustls-ring = ["tor-rtcompat/rustls-ring", "__is_nonadditive"]
+rustls-aws-lc = ["tor-rtcompat/rustls-aws-lc", "__is_nonadditive"]
+# For backwards-compatibility
+rustls = ["rustls-ring"]
 
 # depends directly on tor-rtcompat/static so native-tls doesn't get automatically included
 static = ["static-sqlite", "tor-rtcompat/static", "__is_nonadditive"]

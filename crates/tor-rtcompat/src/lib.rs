@@ -42,7 +42,11 @@
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 pub(crate) mod impls;
@@ -72,25 +76,53 @@ pub mod tls {
 
     #[cfg(all(feature = "native-tls", any(feature = "tokio", feature = "async-std")))]
     pub use crate::impls::native_tls::NativeTlsProvider;
-    #[cfg(all(feature = "rustls", any(feature = "tokio", feature = "async-std")))]
+    #[cfg(all(
+        any(feature = "rustls-ring", feature = "rustls-aws-lc"),
+        any(feature = "tokio", feature = "async-std")
+    ))]
     pub use crate::impls::rustls::RustlsProvider;
 }
 
-#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio"))]
+#[cfg(all(
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
+    feature = "tokio"
+))]
 pub mod tokio;
 
-#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "async-std"))]
+#[cfg(all(
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
+    feature = "async-std"
+))]
 pub mod async_std;
 
 pub use compound::CompoundRuntime;
 
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     feature = "async-std",
     not(feature = "tokio")
 ))]
 use async_std as preferred_backend_mod;
-#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio"))]
+#[cfg(all(
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
+    feature = "tokio"
+))]
 use tokio as preferred_backend_mod;
 
 /// The runtime that we prefer to use, out of all the runtimes compiled into the
@@ -101,7 +133,11 @@ use tokio as preferred_backend_mod;
 /// If `native_tls` and `rustls` are both available, we prefer `native_tls` since
 /// it has been used in Arti for longer.
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 #[derive(Clone)]
@@ -111,7 +147,11 @@ pub struct PreferredRuntime {
 }
 
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 crate::opaque::implement_opaque_runtime! {
@@ -119,7 +159,11 @@ crate::opaque::implement_opaque_runtime! {
 }
 
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 impl PreferredRuntime {
@@ -289,7 +333,11 @@ pub mod cond {
 //            this macro, like in scheduler.rs
 #[macro_export]
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "tokio", feature = "async-std"),
 ))]
 macro_rules! test_with_all_runtimes {
@@ -320,7 +368,11 @@ macro_rules! test_with_all_runtimes {
 /// (Always prefers tokio if present.)
 #[macro_export]
 #[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "tokio", feature = "async-std"),
 ))]
 macro_rules! test_with_one_runtime {
@@ -331,7 +383,11 @@ macro_rules! test_with_one_runtime {
 
 #[cfg(all(
     test,
-    any(feature = "native-tls", feature = "rustls"),
+    any(
+        feature = "native-tls",
+        feature = "rustls-ring",
+        feature = "rustls-aws-lc"
+    ),
     any(feature = "async-std", feature = "tokio")
 ))]
 mod test {

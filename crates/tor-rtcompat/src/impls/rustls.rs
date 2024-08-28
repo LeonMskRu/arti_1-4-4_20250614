@@ -5,6 +5,10 @@ use crate::traits::{CertifiedConn, TlsConnector, TlsProvider};
 use async_trait::async_trait;
 use futures::{AsyncRead, AsyncWrite};
 use futures_rustls::rustls;
+#[cfg(all(feature = "rustls-aws-lc", not(feature = "rustls-ring")))]
+use futures_rustls::rustls::crypto::aws_lc_rs::default_provider;
+#[cfg(feature = "rustls-ring")]
+use futures_rustls::rustls::crypto::ring::default_provider;
 use rustls::client::danger;
 use rustls::{CertificateError, Error as TLSError};
 use rustls_pki_types::{CertificateDer as Certificate, ServerName};
@@ -23,7 +27,10 @@ use std::{
 /// and install a default (ring) provider.
 #[cfg_attr(
     docsrs,
-    doc(cfg(all(feature = "rustls", any(feature = "tokio", feature = "async-std"))))
+    doc(cfg(all(
+        any(feature = "rustls-ring", feature = "rustls-aws-lc"),
+        any(feature = "tokio", feature = "async-std")
+    )))
 )]
 #[derive(Clone)]
 #[non_exhaustive]
@@ -109,9 +116,7 @@ impl RustlsProvider {
                             should call CryptoProvider::install_default()"
             );
             let _idempotent_ignore =
-                futures_rustls::rustls::crypto::CryptoProvider::install_default(
-                    futures_rustls::rustls::crypto::ring::default_provider(),
-                );
+                futures_rustls::rustls::crypto::CryptoProvider::install_default(default_provider());
         }
 
         // Be afraid: we are overriding the default certificate verification and
@@ -223,7 +228,7 @@ impl danger::ServerCertVerifier for Verifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        rustls::crypto::ring::default_provider()
+        default_provider()
             .signature_verification_algorithms
             .supported_schemes()
     }

@@ -367,6 +367,7 @@ minimal-versions:
   needs: ["rust-checks"]
   script:
     - rustup install nightly
+    - maint/common/apt-install cmake
     - ./maint/downgrade_dependencies
     - cargo test --verbose --target x86_64-unknown-linux-gnu --all-features
 
