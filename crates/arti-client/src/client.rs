@@ -76,6 +76,26 @@ use tracing::{debug, info};
 /// Cloning this object makes a new reference to the same underlying
 /// handles: it's usually better to clone the `TorClient` than it is to
 /// create a new one.
+///
+/// # Examples
+/// ```
+/// # use arti_client::{TorClient,TorClientConfig, DataStream}; use anyhow::Result;
+/// # use tor_rtcompat::PreferredRuntime;
+/// async fn get_socket() -> Result<DataStream> {
+///     // A basic default client configuration using the default asynchronous runtime.
+///     let config = TorClientConfig::default();
+///
+///     eprintln!("connecting to Tor...");
+///
+///     // Let the Arti client start and bootstrap a connection to the network.
+///     let tor_client = TorClient::create_bootstrapped(config).await?;
+///     // Initiate a connection over Tor to example.com, port 80
+///     let mut stream: DataStream = tor_client.connect(("example.com", 80)).await?;
+///     // You can communicate through the port using read/write operations to the DataStream
+///     Ok(stream)
+/// }
+/// ```
+///
 // TODO(nickm): This type now has 5 Arcs inside it, and 2 types that have
 // implicit Arcs inside them! maybe it's time to replace much of the insides of
 // this with an Arc<TorClientInner>?
@@ -463,6 +483,44 @@ pub enum DormantMode {
 }
 
 /// Preferences for how to route a stream over the Tor network.
+///
+/// Isolation tokens are used to uniquely identify a stream to isolate it from others.
+///
+/// # Example
+/// Connecting to Tor using set of stream isolation preferences which are used to make decisions
+/// about whether that stream can share the same circuit as other streams.
+/// ```
+/// # use arti_client::{IsolationToken, StreamPrefs};use arti_client::{TorClient,TorClientConfig};use anyhow::Result;
+/// async fn get_tor_client() -> Result<()> {
+///     let config = TorClientConfig::default();
+///     println!("connecting to Tor...");
+///     let mut tor_client = TorClient::create_bootstrapped(config).await?;
+///
+///     // Isolating every stream so that they do not share the same circuit.
+///     let isolated_streams = {
+///         let mut pref = StreamPrefs::new();
+///         pref.isolate_every_stream();
+///         pref
+///     };
+///     // assert_eq!(isolated_streams.ip_ver_pref, IpVersionPreference::Ipv4Preferred);
+///     // assert!(!isolated_streams.optimistic_stream);
+///
+///     // Connections with these preferences will have their own isolation group
+///     let isolation_group = {
+///         let mut pref = StreamPrefs::new();
+///         pref.new_isolation_group();
+///         pref
+///     };
+///     // You can override the default stream configuration preference and then connect
+///     tor_client.set_stream_prefs(isolated_streams.clone());
+///     tor_client.connect(("example.com", 80)).await?;
+///
+///     // Or you can connect with explicit connection preferences for different requests
+///     tor_client.connect_with_prefs(("example.com", 80), &isolation_group).await?;
+///     Ok(())
+/// }
+/// ```
+///
 #[derive(Debug, Default, Clone)]
 pub struct StreamPrefs {
     /// What kind of IPv6/IPv4 we'd prefer, and how strongly.
@@ -1207,6 +1265,8 @@ impl<R: Runtime> TorClient<R> {
     ///
     /// (Connections made with clones of the returned `TorClient` may
     /// share circuits with each other.)
+    ///
+    ///
     #[must_use]
     pub fn isolated_client(&self) -> TorClient<R> {
         let mut result = self.clone();

@@ -51,6 +51,63 @@ impl<R: Runtime> DirProviderBuilder<R> for DirMgrBuilder {
 /// An object for constructing a [`TorClient`].
 ///
 /// Returned by [`TorClient::builder()`].
+///
+/// # Examples
+/// To create a Tor client immediately, without waiting for it to bootstrap.
+/// You can create TorClient object by calling [`TorClientBuilder::create_unbootstrapped()`].
+///
+/// This method can be used to create a client and connect later as it
+/// does not require you to use async function, i.e. you don't have to await to bootstrap.
+///
+/// ```
+/// # use arti_client::{TorClient, TorClientConfig, BootstrapBehavior}; use anyhow::Result; use tor_rtcompat::PreferredRuntime;
+/// pub fn get_tor_client() -> Result<TorClient<PreferredRuntime>> {
+///
+///     let config = TorClientConfig::default();
+///     eprintln!("creating unbootstrapped Tor client");
+///
+///     // Create an unbootstrapped Tor client. Bootstrapping will happen when the client is used,
+///     // since `BootstrapBehavior::OnDemand` is the default.
+///     Ok(TorClient::builder()     // Returns TorClientBuilder
+///         .config(config)
+///         .create_unbootstrapped()?)
+/// }
+///
+/// async fn connect() -> Result<()> {
+///     let tor_client = get_tor_client()?;
+///     tor_client.connect(("example.com", 443)).await?;
+///     Ok(())
+/// }
+/// ```
+///
+/// To establish a connection to Tor network, the client needs to be bootstrapped before connecting.
+/// You can also manually bootstrap a client in case you want more control on bootstrapping process.
+///
+/// ```
+/// # use arti_client::{TorClient, TorClientConfig, BootstrapBehavior, TorClientBuilder}; use anyhow::Result;
+/// # use tor_rtcompat::PreferredRuntime;
+/// // Setting the bootstrap behavior to Manual.
+/// async fn connect() -> Result<()>  {
+///
+///     let config = TorClientConfig::default();
+///     // Get the current preferred runtime.
+///     let rt = PreferredRuntime::current()?;
+///
+///     // Setting the bootstrap behavior to manual will require you to bootstrap the client
+///     // with `TorClient::bootstrap before you connect.
+///     // Attempts to use the client before calling `bootstrap` will fail.
+///     // This is useful in case you want more control to initiate connections.
+///     let tor_client_builder = TorClient::with_runtime(rt).config(config).bootstrap_behavior(BootstrapBehavior::Manual);
+///     eprintln!("connecting to Tor...");
+///
+///     // You would have to bootstrap the client before connecting or else it will fail with
+///     // an error of kind `ErrorKind::BootstrapRequired`
+///     let tor_client = tor_client_builder.create_bootstrapped().await?;
+///     tor_client.connect(("example.com", 80)).await?;
+///     Ok(())
+/// }
+/// ```
+///
 #[derive(Clone)]
 #[must_use]
 pub struct TorClientBuilder<R: Runtime> {
