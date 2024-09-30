@@ -143,6 +143,36 @@ restricted_msg! {
     }
 }
 
+/// This indicate what type of channel it is which in turn makes it decide for the correct channel
+/// cell state machines and authentication process (if any).
+///
+/// It is located into a [`ChannelDetails`] and thus created once the channel handshake is
+/// finalized. In other words, when the channel opens.
+#[derive(Clone, Copy, Debug, derive_more::Display)]
+#[non_exhaustive]
+#[allow(unused)] // TODO: Remove once used.
+pub enum ChannelType {
+    /// Client: Initiated as a client to a relay. Unauthenticated.
+    ClientInitiator,
+    /// Relay: Initiating as a relay to a relay. Authenticated.
+    RelayInitiator,
+    /// Relay: Responding as a relay to a relay or client. Authenticated or Unauthenticated.
+    RelayResponder {
+        /// Indicate if the channel is authenticated. Responding as a relay can be either from a
+        /// Relay (authenticated) or a Client/Bridge (Unauthenticated). We only know this
+        /// information once the handshake is completed.
+        authenticated: bool,
+    },
+}
+
+impl ChannelType {
+    /// Return true if this channel type is an initiator.
+    #[allow(unused)] // TODO: Remove once used.
+    pub(crate) fn is_initiator(&self) -> bool {
+        matches!(self, Self::ClientInitiator | Self::RelayInitiator)
+    }
+}
+
 /// A channel cell that we allot to be sent on an open channel from
 /// a server to a client.
 pub(crate) type OpenChanCellS2C = ChanCell<OpenChanMsgS2C>;
@@ -209,6 +239,9 @@ pub struct Channel {
 /// `control` can't be here because we rely on it getting dropped when the last user goes away.
 #[derive(Debug)]
 pub(crate) struct ChannelDetails {
+    /// The channel type.
+    #[allow(unused)] // TODO: Remove once used.
+    channel_type: ChannelType,
     /// If true, this channel is closed.
     ///
     /// Set by the reactor when it exits.
@@ -444,8 +477,12 @@ impl Channel {
     /// Internal method, called to finalize the channel when we've
     /// sent our netinfo cell, received the peer's netinfo cell, and
     /// we're finally ready to create circuits.
+    ///
+    /// Quick note on the allow clippy. This is has one call site so for now, it is fine that we
+    /// bust the mighty 7 arguments.
     #[allow(clippy::too_many_arguments)] // TODO consider if we want a builder
     fn new<S>(
+        channel_type: ChannelType,
         link_protocol: u16,
         sink: BoxedChannelSink,
         stream: BoxedChannelStream,
@@ -478,6 +515,7 @@ impl Channel {
             unused_since,
             reactor_closed_rx,
             memquota,
+            channel_type,
         };
         let details = Arc::new(details);
 
@@ -735,9 +773,9 @@ impl Channel {
     //  * It returns the mpsc Receiver
     //  * It does not require explicit specification of details
     #[cfg(feature = "testing")]
-    pub fn new_fake() -> (Channel, mpsc::UnboundedReceiver<CtrlMsg>) {
+    pub fn new_fake(channel_type: ChannelType) -> (Channel, mpsc::UnboundedReceiver<CtrlMsg>) {
         let (control, control_recv) = mpsc::unbounded();
-        let details = fake_channel_details();
+        let details = fake_channel_details(channel_type);
 
         let unique_id = UniqId::new();
         let peer_id = OwnedChanTarget::builder()
@@ -803,7 +841,7 @@ impl HasRelayIds for Channel {
 
 /// Make some fake channel details (for testing only!)
 #[cfg(any(test, feature = "testing"))]
-fn fake_channel_details() -> Arc<ChannelDetails> {
+fn fake_channel_details(channel_type: ChannelType) -> Arc<ChannelDetails> {
     let unused_since = AtomicOptTimestamp::new();
     let (_tx, rx) = oneshot::channel(); // This will make rx trigger immediately.
 
@@ -812,6 +850,7 @@ fn fake_channel_details() -> Arc<ChannelDetails> {
         reactor_closed_rx: rx.shared(),
         unused_since,
         memquota: crate::util::fake_mq(),
+        channel_type,
     })
 }
 
@@ -861,7 +900,7 @@ pub(crate) mod test {
     fn send_bad() {
         tor_rtcompat::test_with_all_runtimes!(|_rt| async move {
             use std::error::Error;
-            let chan = fake_channel(fake_channel_details());
+            let chan = fake_channel(fake_channel_details(ChannelType::ClientInitiator));
 
             let cell = AnyChanCell::new(CircId::new(7), msg::Created2::new(&b"hihi"[..]).into());
             let e = chan.sender().check_cell(&cell);
@@ -899,7 +938,7 @@ pub(crate) mod test {
 
     #[test]
     fn check_match() {
-        let chan = fake_channel(fake_channel_details());
+        let chan = fake_channel(fake_channel_details(ChannelType::ClientInitiator));
 
         let t1 = OwnedChanTarget::builder()
             .ed_identity([6; 32].into())
@@ -924,14 +963,14 @@ pub(crate) mod test {
 
     #[test]
     fn unique_id() {
-        let ch1 = fake_channel(fake_channel_details());
-        let ch2 = fake_channel(fake_channel_details());
+        let ch1 = fake_channel(fake_channel_details(ChannelType::ClientInitiator));
+        let ch2 = fake_channel(fake_channel_details(ChannelType::ClientInitiator));
         assert_ne!(ch1.unique_id(), ch2.unique_id());
     }
 
     #[test]
     fn duration_unused_at() {
-        let details = fake_channel_details();
+        let details = fake_channel_details(ChannelType::ClientInitiator);
         let ch = fake_channel(Arc::clone(&details));
         details.unused_since.update();
         assert!(ch.duration_unused().is_some());

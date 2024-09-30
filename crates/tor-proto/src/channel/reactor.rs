@@ -473,7 +473,7 @@ impl<S: SleepProvider> Reactor<S> {
 pub(crate) mod test {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::channel::UniqId;
+    use crate::channel::{ChannelType, UniqId};
     use crate::circuit::CircParameters;
     use crate::util::fake_mq;
     use futures::sink::SinkExt;
@@ -506,6 +506,7 @@ pub(crate) mod test {
             CodecError::DecCell(tor_cell::Error::ChanProto("dummy message".into()))
         });
         let (chan, reactor) = crate::channel::Channel::new(
+            ChannelType::ClientInitiator,
             link_protocol,
             Box::new(send1),
             Box::new(recv2),
