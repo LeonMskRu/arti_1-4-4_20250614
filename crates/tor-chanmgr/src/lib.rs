@@ -59,6 +59,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tor_config::ReconfigureError;
 use tor_error::error_report;
+use tor_keymgr::KeyMgr;
 use tor_linkspec::{ChanTarget, OwnedChanTarget};
 use tor_netdir::{params::NetParameters, NetDirProvider};
 use tor_proto::channel::Channel;
@@ -212,6 +213,7 @@ impl<R: Runtime> ChanMgr<R> {
         dormancy: Dormancy,
         netparams: &NetParameters,
         memquota: ToplevelAccount,
+        keymgr: Option<Arc<KeyMgr>>,
     ) -> Self
     where
         R: 'static,
@@ -220,7 +222,7 @@ impl<R: Runtime> ChanMgr<R> {
         let sender = Arc::new(std::sync::Mutex::new(sender));
         let reporter = BootstrapReporter(sender);
         let transport = transport::DefaultTransport::new(runtime.clone());
-        let builder = builder::ChanBuilder::new(runtime, transport);
+        let builder = builder::ChanBuilder::new(runtime, transport, keymgr);
         let factory = factory::CompoundFactory::new(
             Arc::new(builder),
             #[cfg(feature = "pt-client")]
@@ -355,7 +357,7 @@ impl<R: Runtime> ChanMgr<R> {
     ///
     /// Unlike [`get_or_launch`](ChanMgr::get_or_launch), this function always
     /// creates a new channel, never retries transient failure, and does not
-    /// register this channel with the `ChanMgr`.  
+    /// register this channel with the `ChanMgr`.
     ///
     /// Generally you should not use this function; `get_or_launch` is usually a
     /// better choice.  This function is the right choice if, for whatever

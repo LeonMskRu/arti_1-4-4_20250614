@@ -76,6 +76,7 @@ impl<R: Runtime> TorRelay<R> {
             Dormancy::Active,
             &NetParameters::from_map(&config.override_net_params),
             ToplevelAccount::new_noop(), // TODO RELAY get mq from TorRelay
+            Some(keymgr.clone()),
         ));
         Ok(Self {
             runtime,
