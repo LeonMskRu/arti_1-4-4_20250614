@@ -1,10 +1,12 @@
 //! Configure and implement onion service reverse-proxy feature.
 
+#[cfg(feature = "rpc")]
+use {derive_deftly::Deftly, tor_rpcbase::templates::*};
+
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
-
 use arti_client::config::onion_service::{OnionServiceConfig, OnionServiceConfigBuilder};
 use futures::{task::SpawnExt, StreamExt as _};
 use tor_config::{
@@ -13,7 +15,7 @@ use tor_config::{
 };
 use tor_error::warn_report;
 use tor_hsrproxy::{config::ProxyConfigBuilder, OnionServiceReverseProxy, ProxyConfig};
-use tor_hsservice::{HsNickname, RunningOnionService};
+use tor_hsservice::{HsId, HsNickname, RunningOnionService};
 use tor_rtcompat::Runtime;
 use tracing::debug;
 
@@ -164,15 +166,30 @@ impl From<OnionServiceProxyConfigMapBuilder> for ProxyBuilderMap {
 /// This is what a user configures when they add an onion service to their
 /// configuration.
 #[must_use = "a hidden service Proxy object will terminate the service when dropped"]
-struct Proxy {
+#[derive(Clone)]
+#[cfg_attr(
+    feature = "rpc",
+    derive(Deftly),
+    derive_deftly(Object),
+    deftly(rpc(expose_outside_of_session))
+)]
+pub(crate) struct Proxy {
     /// The onion service.
     ///
     /// This is launched and running.
-    svc: Arc<RunningOnionService>,
+    pub(crate) svc: Arc<RunningOnionService>,
     /// The reverse proxy that accepts connections from the onion service.
     ///
     /// This is also launched and running.
     proxy: Arc<OnionServiceReverseProxy>,
+}
+
+impl std::fmt::Debug for Proxy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Proxy")
+            .field("proxy", &self.proxy)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Proxy {
@@ -257,7 +274,7 @@ pub(crate) struct ProxySet<R: Runtime> {
     /// The arti_client that we use to launch proxies.
     client: arti_client::TorClient<R>,
     /// The proxies themselves, indexed by nickname.
-    proxies: Mutex<BTreeMap<HsNickname, Proxy>>,
+    proxies: Arc<RwLock<BTreeMap<HsNickname, Proxy>>>,
 }
 
 impl<R: Runtime> ProxySet<R> {
@@ -266,14 +283,15 @@ impl<R: Runtime> ProxySet<R> {
         client: &arti_client::TorClient<R>,
         config_list: OnionServiceProxyConfigMap,
     ) -> anyhow::Result<Self> {
-        let proxies: BTreeMap<_, _> = config_list
+
+        let proxies = Arc::new(RwLock::new(config_list
             .into_iter()
             .map(|(nickname, cfg)| Ok((nickname, Proxy::launch_new(client, cfg)?)))
-            .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+            .collect::<anyhow::Result<BTreeMap<_, _>>>()?));
 
         Ok(Self {
             client: client.clone(),
-            proxies: Mutex::new(proxies),
+            proxies,
         })
     }
 
@@ -288,7 +306,7 @@ impl<R: Runtime> ProxySet<R> {
         // TODO: this should probably take `how: Reconfigure` and implement an all-or-nothing mode.
         // See #1156.
     ) -> Result<(), anyhow::Error> {
-        let mut proxy_map = self.proxies.lock().expect("lock poisoned");
+        let mut proxy_map = self.proxies.write().expect("lock poisoned");
 
         // Set of the nicknames of defunct proxies.
         let mut defunct_nicknames: HashSet<_> = proxy_map.keys().map(Clone::clone).collect();
@@ -337,7 +355,7 @@ impl<R: Runtime> ProxySet<R> {
 
     /// Whether this `ProxySet` is empty.
     pub(crate) fn is_empty(&self) -> bool {
-        self.proxies.lock().expect("lock poisoned").is_empty()
+        self.proxies.read().expect("lock poisoned").is_empty()
     }
 }
 
@@ -345,5 +363,26 @@ impl<R: Runtime> crate::reload_cfg::ReconfigurableModule for ProxySet<R> {
     fn reconfigure(&self, new: &crate::ArtiCombinedConfig) -> anyhow::Result<()> {
         ProxySet::reconfigure(self, new.0.onion_services.clone())?;
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VisibleProxySet {
+    proxies: Arc<RwLock<BTreeMap<HsNickname, Proxy>>>,
+}
+
+impl<R: Runtime> From<&ProxySet<R>> for VisibleProxySet {
+    fn from(value: &ProxySet<R>) -> Self {
+        Self {
+            proxies: value.proxies.clone()
+        }
+    }
+}
+
+impl VisibleProxySet {
+    pub(crate) fn get_by_hsid(&self, hsid: &HsId) -> Option<Proxy> {
+        self.proxies.read().expect("lock poisoned").values().find(|p| {
+            p.svc.onion_name().map(|id| &id == hsid).unwrap_or(false)
+        }).map(|p| p.to_owned())
     }
 }

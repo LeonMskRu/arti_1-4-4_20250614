@@ -8,7 +8,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tor_async_utils::{DropNotifyEofSignallable, DropNotifyWatchSender};
 use tor_rpcbase::{self as rpc};
 use tor_rtcompat::Runtime;
-
+use crate::onion_proxy::VisibleProxySet;
 use super::proxyinfo::{self, ProxyInfo};
 
 /// A top-level RPC session object.
@@ -45,6 +45,7 @@ pub(crate) struct RpcVisibleArtiState {
     ///
     /// Right now it only lists Socks; in the future it may list more.
     proxy_info: postage::watch::Receiver<ProxyInfoState>,
+    onion_services: postage::watch::Receiver<OnionServicesState>,
 }
 
 /// Handle to set RPC state across RPC sessions.  (See `RpcVisibleArtiState`.)
@@ -53,6 +54,7 @@ pub(crate) struct RpcVisibleArtiState {
 pub(crate) struct RpcStateSender {
     /// Sender for setting our list of proxy ports.
     proxy_info_sender: DropNotifyWatchSender<ProxyInfoState>,
+    onion_services_sender: DropNotifyWatchSender<OnionServicesState>,
 }
 
 impl ArtiRpcSession {
@@ -95,14 +97,29 @@ impl DropNotifyEofSignallable for ProxyInfoState {
     }
 }
 
+#[derive(Debug, Clone)]
+enum OnionServicesState {
+    Unset,
+    Set(VisibleProxySet),
+    Eof,
+}
+
+impl DropNotifyEofSignallable for OnionServicesState {
+    fn eof() -> Self {
+        Self::Eof
+    }
+}
+
 impl RpcVisibleArtiState {
     /// Construct a new `RpcVisibleArtiState`.
     pub(crate) fn new() -> (Arc<Self>, RpcStateSender) {
         let (proxy_info_sender, proxy_info) = postage::watch::channel_with(ProxyInfoState::Unset);
         let proxy_info_sender = DropNotifyWatchSender::new(proxy_info_sender);
+        let (onion_services_sender, onion_services) = postage::watch::channel_with(OnionServicesState::Unset);
+        let onion_services_sender = DropNotifyWatchSender::new(onion_services_sender);
         (
-            Arc::new(Self { proxy_info }),
-            RpcStateSender { proxy_info_sender },
+            Arc::new(Self { proxy_info, onion_services }),
+            RpcStateSender { proxy_info_sender, onion_services_sender },
         )
     }
 
@@ -118,6 +135,20 @@ impl RpcVisibleArtiState {
                 }
                 ProxyInfoState::Set(proxyinfo) => return Ok(Arc::clone(&proxyinfo)),
                 ProxyInfoState::Eof => return Err(()),
+            }
+        }
+        Err(())
+    }
+
+    pub (super) async fn get_onion_services(&self) -> Result<VisibleProxySet, ()> {
+        let mut onion_services = self.onion_services.clone();
+        while let Some(v) = onion_services.next().await {
+            match v {
+                OnionServicesState::Unset => {
+                    // Not yet set, try again.
+                }
+                OnionServicesState::Set(o) => return Ok(o),
+                OnionServicesState::Eof => return Err(()),
             }
         }
         Err(())
@@ -140,6 +171,10 @@ impl RpcStateSender {
                 .collect(),
         };
         *self.proxy_info_sender.borrow_mut() = ProxyInfoState::Set(Arc::new(info));
+    }
+
+    pub(crate) fn set_onion_services(&mut self, onion_services: VisibleProxySet) {
+        *self.onion_services_sender.borrow_mut() = OnionServicesState::Set(onion_services);
     }
 }
 

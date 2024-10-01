@@ -120,11 +120,34 @@ async fn run_proxy<R: Runtime>(
         Arc::new(reload_cfg::Application::new(arti_config.clone())),
     ];
 
+    #[cfg(all(feature = "rpc", feature = "tokio"))]
+    let mut rpc_data = {
+        // TODO RPC This code doesn't really belong here; it's just an example.
+        if let Some(listen_path) = rpc_path {
+            let (rpc_state, rpc_state_sender) = rpc::RpcVisibleArtiState::new();
+            // TODO Conceivably this listener belongs on a renamed "proxy" list.
+            let rpc_mgr =
+                rpc::launch_rpc_listener(&runtime, listen_path, client.clone(), rpc_state)?;
+            Some((rpc_mgr, rpc_state_sender))
+        } else {
+            None
+        }
+    };
+
     cfg_if::cfg_if! {
         if #[cfg(feature = "onion-service-service")] {
             let onion_services =
                 onion_proxy::ProxySet::launch_new(&client, arti_config.onion_services.clone())?;
             let launched_onion_svc = !onion_services.is_empty();
+
+            cfg_if::cfg_if! {
+                if #[cfg(feature="rpc")] {
+                    if let Some(rpc_data) = &mut rpc_data {
+                        rpc_data.1.set_onion_services((&onion_services).into());
+                    }
+                }
+            }
+
             reconfigurable_modules.push(Arc::new(onion_services));
         } else {
             let launched_onion_svc = false;
@@ -143,20 +166,6 @@ async fn run_proxy<R: Runtime>(
         &arti_config,
         weak_modules,
     )?;
-
-    #[cfg(all(feature = "rpc", feature = "tokio"))]
-    let rpc_data = {
-        // TODO RPC This code doesn't really belong here; it's just an example.
-        if let Some(listen_path) = rpc_path {
-            let (rpc_state, rpc_state_sender) = rpc::RpcVisibleArtiState::new();
-            // TODO Conceivably this listener belongs on a renamed "proxy" list.
-            let rpc_mgr =
-                rpc::launch_rpc_listener(&runtime, listen_path, client.clone(), rpc_state)?;
-            Some((rpc_mgr, rpc_state_sender))
-        } else {
-            None
-        }
-    };
 
     let mut proxy: Vec<PinnedFuture<(Result<()>, &str)>> = Vec::new();
     if !socks_listen.is_empty() {

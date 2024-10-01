@@ -12,6 +12,7 @@ use tor_rtcompat::Runtime;
 pub(crate) mod conntarget;
 mod proxyinfo;
 mod session;
+mod onion_service;
 
 pub(crate) use session::{RpcStateSender, RpcVisibleArtiState};
 

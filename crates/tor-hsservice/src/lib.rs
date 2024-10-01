@@ -82,6 +82,7 @@ pub mod time_store_for_doctests_unstable_no_semver_guarantees {
     pub use crate::time_store::*;
 }
 
+use std::rc::Weak;
 use internal_prelude::*;
 
 // ---------- public exports ----------
@@ -101,7 +102,7 @@ pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
 
 pub use helpers::handle_rend_requests;
-
+use crate::config::CAARecordList;
 //---------- top-level service implementation (types and methods) ----------
 
 /// Convenience alias for link specifiers of an intro point
@@ -133,6 +134,7 @@ pub struct RunningOnionService {
 struct SvcInner {
     /// Configuration information about this service.
     config_tx: postage::watch::Sender<Arc<OnionServiceConfig>>,
+    config: Arc<OnionServiceConfig>,
 
     /// A oneshot that will be dropped when this object is dropped.
     _shutdown_tx: postage::broadcast::Sender<void::Void>,
@@ -288,7 +290,8 @@ impl OnionService {
 
         let (rend_req_tx, rend_req_rx) = mpsc::channel(32);
         let (shutdown_tx, shutdown_rx) = broadcast::channel(0);
-        let (config_tx, config_rx) = postage::watch::channel_with(Arc::new(config));
+        let config = Arc::new(config);
+        let (config_tx, config_rx) = postage::watch::channel_with(config.clone());
 
         let (ipt_mgr_view, publisher_view) =
             crate::ipt_set::ipts_channel(&runtime, iptpub_storage_handle)?;
@@ -326,6 +329,7 @@ impl OnionService {
             keymgr,
             inner: Mutex::new(SvcInner {
                 config_tx,
+                config,
                 _shutdown_tx: shutdown_tx,
                 status_tx,
                 unlaunched: Some((
@@ -352,6 +356,21 @@ impl OnionService {
     /// keystores.
     pub fn onion_name(&self) -> Option<HsId> {
         onion_name(&self.keymgr, &self.config.nickname)
+    }
+
+    /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
+    /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
+    /// Baseline Requirements.
+    ///
+    /// The CA nonce must be equal to or less than 32 bytes.
+    pub fn onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
+        onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
+    }
+
+    /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
+    /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
+    pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
+        onion_caa(&self.keymgr, &self.config.nickname, &self.config.caa, expiry)
     }
 
     /// Generate an identity key (KP_hs_id) for this service.
@@ -402,15 +421,24 @@ impl RunningOnionService {
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
+        let mut new_config_w = std::sync::Weak::<OnionServiceConfig>::new();
         inner.config_tx.try_maybe_send(|cur_config| {
             let new_config = cur_config.for_transition_to(new_config, how)?;
-            Ok(match how {
+            Ok::<_, ReconfigureError>(match how {
                 // We're only checking, so return the current configuration.
                 tor_config::Reconfigure::CheckAllOrNothing => Arc::clone(cur_config),
                 // We're replacing the configuration, and we didn't get an error.
-                _ => Arc::new(new_config),
+                _ => {
+                    let config = Arc::new(new_config);
+                    new_config_w = Arc::downgrade(&config);
+                    config
+                },
             })
-        })
+        })?;
+        if let Some(new_config) = new_config_w.upgrade() {
+            inner.config = new_config;
+        }
+        Ok(())
 
         // TODO (#1153, #1209): We need to make sure that the various tasks listening on
         // config_rx actually enforce the configuration, not only on new
@@ -490,6 +518,22 @@ impl RunningOnionService {
     pub fn onion_name(&self) -> Option<HsId> {
         onion_name(&self.keymgr, &self.nickname)
     }
+
+    /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
+    /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
+    /// Baseline Requirements.
+    ///
+    /// The CA nonce must be equal to or less than 32 bytes.
+    pub fn onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
+        onion_csr(&self.keymgr, &self.nickname, ca_nonce)
+    }
+
+    /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
+    /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
+    pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
+        let mut inner = self.inner.lock().expect("lock poisoned");
+        onion_caa(&self.keymgr, &self.nickname, &inner.config.caa, expiry)
+    }
 }
 
 /// Generate the identity key of the service, unless it already exists or `offline_hsid` is `true`.
@@ -568,6 +612,141 @@ fn onion_name(keymgr: &KeyMgr, nickname: &HsNickname) -> Option<HsId> {
         .get::<HsIdKey>(&hsid_spec)
         .ok()?
         .map(|hsid| hsid.id())
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum OnionCsrError {
+    KeyNotFound,
+    CANonceTooLong
+}
+
+fn onion_csr(keymgr: &KeyMgr, nickname: &HsNickname, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
+    if ca_nonce.len() > 32 {
+        return Err(OnionCsrError::CANonceTooLong);
+    }
+
+    let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
+    let hs_key = Into::<ed25519::ExpandedKeypair>::into(
+        keymgr.get::<HsIdKeypair>(&hsid_spec).map_err(|_| OnionCsrError::KeyNotFound)?
+            .ok_or(OnionCsrError::KeyNotFound)?
+    );
+
+    let mut rng = rand::thread_rng();
+    let mut applicant_nonce = [0u8; 10];
+    rng.fill(&mut applicant_nonce);
+    drop(rng);
+
+    // See RFC 2986 for format details
+    let mut csr = vec![
+        // CertificationRequest SEQUENCE
+        48, 129, 161,
+            // CertificationRequestInfo SEQUENCE
+            48, 85,
+                // version INTEGER
+                2, 1, 0,
+                // subject Name
+                48, 0,
+                // subjectPKInfo SubjectPublicKeyInfo
+                48, 42,
+                    // algorithm AlgorithmIdentifier
+                    48, 5,
+                        // algorithm OBJECT IDENTIFIER - id-Ed25519
+                        6, 3, 43, 101, 112,
+                    // subjectPublicKey BIT STRING
+                    3, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                // attributes [0] Attributes
+                160, 34,
+                    // Attribute SEQUENCE
+                    48, 20,
+                        // type OBJECT IDENTIFIER - cabf-caApplicantNonce
+                        6, 4, 103, 129, 12, 42,
+                        // values SET
+                        49, 12,
+                            // OCTET STRING
+                            4, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    // Attribute SEQUENCE
+                    48, 10,
+                        // type OBJECT IDENTIFIER - cabf-caSigningNonce
+                        6, 4, 103, 129, 12, 41,
+                        // values SET
+                        49, 2,
+                            // OCTET STRING
+                            4, 0,
+    ];
+    // Copy public key into subjectPublicKey
+    csr[22..54].copy_from_slice(&hs_key.public().to_bytes());
+    // Copy random value into cabf-caApplicantNonce
+    csr[68..78].copy_from_slice(&applicant_nonce);
+
+    // Copy CA random value into cabf-caSigningNonce
+    csr.extend_from_slice(&ca_nonce);
+    let ca_nonce_len = ca_nonce.len() as u8;
+    // Update DER lengths to accommodate CA random value length
+    csr[89] += ca_nonce_len;
+    csr[87] += ca_nonce_len;
+    csr[79] += ca_nonce_len;
+    csr[55] += ca_nonce_len;
+    csr[4] += ca_nonce_len;
+    csr[2] += ca_nonce_len;
+
+    // Sign TBS part
+    let signature = hs_key.sign(&csr[3..]);
+
+    // Add objects that come after TBS part
+    csr.extend_from_slice(&[
+            // signatureAlgorithm AlgorithmIdentifier
+            48, 5,
+                // algorithm OBJECT IDENTIFIER - id-Ed25519
+                6, 3, 43, 101, 112,
+            // signature BIT STRING
+            3, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+
+    // Insert signature
+    csr[100+ca_nonce_len as usize..164+ca_nonce_len as usize].copy_from_slice(signature.to_bytes().as_slice());
+    Ok(csr)
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum OnionCaaError {
+    KeyNotFound,
+    InvalidSystemTime,
+}
+
+#[derive(Debug)]
+pub struct OnionCaa {
+    pub caa: String,
+    pub expiry: u64,
+    pub signature: Vec<u8>
+}
+
+fn onion_caa(keymgr: &KeyMgr, nickname: &HsNickname, caa: &CAARecordList, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
+    let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
+    let hs_key = Into::<ed25519::ExpandedKeypair>::into(
+        keymgr.get::<HsIdKeypair>(&hsid_spec).map_err(|_| OnionCaaError::KeyNotFound)?
+            .ok_or(OnionCaaError::KeyNotFound)?
+    );
+
+    let now = SystemTime::now();
+    let expiry = now + Duration::from_secs(expiry);
+    let expiry_unix = expiry.duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| OnionCaaError::InvalidSystemTime)?
+        .as_secs();
+
+    let caa_rrset = caa.iter()
+        .map(|r| format!("caa {} {} \"{}\"", r.flags, r.tag, r.value.replace("\"", "\\\"")))
+        .join("\n");
+
+    let tbs = format!("onion-caa|{}|{}", expiry_unix, caa_rrset);
+    let signature = hs_key.sign(tbs.as_bytes());
+
+    Ok(OnionCaa {
+        caa: caa_rrset,
+        expiry: expiry_unix,
+        signature: signature.to_vec()
+    })
 }
 
 #[cfg(test)]
