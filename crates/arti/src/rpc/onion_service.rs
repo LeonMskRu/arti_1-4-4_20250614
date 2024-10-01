@@ -8,7 +8,7 @@ use tor_rpcbase::{self as rpc, ObjectId};
 
 #[derive(Debug, serde::Deserialize, derive_deftly::Deftly)]
 #[derive_deftly(rpc::DynMethod)]
-#[deftly(rpc(method_name = "arti:get_onion_service"))]
+#[deftly(rpc(method_name = "arti:x_acme_get_onion_service"))]
 struct GetOnionService {
     domain: String,
 }
@@ -45,7 +45,7 @@ impl HasKind for GetOnionServiceError {
 
 #[derive(Debug, serde::Deserialize, derive_deftly::Deftly)]
 #[derive_deftly(rpc::DynMethod)]
-#[deftly(rpc(method_name = "arti:onion_service_name"))]
+#[deftly(rpc(method_name = "arti:x_acme_onion_service_name"))]
 struct OnionServiceName {}
 
 impl rpc::RpcMethod for OnionServiceName {
@@ -74,7 +74,7 @@ impl HasKind for OnionServiceNameError {
 
 #[derive(Debug, serde::Deserialize, derive_deftly::Deftly)]
 #[derive_deftly(rpc::DynMethod)]
-#[deftly(rpc(method_name = "arti:onion_service_csr"))]
+#[deftly(rpc(method_name = "arti:x_acme_onion_service_csr"))]
 struct OnionServiceCsr {
     ca_nonce: String,
 }
@@ -111,7 +111,7 @@ impl HasKind for OnionServiceCsrError {
 
 #[derive(Debug, serde::Deserialize, derive_deftly::Deftly)]
 #[derive_deftly(rpc::DynMethod)]
-#[deftly(rpc(method_name = "arti:onion_service_caa"))]
+#[deftly(rpc(method_name = "arti:x_acme_onion_service_caa"))]
 struct OnionServiceCaa {
     expiry: u64,
 }

@@ -83,7 +83,6 @@ pub mod time_store_for_doctests_unstable_no_semver_guarantees {
 }
 
 use internal_prelude::*;
-use std::rc::Weak;
 
 // ---------- public exports ----------
 
@@ -536,7 +535,7 @@ impl RunningOnionService {
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
     pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
-        let mut inner = self.inner.lock().expect("lock poisoned");
+        let inner = self.inner.lock().expect("lock poisoned");
         onion_caa(&self.keymgr, &self.nickname, &inner.config.caa, expiry)
     }
 }
@@ -619,9 +618,12 @@ fn onion_name(keymgr: &KeyMgr, nickname: &HsNickname) -> Option<HsId> {
         .map(|hsid| hsid.id())
 }
 
+/// Possible errors when creating a CSR for an Onion Service
 #[derive(Debug, Copy, Clone)]
 pub enum OnionCsrError {
+    /// Arti can't find the key for this service
     KeyNotFound,
+    /// The CA nonce was too long to fit
     CANonceTooLong,
 }
 
@@ -723,16 +725,23 @@ fn onion_csr(
     Ok(csr)
 }
 
+/// Possible errors when creating a CAA document for an Onion Service
 #[derive(Debug, Copy, Clone)]
 pub enum OnionCaaError {
+    /// Arti can't find the key for this service
     KeyNotFound,
+    /// The system clock is bogus
     InvalidSystemTime,
 }
 
+/// A CAA document per draft-ietf-acme-onion
 #[derive(Debug)]
 pub struct OnionCaa {
+    /// CAA RRSet
     pub caa: String,
+    /// Expiry UNIX timestamp
     pub expiry: u64,
+    /// Document signature
     pub signature: Vec<u8>,
 }
 
