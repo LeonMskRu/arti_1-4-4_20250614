@@ -98,6 +98,7 @@ phf = { version = "0.11.1", features = ["macros"] }
 rand = { version = "0.8", optional = true }
 serde = "1.0.103"
 serde_with = "3.0.0"
+shell-words = "1"
 signature = "2"
 smallvec = "1.10"
 subtle = "2"
@@ -120,7 +121,6 @@ visible = { version = "0.0.1", optional = true }
 void = "1"
 weak-table = "0.3.0"
 zeroize = "1"
-shell-words = "1"
 
 [dev-dependencies]
 anyhow = "1.0.23"
