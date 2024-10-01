@@ -1,5 +1,7 @@
 //! Declare the RPC session object as exposed from the RPC server run by the `arti` crate.
 
+use super::proxyinfo::{self, ProxyInfo};
+use crate::onion_proxy::VisibleProxySet;
 use arti_client::TorClient;
 use arti_rpcserver::RpcAuthentication;
 use derive_deftly::Deftly;
@@ -8,8 +10,6 @@ use std::{net::SocketAddr, sync::Arc};
 use tor_async_utils::{DropNotifyEofSignallable, DropNotifyWatchSender};
 use tor_rpcbase::{self as rpc};
 use tor_rtcompat::Runtime;
-use crate::onion_proxy::VisibleProxySet;
-use super::proxyinfo::{self, ProxyInfo};
 
 /// A top-level RPC session object.
 ///
@@ -115,11 +115,18 @@ impl RpcVisibleArtiState {
     pub(crate) fn new() -> (Arc<Self>, RpcStateSender) {
         let (proxy_info_sender, proxy_info) = postage::watch::channel_with(ProxyInfoState::Unset);
         let proxy_info_sender = DropNotifyWatchSender::new(proxy_info_sender);
-        let (onion_services_sender, onion_services) = postage::watch::channel_with(OnionServicesState::Unset);
+        let (onion_services_sender, onion_services) =
+            postage::watch::channel_with(OnionServicesState::Unset);
         let onion_services_sender = DropNotifyWatchSender::new(onion_services_sender);
         (
-            Arc::new(Self { proxy_info, onion_services }),
-            RpcStateSender { proxy_info_sender, onion_services_sender },
+            Arc::new(Self {
+                proxy_info,
+                onion_services,
+            }),
+            RpcStateSender {
+                proxy_info_sender,
+                onion_services_sender,
+            },
         )
     }
 
@@ -140,7 +147,7 @@ impl RpcVisibleArtiState {
         Err(())
     }
 
-    pub (super) async fn get_onion_services(&self) -> Result<VisibleProxySet, ()> {
+    pub(super) async fn get_onion_services(&self) -> Result<VisibleProxySet, ()> {
         let mut onion_services = self.onion_services.clone();
         while let Some(v) = onion_services.next().await {
             match v {

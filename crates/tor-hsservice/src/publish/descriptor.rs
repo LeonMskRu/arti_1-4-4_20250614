@@ -114,13 +114,18 @@ pub(super) fn build_sign<Rng: RngCore + CryptoRng>(
         "failed to sign the descriptor signing key"
     ))?;
 
-    let caa = config.caa.iter().map(|caa_entry| Ok(CAABuilder::default()
-        .flags(caa_entry.flags)
-        .tag(caa_entry.tag.clone())
-        .value(caa_entry.value.clone())
-        .build()
-        .map_err(|e| into_internal!("failed to build CAA")(e))?
-    )).collect::<Result<Vec<CAA>, FatalError>>()?;
+    let caa = config
+        .caa
+        .iter()
+        .map(|caa_entry| {
+            Ok(CAABuilder::default()
+                .flags(caa_entry.flags)
+                .tag(caa_entry.tag.clone())
+                .value(caa_entry.value.clone())
+                .build()
+                .map_err(|e| into_internal!("failed to build CAA")(e))?)
+        })
+        .collect::<Result<Vec<CAA>, FatalError>>()?;
 
     let desc = HsDescBuilder::default()
         .blinded_id(&(&blind_id_kp).into())

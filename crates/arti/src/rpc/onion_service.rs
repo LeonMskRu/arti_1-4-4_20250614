@@ -1,16 +1,16 @@
+use super::session::ArtiRpcSession;
+use crate::onion_proxy::Proxy;
+use base64ct::Encoding;
 use std::sync::Arc;
 use tor_error::{ErrorKind, HasKind};
 use tor_hsservice::{HsId, OnionCaaError, OnionCsrError};
 use tor_rpcbase::{self as rpc, ObjectId};
-use crate::onion_proxy::Proxy;
-use super::session::ArtiRpcSession;
-use base64ct::Encoding;
 
 #[derive(Debug, serde::Deserialize, derive_deftly::Deftly)]
 #[derive_deftly(rpc::DynMethod)]
 #[deftly(rpc(method_name = "arti:get_onion_service"))]
 struct GetOnionService {
-    domain: String
+    domain: String,
 }
 
 impl rpc::RpcMethod for GetOnionService {
@@ -20,7 +20,7 @@ impl rpc::RpcMethod for GetOnionService {
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub(super) struct OnionServiceInfo {
-    service: ObjectId
+    service: ObjectId,
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -30,7 +30,7 @@ enum GetOnionServiceError {
     #[error("Invalid onion address")]
     BadOnionAddress(#[from] tor_hscrypto::pk::HsIdParseError),
     #[error("Onion service not found")]
-    NotFound
+    NotFound,
 }
 
 impl HasKind for GetOnionServiceError {
@@ -38,7 +38,7 @@ impl HasKind for GetOnionServiceError {
         match self {
             Self::Shutdown => ErrorKind::ArtiShuttingDown,
             Self::BadOnionAddress(_) => ErrorKind::OnionServiceAddressInvalid,
-            Self::NotFound => ErrorKind::OnionServiceNotFound
+            Self::NotFound => ErrorKind::OnionServiceNotFound,
         }
     }
 }
@@ -55,7 +55,7 @@ impl rpc::RpcMethod for OnionServiceName {
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub(super) struct OnionServiceNameResponse {
-    name: String
+    name: String,
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -76,7 +76,7 @@ impl HasKind for OnionServiceNameError {
 #[derive_deftly(rpc::DynMethod)]
 #[deftly(rpc(method_name = "arti:onion_service_csr"))]
 struct OnionServiceCsr {
-    ca_nonce: String
+    ca_nonce: String,
 }
 
 impl rpc::RpcMethod for OnionServiceCsr {
@@ -86,7 +86,7 @@ impl rpc::RpcMethod for OnionServiceCsr {
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub(super) struct OnionServiceCsrResponse {
-    csr: String
+    csr: String,
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -96,7 +96,7 @@ enum OnionServiceCsrError {
     #[error("The signing key for the onion service couldn't be found")]
     KeyNotFound,
     #[error("The CA nonce is too long")]
-    CANonceTooLong
+    CANonceTooLong,
 }
 
 impl HasKind for OnionServiceCsrError {
@@ -113,7 +113,7 @@ impl HasKind for OnionServiceCsrError {
 #[derive_deftly(rpc::DynMethod)]
 #[deftly(rpc(method_name = "arti:onion_service_caa"))]
 struct OnionServiceCaa {
-    expiry: u64
+    expiry: u64,
 }
 
 impl rpc::RpcMethod for OnionServiceCaa {
@@ -133,7 +133,7 @@ enum OnionServiceCaaError {
     #[error("The signing key for the onion service couldn't be found")]
     KeyNotFound,
     #[error("The system clock time makes no sense")]
-    InvalidSystemTime
+    InvalidSystemTime,
 }
 
 impl HasKind for OnionServiceCaaError {
@@ -150,7 +150,8 @@ async fn rpc_session_get_onion_service(
     method: Box<GetOnionService>,
     ctx: Arc<dyn rpc::Context>,
 ) -> Result<OnionServiceInfo, GetOnionServiceError> {
-    let rhs = method.domain
+    let rhs = method
+        .domain
         .rmatch_indices('.')
         .nth(1)
         .map(|(i, _)| i + 1)
@@ -158,16 +159,19 @@ async fn rpc_session_get_onion_service(
     let rhs = &method.domain[rhs..];
     let hsid: HsId = rhs.parse()?;
 
-    let onion_services = session.arti_state.get_onion_services().await
+    let onion_services = session
+        .arti_state
+        .get_onion_services()
+        .await
         .map_err(|_| GetOnionServiceError::Shutdown)?;
 
     let onion_service = match onion_services.get_by_hsid(&hsid) {
         Some(s) => s,
-        None => return Err(GetOnionServiceError::NotFound)
+        None => return Err(GetOnionServiceError::NotFound),
     };
 
     Ok(OnionServiceInfo {
-        service: ctx.register_owned(Arc::new(onion_service))
+        service: ctx.register_owned(Arc::new(onion_service)),
     })
 }
 rpc::static_rpc_invoke_fn! {rpc_session_get_onion_service;}
@@ -177,11 +181,13 @@ async fn rpc_onion_service_name(
     _method: Box<OnionServiceName>,
     _ctx: Arc<dyn rpc::Context>,
 ) -> Result<OnionServiceNameResponse, OnionServiceNameError> {
-    let name = onion_service.svc.onion_name()
+    let name = onion_service
+        .svc
+        .onion_name()
         .ok_or(OnionServiceNameError::KeyNotFound)?;
 
     Ok(OnionServiceNameResponse {
-        name: name.to_string()
+        name: name.to_string(),
     })
 }
 rpc::static_rpc_invoke_fn! {rpc_onion_service_name;}
@@ -194,13 +200,16 @@ async fn rpc_onion_service_csr(
     let ca_nonce = base64ct::Base64::decode_vec(&method.ca_nonce)
         .map_err(|_| OnionServiceCsrError::InvalidBase64)?;
 
-    let csr = onion_service.svc.onion_csr(&ca_nonce).map_err(|e| match e {
-        OnionCsrError::CANonceTooLong => OnionServiceCsrError::CANonceTooLong,
-        OnionCsrError::KeyNotFound => OnionServiceCsrError::KeyNotFound
-    })?;
+    let csr = onion_service
+        .svc
+        .onion_csr(&ca_nonce)
+        .map_err(|e| match e {
+            OnionCsrError::CANonceTooLong => OnionServiceCsrError::CANonceTooLong,
+            OnionCsrError::KeyNotFound => OnionServiceCsrError::KeyNotFound,
+        })?;
 
     Ok(OnionServiceCsrResponse {
-        csr: base64ct::Base64::encode_string(&csr)
+        csr: base64ct::Base64::encode_string(&csr),
     })
 }
 rpc::static_rpc_invoke_fn! {rpc_onion_service_csr;}
@@ -210,15 +219,18 @@ async fn rpc_onion_service_caa(
     method: Box<OnionServiceCaa>,
     _ctx: Arc<dyn rpc::Context>,
 ) -> Result<OnionServiceCaaResponse, OnionServiceCaaError> {
-    let caa = onion_service.svc.onion_caa(method.expiry).map_err(|e| match e {
-        OnionCaaError::KeyNotFound => OnionServiceCaaError::KeyNotFound,
-        OnionCaaError::InvalidSystemTime => OnionServiceCaaError::InvalidSystemTime,
-    })?;
+    let caa = onion_service
+        .svc
+        .onion_caa(method.expiry)
+        .map_err(|e| match e {
+            OnionCaaError::KeyNotFound => OnionServiceCaaError::KeyNotFound,
+            OnionCaaError::InvalidSystemTime => OnionServiceCaaError::InvalidSystemTime,
+        })?;
 
     Ok(OnionServiceCaaResponse {
         caa: caa.caa,
         expiry: caa.expiry,
-        signature: base64ct::Base64::encode_string(&caa.signature)
+        signature: base64ct::Base64::encode_string(&caa.signature),
     })
 }
 rpc::static_rpc_invoke_fn! {rpc_onion_service_caa;}

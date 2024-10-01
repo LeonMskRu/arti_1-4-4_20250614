@@ -370,6 +370,8 @@ mod test {
     #[allow(unused_imports)] // depends on features
     use tor_error::ErrorReport as _;
 
+    use super::*;
+    use tor_hsservice::config::CAARecordBuilder;
     #[cfg(feature = "restricted-discovery")]
     use {
         arti_client::HsClientDescEncKey,
@@ -378,8 +380,6 @@ mod test {
             DirectoryKeyProviderBuilder, HsClientNickname,
         },
     };
-    use tor_hsservice::config::CAARecordBuilder;
-    use super::*;
 
     //---------- tests that rely on the provided example config file ----------
     //
@@ -1323,10 +1323,7 @@ example config file {which:?}, uncommented={uncommented:?}
                 caa.flags(128);
                 caa.tag("issue".into());
                 caa.value("test.acmeforonions.org; validationmethods=onion-csr-01".into());
-                b.service()
-                    .caa()
-                    .access()
-                    .push(caa);
+                b.service().caa().access().push(caa);
 
                 b.build().unwrap()
             };

@@ -113,9 +113,8 @@ pub struct HsDesc {
     // TODO:  When someday we add a "create2 format" other than "hs-ntor", we
     // should turn this into a caret enum, record this info, and expose it.
     // create2_formats: Vec<u32>,
-
     /// CAA records
-    caa: Vec<CAA>
+    caa: Vec<CAA>,
 }
 
 /// A type of authentication that is required when introducing to an onion
@@ -357,7 +356,9 @@ impl HsDesc {
     }
 
     /// The CAA records for this onion service
-    pub fn caa(&self) -> &[CAA] { &self.caa }
+    pub fn caa(&self) -> &[CAA] {
+        &self.caa
+    }
 }
 
 /// An error returned by [`HsDesc::parse_decrypt_validate`], indicating what

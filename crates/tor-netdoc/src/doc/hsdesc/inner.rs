@@ -41,7 +41,7 @@ pub(crate) struct HsDescInner {
     // Always has >= 1 and <= NUM_INTRO_POINT_MAX entries
     pub(super) intro_points: Vec<IntroPointDesc>,
     /// CAA records
-    pub (super) caa: Vec<CAA>,
+    pub(super) caa: Vec<CAA>,
 }
 
 decl_keyword! {
@@ -425,7 +425,8 @@ impl HsDescInner {
             if args.len() != 3 {
                 return Err(EK::TooManyArguments.with_msg("CAA entries must have 3 arguments"));
             }
-            let flags: u8 = args[0].parse()
+            let flags: u8 = args[0]
+                .parse()
                 .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA flags: {}", e)))?;
             let tag = &args[1];
             if !tag.is_ascii() {
@@ -442,7 +443,7 @@ impl HsDescInner {
             intro_auth_types: auth_types,
             single_onion_service: is_single_onion_service,
             intro_points,
-            caa
+            caa,
         };
         let sig_gated = SignatureGated::new(inner, signatures);
         let time_bound = match expirations.iter().min() {

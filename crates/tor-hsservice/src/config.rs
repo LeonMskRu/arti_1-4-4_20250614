@@ -7,7 +7,9 @@ use derive_deftly::derive_deftly_adhoc;
 use tor_cell::relaycell::hs::est_intro;
 use tor_config::define_list_builder_helper;
 
-use crate::config::restricted_discovery::{RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder};
+use crate::config::restricted_discovery::{
+    RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder,
+};
 
 #[cfg(feature = "restricted-discovery")]
 pub mod restricted_discovery;
@@ -90,7 +92,6 @@ pub struct OnionServiceConfig {
     // /// our proof-of-work defense is enabled.
     // pow_queue_rate: TokenBucketConfig,
     // ...
-
     /// CAA records to publish for the onion service
     #[builder(default, sub_builder(fn_name = "build"))]
     #[builder_field_attr(serde(default))]

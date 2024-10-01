@@ -88,7 +88,8 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
         }
 
         for caa_entry in caa {
-            encoder.item(CAA)
+            encoder
+                .item(CAA)
                 .arg(&caa_entry.flags)
                 .arg(&caa_entry.tag)
                 .arg(&format!("\"{}\"", caa_entry.value.replace("\"", "\\\"")));
@@ -281,7 +282,7 @@ mod test {
         let caa = &[CAA {
             flags: 128,
             tag: "issue".into(),
-            value: "test.acmeforonions.org".into()
+            value: "test.acmeforonions.org".into(),
         }];
 
         let hs_desc = create_inner_desc(

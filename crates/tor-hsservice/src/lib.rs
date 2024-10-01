@@ -82,8 +82,8 @@ pub mod time_store_for_doctests_unstable_no_semver_guarantees {
     pub use crate::time_store::*;
 }
 
-use std::rc::Weak;
 use internal_prelude::*;
+use std::rc::Weak;
 
 // ---------- public exports ----------
 
@@ -101,8 +101,8 @@ pub use publish::UploadError as DescUploadError;
 pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
 
-pub use helpers::handle_rend_requests;
 use crate::config::CAARecordList;
+pub use helpers::handle_rend_requests;
 //---------- top-level service implementation (types and methods) ----------
 
 /// Convenience alias for link specifiers of an intro point
@@ -370,7 +370,12 @@ impl OnionService {
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
     pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
-        onion_caa(&self.keymgr, &self.config.nickname, &self.config.caa, expiry)
+        onion_caa(
+            &self.keymgr,
+            &self.config.nickname,
+            &self.config.caa,
+            expiry,
+        )
     }
 
     /// Generate an identity key (KP_hs_id) for this service.
@@ -432,7 +437,7 @@ impl RunningOnionService {
                     let config = Arc::new(new_config);
                     new_config_w = Arc::downgrade(&config);
                     config
-                },
+                }
             })
         })?;
         if let Some(new_config) = new_config_w.upgrade() {
@@ -617,18 +622,24 @@ fn onion_name(keymgr: &KeyMgr, nickname: &HsNickname) -> Option<HsId> {
 #[derive(Debug, Copy, Clone)]
 pub enum OnionCsrError {
     KeyNotFound,
-    CANonceTooLong
+    CANonceTooLong,
 }
 
-fn onion_csr(keymgr: &KeyMgr, nickname: &HsNickname, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
+fn onion_csr(
+    keymgr: &KeyMgr,
+    nickname: &HsNickname,
+    ca_nonce: &[u8],
+) -> Result<Vec<u8>, OnionCsrError> {
     if ca_nonce.len() > 32 {
         return Err(OnionCsrError::CANonceTooLong);
     }
 
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
     let hs_key = Into::<ed25519::ExpandedKeypair>::into(
-        keymgr.get::<HsIdKeypair>(&hsid_spec).map_err(|_| OnionCsrError::KeyNotFound)?
-            .ok_or(OnionCsrError::KeyNotFound)?
+        keymgr
+            .get::<HsIdKeypair>(&hsid_spec)
+            .map_err(|_| OnionCsrError::KeyNotFound)?
+            .ok_or(OnionCsrError::KeyNotFound)?,
     );
 
     let mut rng = rand::thread_rng();
@@ -637,6 +648,7 @@ fn onion_csr(keymgr: &KeyMgr, nickname: &HsNickname, ca_nonce: &[u8]) -> Result<
     drop(rng);
 
     // See RFC 2986 for format details
+    #[rustfmt::skip]
     let mut csr = vec![
         // CertificationRequest SEQUENCE
         48, 129, 161,
@@ -693,6 +705,7 @@ fn onion_csr(keymgr: &KeyMgr, nickname: &HsNickname, ca_nonce: &[u8]) -> Result<
     let signature = hs_key.sign(&csr[3..]);
 
     // Add objects that come after TBS part
+    #[rustfmt::skip]
     csr.extend_from_slice(&[
             // signatureAlgorithm AlgorithmIdentifier
             48, 5,
@@ -705,7 +718,8 @@ fn onion_csr(keymgr: &KeyMgr, nickname: &HsNickname, ca_nonce: &[u8]) -> Result<
     ]);
 
     // Insert signature
-    csr[100+ca_nonce_len as usize..164+ca_nonce_len as usize].copy_from_slice(signature.to_bytes().as_slice());
+    csr[100 + ca_nonce_len as usize..164 + ca_nonce_len as usize]
+        .copy_from_slice(signature.to_bytes().as_slice());
     Ok(csr)
 }
 
@@ -719,24 +733,40 @@ pub enum OnionCaaError {
 pub struct OnionCaa {
     pub caa: String,
     pub expiry: u64,
-    pub signature: Vec<u8>
+    pub signature: Vec<u8>,
 }
 
-fn onion_caa(keymgr: &KeyMgr, nickname: &HsNickname, caa: &CAARecordList, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
+fn onion_caa(
+    keymgr: &KeyMgr,
+    nickname: &HsNickname,
+    caa: &CAARecordList,
+    expiry: u64,
+) -> Result<OnionCaa, OnionCaaError> {
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
     let hs_key = Into::<ed25519::ExpandedKeypair>::into(
-        keymgr.get::<HsIdKeypair>(&hsid_spec).map_err(|_| OnionCaaError::KeyNotFound)?
-            .ok_or(OnionCaaError::KeyNotFound)?
+        keymgr
+            .get::<HsIdKeypair>(&hsid_spec)
+            .map_err(|_| OnionCaaError::KeyNotFound)?
+            .ok_or(OnionCaaError::KeyNotFound)?,
     );
 
     let now = SystemTime::now();
     let expiry = now + Duration::from_secs(expiry);
-    let expiry_unix = expiry.duration_since(std::time::UNIX_EPOCH)
+    let expiry_unix = expiry
+        .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| OnionCaaError::InvalidSystemTime)?
         .as_secs();
 
-    let caa_rrset = caa.iter()
-        .map(|r| format!("caa {} {} \"{}\"", r.flags, r.tag, r.value.replace("\"", "\\\"")))
+    let caa_rrset = caa
+        .iter()
+        .map(|r| {
+            format!(
+                "caa {} {} \"{}\"",
+                r.flags,
+                r.tag,
+                r.value.replace("\"", "\\\"")
+            )
+        })
         .join("\n");
 
     let tbs = format!("onion-caa|{}|{}", expiry_unix, caa_rrset);
@@ -745,7 +775,7 @@ fn onion_caa(keymgr: &KeyMgr, nickname: &HsNickname, caa: &CAARecordList, expiry
     Ok(OnionCaa {
         caa: caa_rrset,
         expiry: expiry_unix,
-        signature: signature.to_vec()
+        signature: signature.to_vec(),
     })
 }
 

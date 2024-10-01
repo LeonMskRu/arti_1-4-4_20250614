@@ -200,6 +200,7 @@ AQIDBA==
         let err = HsDescMiddle {
             client_auth: Some(&client_auth),
             subcredential: TEST_SUBCREDENTIAL.into(),
+            caa_critical: false,
             encrypted: TEST_ENCRYPTED_VALUE.into(),
         }
         .build_sign(&mut rng)
