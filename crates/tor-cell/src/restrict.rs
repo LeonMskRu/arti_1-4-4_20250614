@@ -117,6 +117,21 @@ macro_rules! restricted_msg {
             )?
         }
 
+        impl $name {
+            /// Check if a given `ChanCmd` is recognized by this restricted message set.
+            // XXX: Remove this once used.
+            #[allow(unused)]
+            $v fn is_known_cmd(cmd: $cmd_type) -> bool {
+                match cmd {
+                    $(
+                        $( #[cfg(feature=$feat)] )?
+                        $cmd_type:: [<$case:snake:upper>] => true,
+                    )*
+                    _ => false,
+                }
+            }
+        }
+
         impl $msg_trait for $name {
             fn cmd(&self) -> $cmd_type {
                 match self {
