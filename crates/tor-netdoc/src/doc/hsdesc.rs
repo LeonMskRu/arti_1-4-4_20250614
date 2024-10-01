@@ -113,6 +113,9 @@ pub struct HsDesc {
     // TODO:  When someday we add a "create2 format" other than "hs-ntor", we
     // should turn this into a caret enum, record this info, and expose it.
     // create2_formats: Vec<u32>,
+
+    /// CAA records
+    caa: Vec<CAA>
 }
 
 /// A type of authentication that is required when introducing to an onion
@@ -160,6 +163,19 @@ pub struct IntroPointDesc {
     /// attacks.
     #[builder(setter(name = "kp_hss_ntor"))] // TODO rename the internal variable too
     svc_ntor_key: HsSvcNtorKey,
+}
+
+/// CAA record
+#[derive(Debug, Clone, amplify::Getters, Builder)]
+#[builder(pattern = "owned")]
+pub struct CAA {
+    /// One octet containing the following fields:
+    ///   - Bit 0, Issuer Critical Flag
+    flags: u8,
+    /// The property identifier, a sequence of US-ASCII characters.
+    tag: String,
+    /// A sequence of octets representing the property value.
+    value: String,
 }
 
 /// An onion service after it has been parsed by the client, but not yet decrypted.
@@ -339,6 +355,9 @@ impl HsDesc {
     pub fn requires_intro_authentication(&self) -> bool {
         self.auth_required.is_some()
     }
+
+    /// The CAA records for this onion service
+    pub fn caa(&self) -> &[CAA] { &self.caa }
 }
 
 /// An error returned by [`HsDesc::parse_decrypt_validate`], indicating what
@@ -501,6 +520,7 @@ impl EncryptedHsDesc {
                 auth_required: inner.intro_auth_types,
                 is_single_onion_service: inner.single_onion_service,
                 intro_points: inner.intro_points,
+                caa: inner.caa,
             })
         });
         Ok(time_bound)

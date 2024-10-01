@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-use super::{IntroAuthType, IntroPointDesc};
+use super::{IntroAuthType, IntroPointDesc, CAA};
 use crate::batching_split_before::IteratorExt as _;
 use crate::parse::tokenize::{ItemResult, NetDocReader};
 use crate::parse::{keyword::Keyword, parser::SectionRules};
@@ -40,6 +40,8 @@ pub(crate) struct HsDescInner {
     //
     // Always has >= 1 and <= NUM_INTRO_POINT_MAX entries
     pub(super) intro_points: Vec<IntroPointDesc>,
+    /// CAA records
+    pub (super) caa: Vec<CAA>,
 }
 
 decl_keyword! {
@@ -54,6 +56,7 @@ decl_keyword! {
         "enc-key-cert" => ENC_KEY_CERT,
         "legacy-key" => LEGACY_KEY,
         "legacy-key-cert" => LEGACY_KEY_CERT,
+        "caa" => CAA,
     }
 }
 
@@ -66,6 +69,7 @@ static HS_INNER_HEADER_RULES: Lazy<SectionRules<HsInnerKwd>> = Lazy::new(|| {
     rules.add(CREATE2_FORMATS.rule().required().args(1..));
     rules.add(INTRO_AUTH_REQUIRED.rule().args(1..));
     rules.add(SINGLE_ONION_SERVICE.rule());
+    rules.add(CAA.rule().args(3..=3));
     rules.add(UNRECOGNIZED.rule().may_repeat().obj_optional());
 
     rules.build()
@@ -414,10 +418,31 @@ impl HsDescInner {
             return Err(EK::MissingEntry.with_msg("no introduction points"));
         }
 
+        let mut caa = Vec::new();
+        while let Some(tok) = header.get(CAA) {
+            let mut args = shell_words::split(tok.args_as_str())
+                .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA line: {}", e)))?;
+            if args.len() != 3 {
+                return Err(EK::TooManyArguments.with_msg("CAA entries must have 3 arguments"));
+            }
+            let flags: u8 = args[0].parse()
+                .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA flags: {}", e)))?;
+            let tag = &args[1];
+            if !tag.is_ascii() {
+                return Err(EK::BadArgument.with_msg(format!("invalid CAA tag: {}", tag)));
+            }
+            caa.push(super::CAA {
+                flags,
+                value: args.pop().unwrap(),
+                tag: args.pop().unwrap(),
+            })
+        }
+
         let inner = HsDescInner {
             intro_auth_types: auth_types,
             single_onion_service: is_single_onion_service,
             intro_points,
+            caa
         };
         let sig_gated = SignatureGated::new(inner, signatures);
         let time_bound = match expirations.iter().min() {
@@ -521,6 +546,7 @@ mod test {
         assert!(inner.intro_auth_types.is_none());
         assert_eq!(inner.single_onion_service, false);
         assert_eq!(inner.intro_points.len(), 3);
+        assert_eq!(inner.caa.len(), 0);
 
         let ipt0 = &inner.intro_points[0];
         assert_eq!(

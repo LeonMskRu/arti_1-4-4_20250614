@@ -8,6 +8,7 @@ use crate::build::NetdocEncoder;
 use crate::doc::hsdesc::inner::HsInnerKwd;
 use crate::doc::hsdesc::IntroAuthType;
 use crate::doc::hsdesc::IntroPointDesc;
+use crate::doc::hsdesc::CAA;
 use crate::NetdocBuilder;
 
 use rand::CryptoRng;
@@ -44,6 +45,8 @@ pub(super) struct HsDescInner<'a> {
     pub(super) intro_auth_key_cert_expiry: SystemTime,
     /// The expiration time of an introduction point encryption key certificate.
     pub(super) intro_enc_key_cert_expiry: SystemTime,
+    /// CAA records
+    pub(super) caa: &'a [CAA],
 }
 
 impl<'a> NetdocBuilder for HsDescInner<'a> {
@@ -58,6 +61,7 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             intro_points,
             intro_auth_key_cert_expiry,
             intro_enc_key_cert_expiry,
+            caa,
         } = self;
 
         let mut encoder = NetdocEncoder::new();
@@ -81,6 +85,13 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
 
         if is_single_onion_service {
             encoder.item(SINGLE_ONION_SERVICE);
+        }
+
+        for caa_entry in caa {
+            encoder.item(CAA)
+                .arg(&caa_entry.flags)
+                .arg(&caa_entry.tag)
+                .arg(&format!("\"{}\"", caa_entry.value.replace("\"", "\\\"")));
         }
 
         // We sort the introduction points here so as not to expose
@@ -213,6 +224,7 @@ mod test {
         auth_required: Option<&SmallVec<[IntroAuthType; 2]>>,
         is_single_onion_service: bool,
         intro_points: &[IntroPointDesc],
+        caa: &[CAA],
     ) -> Result<String, EncodeError> {
         let hs_desc_sign = ed25519::Keypair::generate(&mut Config::Deterministic.into_rng());
 
@@ -224,6 +236,7 @@ mod test {
             intro_points,
             intro_auth_key_cert_expiry: UNIX_EPOCH,
             intro_enc_key_cert_expiry: UNIX_EPOCH,
+            caa,
         }
         .build_sign(&mut thread_rng())
     }
@@ -236,6 +249,7 @@ mod test {
             None,                   /* auth_required */
             true,                   /* is_single_onion_service */
             &[],                    /* intro_points */
+            &[],
         )
         .unwrap();
 
@@ -247,6 +261,7 @@ mod test {
             None,                   /* auth_required */
             false,                  /* is_single_onion_service */
             &[],                    /* intro_points */
+            &[],
         )
         .unwrap();
 
@@ -263,6 +278,12 @@ mod test {
             create_intro_point_descriptor(&mut rng, link_specs3),
         ];
 
+        let caa = &[CAA {
+            flags: 128,
+            tag: "issue".into(),
+            value: "test.acmeforonions.org".into()
+        }];
+
         let hs_desc = create_inner_desc(
             &[
                 HandshakeType::TAP,
@@ -272,12 +293,14 @@ mod test {
             None,   /* auth_required */
             false,  /* is_single_onion_service */
             intros, /* intro_points */
+            caa,
         )
         .unwrap();
 
         assert_eq!(
             hs_desc,
             r#"create2-formats 0 2 3
+caa 128 issue "test.acmeforonions.org"
 introduction-point AQAGfwAAASLF
 onion-key ntor CJi8nDPhIFA7X9Q+oP7+jzxNo044cblmagk/d7oKWGc=
 auth-key
@@ -346,6 +369,7 @@ o7Ct/ZB0j8YRB5lKSd07YAjA6Zo8kMnuZYX2Mb67TxWDQ/zlYJGOwLlj7A8=
             None,                   /* auth_required */
             false,                  /* is_single_onion_service */
             intros,                 /* intro_points */
+            &[],
         )
         .unwrap_err();
 
@@ -366,6 +390,7 @@ o7Ct/ZB0j8YRB5lKSd07YAjA6Zo8kMnuZYX2Mb67TxWDQ/zlYJGOwLlj7A8=
             Some(&auth),            /* auth_required */
             false,                  /* is_single_onion_service */
             intros,                 /* intro_points */
+            &[],
         )
         .unwrap();
 

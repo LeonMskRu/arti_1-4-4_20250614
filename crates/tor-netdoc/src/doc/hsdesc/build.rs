@@ -4,7 +4,7 @@ mod inner;
 mod middle;
 mod outer;
 
-use crate::doc::hsdesc::{IntroAuthType, IntroPointDesc};
+use crate::doc::hsdesc::{IntroAuthType, IntroPointDesc, CAA};
 use crate::NetdocBuilder;
 use rand::{CryptoRng, RngCore};
 use tor_bytes::EncodeError;
@@ -83,6 +83,8 @@ struct HsDesc<'a> {
     revision_counter: RevisionCounter,
     /// The "subcredential" of the onion service.
     subcredential: Subcredential,
+    /// CAA records
+    caa: &'a [CAA],
 }
 
 /// Client authorization parameters.
@@ -156,6 +158,7 @@ impl<'a> NetdocBuilder for HsDescBuilder<'a> {
             intro_points: hs_desc.intro_points,
             intro_auth_key_cert_expiry: hs_desc.intro_auth_key_cert_expiry,
             intro_enc_key_cert_expiry: hs_desc.intro_enc_key_cert_expiry,
+            caa: hs_desc.caa,
         }
         .build_sign(rng)?;
 
@@ -177,6 +180,7 @@ impl<'a> NetdocBuilder for HsDescBuilder<'a> {
         let middle_plaintext = HsDescMiddle {
             client_auth: client_auth.as_ref(),
             subcredential: hs_desc.subcredential,
+            caa_critical: !hs_desc.caa.is_empty(),
             encrypted: inner_encrypted,
         }
         .build_sign(rng)?;

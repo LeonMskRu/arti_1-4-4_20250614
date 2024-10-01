@@ -5,10 +5,9 @@ use crate::internal_prelude::*;
 use amplify::Getters;
 use derive_deftly::derive_deftly_adhoc;
 use tor_cell::relaycell::hs::est_intro;
+use tor_config::define_list_builder_helper;
 
-use crate::config::restricted_discovery::{
-    RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder,
-};
+use crate::config::restricted_discovery::{RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder};
 
 #[cfg(feature = "restricted-discovery")]
 pub mod restricted_discovery;
@@ -91,6 +90,12 @@ pub struct OnionServiceConfig {
     // /// our proof-of-work defense is enabled.
     // pow_queue_rate: TokenBucketConfig,
     // ...
+
+    /// CAA records to publish for the onion service
+    #[builder(default, sub_builder(fn_name = "build"))]
+    #[builder_field_attr(serde(default))]
+    #[deftly(publisher_view)]
+    pub(crate) caa: CAARecordList,
 }
 
 derive_deftly_adhoc! {
@@ -222,6 +227,7 @@ impl OnionServiceConfig {
 
             // The descriptor publisher responds by generating and publishing a new descriptor.
             restricted_discovery: simply_update,
+            caa: simply_update,
         }
 
         Ok(other)
@@ -326,4 +332,44 @@ fn dos_params_from_token_bucket_config(
     };
     let cast = |n| i32::try_from(n).map_err(|_| err());
     est_intro::DosParams::new(Some(cast(c.rate)?), Some(cast(c.burst)?)).map_err(|_| err())
+}
+
+/// The serialized format of a [`CAARecordListBuilder`]:
+pub type CAARecordList = Vec<CAARecord>;
+
+define_list_builder_helper! {
+    pub struct CAARecordListBuilder {
+        caa: [CAARecordBuilder],
+    }
+    built: CAARecordList = caa;
+    default = vec![];
+}
+
+/// A CAA record to be published in the Onion Service descriptor
+#[derive(Debug, Clone, Builder, Eq, PartialEq)]
+#[builder(build_fn(error = "ConfigBuildError", validate = "Self::validate"))]
+#[builder(derive(Serialize, Deserialize, Debug))]
+pub struct CAARecord {
+    /// One octet containing the following fields:
+    ///   - Bit 0, Issuer Critical Flag
+    pub(crate) flags: u8,
+    /// The property identifier, a sequence of US-ASCII characters.
+    pub(crate) tag: String,
+    /// A sequence of octets representing the property value.
+    pub(crate) value: String,
+}
+
+impl CAARecordBuilder {
+    fn validate(&self) -> Result<(), ConfigBuildError> {
+        if let Some(tag) = &self.tag {
+            if !tag.is_ascii() {
+                return Err(ConfigBuildError::Invalid {
+                    field: "tag".into(),
+                    problem: "CAA tag must be US-ASCII".into(),
+                });
+            }
+        }
+
+        Ok(())
+    }
 }

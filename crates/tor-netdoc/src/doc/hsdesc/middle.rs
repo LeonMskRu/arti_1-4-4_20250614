@@ -170,6 +170,7 @@ decl_keyword! {
         "desc-auth-type" => DESC_AUTH_TYPE,
         "desc-auth-ephemeral-key" => DESC_AUTH_EPHEMERAL_KEY,
         "auth-client" => AUTH_CLIENT,
+        "caa-critical" => CAA_CRITICAL,
         "encrypted" => ENCRYPTED,
     }
 }

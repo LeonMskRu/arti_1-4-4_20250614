@@ -366,7 +366,7 @@ mod test {
             DirectoryKeyProviderBuilder, HsClientNickname,
         },
     };
-
+    use tor_hsservice::config::CAARecordBuilder;
     use super::*;
 
     //---------- tests that rely on the provided example config file ----------
@@ -1306,6 +1306,15 @@ example config file {which:?}, uncommented={uncommented:?}
                         .access()
                         .push(dir);
                 }
+
+                let mut caa = CAARecordBuilder::default();
+                caa.flags(128);
+                caa.tag("issue".into());
+                caa.value("test.acmeforonions.org; validationmethods=onion-csr-01".into());
+                b.service()
+                    .caa()
+                    .access()
+                    .push(caa);
 
                 b.build().unwrap()
             };
