@@ -106,7 +106,7 @@ use futures::io::{AsyncRead, AsyncWrite};
 use oneshot_fused_workaround as oneshot;
 
 use educe::Educe;
-use futures::{FutureExt as _, Sink};
+use futures::{FutureExt as _, Sink, StreamExt};
 use std::result::Result as StdResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -173,6 +173,41 @@ impl ChannelType {
     pub(crate) fn is_initiator(&self) -> bool {
         matches!(self, Self::ClientInitiator | Self::RelayInitiator)
     }
+}
+
+/// A channel cell frame used for sending and receiving cells on a channel. The handler takes care
+/// of the cell codec transition depending in which state the channel is.
+///
+/// ChannelFrame is used to basically handle all in and outbound cells on a channel for its entire
+/// lifetime.
+pub(crate) type ChannelFrame<T> = futures_codec::Framed<T, handler::ChannelCellHandler>;
+
+/// Helper: Receive on the given frame.
+pub(crate) async fn framed_recv<T, C, I>(
+    framed: &mut futures_codec::Framed<T, C>,
+) -> Result<Option<I>>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+    C: futures_codec::Decoder<Item = I, Error = Error> + futures_codec::Encoder,
+{
+    match framed.next().await {
+        Some(Ok(item)) => Ok(Some(item)),
+        Some(Err(e)) => Err(e),
+        None => Ok(None),
+    }
+}
+
+/// Helper: Return a new channel frame from an object implementing AsyncRead + AsyncWrite. In the
+/// tor context, it is always a TLS stream.
+///
+/// The ty (type) argument needs to be able to transform into a ChannelCellHandler which would
+/// generally be a ChannelType.
+pub(crate) fn new_frame<T, I>(tls: T, ty: I) -> ChannelFrame<T>
+where
+    T: AsyncRead + AsyncWrite,
+    I: Into<handler::ChannelCellHandler>,
+{
+    futures_codec::Framed::new(tls, ty.into())
 }
 
 /// A channel cell that we allot to be sent on an open channel from
