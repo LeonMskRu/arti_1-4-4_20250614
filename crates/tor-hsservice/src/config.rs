@@ -6,7 +6,7 @@ use amplify::Getters;
 use derive_deftly::derive_deftly_adhoc;
 use tor_cell::relaycell::hs::est_intro;
 use tor_config::define_list_builder_helper;
-
+use tor_netdoc::doc::hsdesc::CAAFlags;
 use crate::config::restricted_discovery::{
     RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder,
 };
@@ -96,7 +96,7 @@ pub struct OnionServiceConfig {
     #[builder(default, sub_builder(fn_name = "build"))]
     #[builder_field_attr(serde(default))]
     #[deftly(publisher_view)]
-    pub(crate) caa: CAARecordList,
+    pub(crate) caa_records: CAARecordList,
 }
 
 derive_deftly_adhoc! {
@@ -228,7 +228,7 @@ impl OnionServiceConfig {
 
             // The descriptor publisher responds by generating and publishing a new descriptor.
             restricted_discovery: simply_update,
-            caa: simply_update,
+            caa_records: simply_update,
         }
 
         Ok(other)
@@ -346,14 +346,14 @@ define_list_builder_helper! {
     default = vec![];
 }
 
-/// A CAA record to be published in the Onion Service descriptor
+/// A CAA (Certificate Authority Authorization) record to publish for an onion service,
+/// in accordance with [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt).
 #[derive(Debug, Clone, Builder, Eq, PartialEq)]
 #[builder(build_fn(error = "ConfigBuildError", validate = "Self::validate"))]
 #[builder(derive(Serialize, Deserialize, Debug))]
 pub struct CAARecord {
-    /// One octet containing the following fields:
-    ///   - Bit 0, Issuer Critical Flag
-    pub(crate) flags: u8,
+    /// One octet containing the flags, currently only issuer critical
+    pub(crate) flags: CAAFlags,
     /// The property identifier, a sequence of US-ASCII characters.
     pub(crate) tag: String,
     /// A sequence of octets representing the property value.

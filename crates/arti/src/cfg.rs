@@ -372,6 +372,7 @@ mod test {
 
     use super::*;
     use tor_hsservice::config::CAARecordBuilder;
+    use tor_netdoc::doc::hsdesc::CAAFlags;
     #[cfg(feature = "restricted-discovery")]
     use {
         arti_client::HsClientDescEncKey,
@@ -1320,10 +1321,10 @@ example config file {which:?}, uncommented={uncommented:?}
                 }
 
                 let mut caa = CAARecordBuilder::default();
-                caa.flags(128);
+                caa.flags(CAAFlags::Critical);
                 caa.tag("issue".into());
                 caa.value("test.acmeforonions.org; validationmethods=onion-csr-01".into());
-                b.service().caa().access().push(caa);
+                b.service().caa_records().access().push(caa);
 
                 b.build().unwrap()
             };

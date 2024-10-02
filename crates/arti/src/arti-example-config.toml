@@ -502,8 +502,8 @@
 #    bob = "descriptor:x25519:B5ZQGTPERMMUDA6VC63LHJUF5IHPOKJMUK26LY2XKSF7VG52AESQ"
 
 
-#    [[onion_services."allium-cepa".caa]]
-#    flags = 128
+#    [[onion_services."allium-cepa".caa_records]]
+#    flags = "Critical"
 #    tag = "issue"
 #    value = "test.acmeforonions.org; validationmethods=onion-csr-01"
 

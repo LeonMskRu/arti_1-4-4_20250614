@@ -372,7 +372,7 @@ impl OnionService {
         onion_caa(
             &self.keymgr,
             &self.config.nickname,
-            &self.config.caa,
+            &self.config.caa_records,
             expiry,
         )
     }
@@ -425,6 +425,8 @@ impl RunningOnionService {
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
+        // The weak Arc creation and then immediate upgrade is a workaround not being able to
+        // hold mutable borrows on inner.config_tx and inner.config at the same time.
         let mut new_config_w = std::sync::Weak::<OnionServiceConfig>::new();
         inner.config_tx.try_maybe_send(|cur_config| {
             let new_config = cur_config.for_transition_to(new_config, how)?;
@@ -536,7 +538,7 @@ impl RunningOnionService {
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
     pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
         let inner = self.inner.lock().expect("lock poisoned");
-        onion_caa(&self.keymgr, &self.nickname, &inner.config.caa, expiry)
+        onion_caa(&self.keymgr, &self.nickname, &inner.config.caa_records, expiry)
     }
 }
 
@@ -771,7 +773,7 @@ fn onion_caa(
         .map(|r| {
             format!(
                 "caa {} {} \"{}\"",
-                r.flags,
+                r.flags.bits(),
                 r.tag,
                 r.value.replace("\"", "\\\"")
             )

@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-use super::{IntroAuthType, IntroPointDesc, CAA};
+use super::{IntroAuthType, IntroPointDesc, CAARecord, CAAFlags};
 use crate::batching_split_before::IteratorExt as _;
 use crate::parse::tokenize::{ItemResult, NetDocReader};
 use crate::parse::{keyword::Keyword, parser::SectionRules};
@@ -41,7 +41,7 @@ pub(crate) struct HsDescInner {
     // Always has >= 1 and <= NUM_INTRO_POINT_MAX entries
     pub(super) intro_points: Vec<IntroPointDesc>,
     /// CAA records
-    pub(super) caa: Vec<CAA>,
+    pub(super) caa_records: Vec<CAARecord>,
 }
 
 decl_keyword! {
@@ -418,7 +418,7 @@ impl HsDescInner {
             return Err(EK::MissingEntry.with_msg("no introduction points"));
         }
 
-        let mut caa = Vec::new();
+        let mut caa_records = Vec::new();
         while let Some(tok) = header.get(CAA) {
             let mut args = shell_words::split(tok.args_as_str())
                 .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA line: {}", e)))?;
@@ -432,8 +432,8 @@ impl HsDescInner {
             if !tag.is_ascii() {
                 return Err(EK::BadArgument.with_msg(format!("invalid CAA tag: {}", tag)));
             }
-            caa.push(super::CAA {
-                flags,
+            caa_records.push(CAARecord {
+                flags: CAAFlags::from_bits_retain(flags),
                 value: args.pop().unwrap(),
                 tag: args.pop().unwrap(),
             })
@@ -443,7 +443,7 @@ impl HsDescInner {
             intro_auth_types: auth_types,
             single_onion_service: is_single_onion_service,
             intro_points,
-            caa,
+            caa_records,
         };
         let sig_gated = SignatureGated::new(inner, signatures);
         let time_bound = match expirations.iter().min() {
@@ -547,7 +547,7 @@ mod test {
         assert!(inner.intro_auth_types.is_none());
         assert_eq!(inner.single_onion_service, false);
         assert_eq!(inner.intro_points.len(), 3);
-        assert_eq!(inner.caa.len(), 0);
+        assert_eq!(inner.caa_records.len(), 0);
 
         let ipt0 = &inner.intro_points[0];
         assert_eq!(

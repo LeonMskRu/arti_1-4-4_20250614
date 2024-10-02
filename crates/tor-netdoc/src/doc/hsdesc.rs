@@ -36,7 +36,8 @@ use smallvec::SmallVec;
 
 use std::result::Result as StdResult;
 use std::time::SystemTime;
-
+use serde::Serialize;
+use serde_with::serde_derive::Deserialize;
 #[cfg(feature = "hsdesc-inner-docs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hsdesc-inner-docs")))]
 pub use {inner::HsDescInner, middle::HsDescMiddle, outer::HsDescOuter};
@@ -113,8 +114,8 @@ pub struct HsDesc {
     // TODO:  When someday we add a "create2 format" other than "hs-ntor", we
     // should turn this into a caret enum, record this info, and expose it.
     // create2_formats: Vec<u32>,
-    /// CAA records
-    caa: Vec<CAA>,
+    /// CAA records - see [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt).
+    caa_records: Vec<CAARecord>,
 }
 
 /// A type of authentication that is required when introducing to an onion
@@ -164,13 +165,25 @@ pub struct IntroPointDesc {
     svc_ntor_key: HsSvcNtorKey,
 }
 
-/// CAA record
+bitflags::bitflags! {
+    /// Flags field for a CAA record
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    #[serde(transparent)]
+    pub struct CAAFlags: u8 {
+        /// Issuer critical - issuance cannot proceed if the CA doesn't understand this record
+        const Critical = 0b10000000;
+        // Flags may have other fields set, we should ignore them
+        const _ = !0;
+    }
+}
+
+/// A CAA (Certificate Authority Authorization) record to publish for an onion service,
+/// in accordance with [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt)
 #[derive(Debug, Clone, amplify::Getters, Builder)]
 #[builder(pattern = "owned")]
-pub struct CAA {
-    /// One octet containing the following fields:
-    ///   - Bit 0, Issuer Critical Flag
-    flags: u8,
+pub struct CAARecord {
+    /// One octet containing the flags, currently only issuer critical
+    flags: CAAFlags,
     /// The property identifier, a sequence of US-ASCII characters.
     tag: String,
     /// A sequence of octets representing the property value.
@@ -356,8 +369,8 @@ impl HsDesc {
     }
 
     /// The CAA records for this onion service
-    pub fn caa(&self) -> &[CAA] {
-        &self.caa
+    pub fn caa_records(&self) -> &[CAARecord] {
+        &self.caa_records
     }
 }
 
@@ -521,7 +534,7 @@ impl EncryptedHsDesc {
                 auth_required: inner.intro_auth_types,
                 is_single_onion_service: inner.single_onion_service,
                 intro_points: inner.intro_points,
-                caa: inner.caa,
+                caa_records: inner.caa_records,
             })
         });
         Ok(time_bound)

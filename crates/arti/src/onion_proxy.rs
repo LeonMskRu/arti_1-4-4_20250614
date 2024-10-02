@@ -5,7 +5,7 @@ use {derive_deftly::Deftly, tor_rpcbase::templates::*};
 
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
 };
 use arti_client::config::onion_service::{OnionServiceConfig, OnionServiceConfigBuilder};
 use futures::{task::SpawnExt, StreamExt as _};
@@ -274,7 +274,7 @@ pub(crate) struct ProxySet<R: Runtime> {
     /// The arti_client that we use to launch proxies.
     client: arti_client::TorClient<R>,
     /// The proxies themselves, indexed by nickname.
-    proxies: Arc<RwLock<BTreeMap<HsNickname, Proxy>>>,
+    proxies: Arc<Mutex<BTreeMap<HsNickname, Proxy>>>,
 }
 
 impl<R: Runtime> ProxySet<R> {
@@ -284,7 +284,7 @@ impl<R: Runtime> ProxySet<R> {
         config_list: OnionServiceProxyConfigMap,
     ) -> anyhow::Result<Self> {
 
-        let proxies = Arc::new(RwLock::new(config_list
+        let proxies = Arc::new(Mutex::new(config_list
             .into_iter()
             .map(|(nickname, cfg)| Ok((nickname, Proxy::launch_new(client, cfg)?)))
             .collect::<anyhow::Result<BTreeMap<_, _>>>()?));
@@ -306,7 +306,7 @@ impl<R: Runtime> ProxySet<R> {
         // TODO: this should probably take `how: Reconfigure` and implement an all-or-nothing mode.
         // See #1156.
     ) -> Result<(), anyhow::Error> {
-        let mut proxy_map = self.proxies.write().expect("lock poisoned");
+        let mut proxy_map = self.proxies.lock().expect("lock poisoned");
 
         // Set of the nicknames of defunct proxies.
         let mut defunct_nicknames: HashSet<_> = proxy_map.keys().map(Clone::clone).collect();
@@ -355,7 +355,7 @@ impl<R: Runtime> ProxySet<R> {
 
     /// Whether this `ProxySet` is empty.
     pub(crate) fn is_empty(&self) -> bool {
-        self.proxies.read().expect("lock poisoned").is_empty()
+        self.proxies.lock().expect("lock poisoned").is_empty()
     }
 }
 
@@ -367,11 +367,11 @@ impl<R: Runtime> crate::reload_cfg::ReconfigurableModule for ProxySet<R> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct VisibleProxySet {
-    proxies: Arc<RwLock<BTreeMap<HsNickname, Proxy>>>,
+pub(crate) struct RPCProxySet {
+    proxies: Arc<Mutex<BTreeMap<HsNickname, Proxy>>>,
 }
 
-impl<R: Runtime> From<&ProxySet<R>> for VisibleProxySet {
+impl<R: Runtime> From<&ProxySet<R>> for RPCProxySet {
     fn from(value: &ProxySet<R>) -> Self {
         Self {
             proxies: value.proxies.clone()
@@ -379,9 +379,9 @@ impl<R: Runtime> From<&ProxySet<R>> for VisibleProxySet {
     }
 }
 
-impl VisibleProxySet {
+impl RPCProxySet {
     pub(crate) fn get_by_hsid(&self, hsid: &HsId) -> Option<Proxy> {
-        self.proxies.read().expect("lock poisoned").values().find(|p| {
+        self.proxies.lock().expect("lock poisoned").values().find(|p| {
             p.svc.onion_name().map(|id| &id == hsid).unwrap_or(false)
         }).map(|p| p.to_owned())
     }

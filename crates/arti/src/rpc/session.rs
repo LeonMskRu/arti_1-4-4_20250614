@@ -1,7 +1,7 @@
 //! Declare the RPC session object as exposed from the RPC server run by the `arti` crate.
 
 use super::proxyinfo::{self, ProxyInfo};
-use crate::onion_proxy::VisibleProxySet;
+use crate::onion_proxy::RPCProxySet;
 use arti_client::TorClient;
 use arti_rpcserver::RpcAuthentication;
 use derive_deftly::Deftly;
@@ -100,7 +100,7 @@ impl DropNotifyEofSignallable for ProxyInfoState {
 #[derive(Debug, Clone)]
 enum OnionServicesState {
     Unset,
-    Set(VisibleProxySet),
+    Set(RPCProxySet),
     Eof,
 }
 
@@ -147,7 +147,7 @@ impl RpcVisibleArtiState {
         Err(())
     }
 
-    pub(super) async fn get_onion_services(&self) -> Result<VisibleProxySet, ()> {
+    pub(super) async fn get_onion_services(&self) -> Result<RPCProxySet, ()> {
         let mut onion_services = self.onion_services.clone();
         while let Some(v) = onion_services.next().await {
             match v {
@@ -180,7 +180,7 @@ impl RpcStateSender {
         *self.proxy_info_sender.borrow_mut() = ProxyInfoState::Set(Arc::new(info));
     }
 
-    pub(crate) fn set_onion_services(&mut self, onion_services: VisibleProxySet) {
+    pub(crate) fn set_onion_services(&mut self, onion_services: RPCProxySet) {
         *self.onion_services_sender.borrow_mut() = OnionServicesState::Set(onion_services);
     }
 }

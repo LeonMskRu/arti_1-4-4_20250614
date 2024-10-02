@@ -8,7 +8,7 @@ use crate::build::NetdocEncoder;
 use crate::doc::hsdesc::inner::HsInnerKwd;
 use crate::doc::hsdesc::IntroAuthType;
 use crate::doc::hsdesc::IntroPointDesc;
-use crate::doc::hsdesc::CAA;
+use crate::doc::hsdesc::CAARecord;
 use crate::NetdocBuilder;
 
 use rand::CryptoRng;
@@ -46,7 +46,7 @@ pub(super) struct HsDescInner<'a> {
     /// The expiration time of an introduction point encryption key certificate.
     pub(super) intro_enc_key_cert_expiry: SystemTime,
     /// CAA records
-    pub(super) caa: &'a [CAA],
+    pub(super) caa_records: &'a [CAARecord],
 }
 
 impl<'a> NetdocBuilder for HsDescInner<'a> {
@@ -61,7 +61,7 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             intro_points,
             intro_auth_key_cert_expiry,
             intro_enc_key_cert_expiry,
-            caa,
+            caa_records,
         } = self;
 
         let mut encoder = NetdocEncoder::new();
@@ -87,10 +87,10 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             encoder.item(SINGLE_ONION_SERVICE);
         }
 
-        for caa_entry in caa {
+        for caa_entry in caa_records {
             encoder
                 .item(CAA)
-                .arg(&caa_entry.flags)
+                .arg(&caa_entry.flags.bits())
                 .arg(&caa_entry.tag)
                 .arg(&format!("\"{}\"", caa_entry.value.replace("\"", "\\\"")));
         }
@@ -210,7 +210,7 @@ mod test {
 
     use super::*;
     use crate::doc::hsdesc::build::test::{create_intro_point_descriptor, expect_bug};
-    use crate::doc::hsdesc::IntroAuthType;
+    use crate::doc::hsdesc::{CAAFlags, IntroAuthType};
 
     use rand::thread_rng;
     use smallvec::SmallVec;
@@ -225,7 +225,7 @@ mod test {
         auth_required: Option<&SmallVec<[IntroAuthType; 2]>>,
         is_single_onion_service: bool,
         intro_points: &[IntroPointDesc],
-        caa: &[CAA],
+        caa_records: &[CAARecord],
     ) -> Result<String, EncodeError> {
         let hs_desc_sign = ed25519::Keypair::generate(&mut Config::Deterministic.into_rng());
 
@@ -237,7 +237,7 @@ mod test {
             intro_points,
             intro_auth_key_cert_expiry: UNIX_EPOCH,
             intro_enc_key_cert_expiry: UNIX_EPOCH,
-            caa,
+            caa_records,
         }
         .build_sign(&mut thread_rng())
     }
@@ -279,8 +279,8 @@ mod test {
             create_intro_point_descriptor(&mut rng, link_specs3),
         ];
 
-        let caa = &[CAA {
-            flags: 128,
+        let caa = &[CAARecord {
+            flags: CAAFlags::Critical,
             tag: "issue".into(),
             value: "test.acmeforonions.org".into(),
         }];
