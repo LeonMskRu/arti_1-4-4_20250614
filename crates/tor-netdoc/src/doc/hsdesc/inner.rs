@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-use super::{IntroAuthType, IntroPointDesc, CAARecord, CAAFlags};
+use super::{CAAFlags, CAARecord, IntroAuthType, IntroPointDesc};
 use crate::batching_split_before::IteratorExt as _;
 use crate::parse::tokenize::{ItemResult, NetDocReader};
 use crate::parse::{keyword::Keyword, parser::SectionRules};

@@ -34,17 +34,17 @@ use tor_units::IntegerMinutes;
 use derive_builder::Builder;
 use smallvec::SmallVec;
 
-use std::result::Result as StdResult;
-use std::time::SystemTime;
 use serde::Serialize;
 use serde_with::serde_derive::Deserialize;
+use std::result::Result as StdResult;
+use std::time::SystemTime;
 #[cfg(feature = "hsdesc-inner-docs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hsdesc-inner-docs")))]
 pub use {inner::HsDescInner, middle::HsDescMiddle, outer::HsDescOuter};
 
 #[cfg(feature = "hs-service")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hs-service")))]
-pub use build::{create_desc_sign_key_cert, HsDescBuilder};
+pub use build::{create_desc_sign_key_cert, CAARecordSet, HsDescBuilder};
 
 /// Metadata about an onion service descriptor, as stored at an HsDir.
 ///

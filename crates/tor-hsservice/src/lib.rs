@@ -102,6 +102,8 @@ pub use tor_hscrypto::pk::HsId;
 
 use crate::config::CAARecordList;
 pub use helpers::handle_rend_requests;
+use tor_bytes::EncodeError;
+use tor_netdoc::doc::hsdesc::{CAARecord, CAARecordBuilder, CAARecordBuilderError, CAARecordSet};
 //---------- top-level service implementation (types and methods) ----------
 
 /// Convenience alias for link specifiers of an intro point
@@ -538,7 +540,12 @@ impl RunningOnionService {
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
     pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
         let inner = self.inner.lock().expect("lock poisoned");
-        onion_caa(&self.keymgr, &self.nickname, &inner.config.caa_records, expiry)
+        onion_caa(
+            &self.keymgr,
+            &self.nickname,
+            &inner.config.caa_records,
+            expiry,
+        )
     }
 }
 
@@ -728,12 +735,20 @@ fn onion_csr(
 }
 
 /// Possible errors when creating a CAA document for an Onion Service
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum OnionCaaError {
     /// Arti can't find the key for this service
     KeyNotFound,
     /// The system clock is bogus
     InvalidSystemTime,
+    /// The CAA records couldn't be serialized
+    EncodeError(EncodeError),
+}
+
+impl From<EncodeError> for OnionCaaError {
+    fn from(value: EncodeError) -> Self {
+        Self::EncodeError(value)
+    }
 }
 
 /// A CAA document per draft-ietf-acme-onion
@@ -768,23 +783,28 @@ fn onion_caa(
         .map_err(|_| OnionCaaError::InvalidSystemTime)?
         .as_secs();
 
-    let caa_rrset = caa
+    let mut rng = rand::thread_rng();
+    let caa_records = caa
         .iter()
         .map(|r| {
-            format!(
-                "caa {} {} \"{}\"",
-                r.flags.bits(),
-                r.tag,
-                r.value.replace("\"", "\\\"")
-            )
+            CAARecordBuilder::default()
+                .flags(r.flags)
+                .tag(r.tag.clone())
+                .value(r.value.clone())
+                .build()
         })
-        .join("\n");
+        .collect::<Result<Vec<CAARecord>, CAARecordBuilderError>>()
+        .expect("unable to build CAA record");
+    let caa_rrset = CAARecordSet {
+        caa_records: &caa_records,
+    };
+    let tbs_caa_rrset = caa_rrset.build_sign(&mut rng)?;
 
-    let tbs = format!("onion-caa|{}|{}", expiry_unix, caa_rrset);
+    let tbs = format!("onion-caa|{}|{}", expiry_unix, tbs_caa_rrset);
     let signature = hs_key.sign(tbs.as_bytes());
 
     Ok(OnionCaa {
-        caa: caa_rrset,
+        caa: tbs_caa_rrset,
         expiry: expiry_unix,
         signature: signature.to_vec(),
     })

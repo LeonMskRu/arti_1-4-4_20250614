@@ -6,9 +6,9 @@
 
 use crate::build::NetdocEncoder;
 use crate::doc::hsdesc::inner::HsInnerKwd;
+use crate::doc::hsdesc::CAARecord;
 use crate::doc::hsdesc::IntroAuthType;
 use crate::doc::hsdesc::IntroPointDesc;
-use crate::doc::hsdesc::CAARecord;
 use crate::NetdocBuilder;
 
 use rand::CryptoRng;
@@ -92,7 +92,7 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
                 .item(CAA)
                 .arg(&caa_entry.flags.bits())
                 .arg(&caa_entry.tag)
-                .arg(&format!("\"{}\"", caa_entry.value.replace("\"", "\\\"")));
+                .arg(&caa_entry.value);
         }
 
         // We sort the introduction points here so as not to expose
@@ -186,6 +186,31 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             encoder
                 .item(ENC_KEY_CERT)
                 .object("ED25519 CERT", signed_enc_key.as_ref());
+        }
+
+        encoder.finish().map_err(|e| e.into())
+    }
+}
+
+/// Helper for building a textual representation of a set of CAA records
+#[derive(Debug)]
+pub struct CAARecordSet<'a> {
+    /// CAA records
+    pub caa_records: &'a [CAARecord],
+}
+
+impl<'a> NetdocBuilder for CAARecordSet<'a> {
+    fn build_sign<R: RngCore + CryptoRng>(self, _: &mut R) -> Result<String, EncodeError> {
+        use HsInnerKwd::*;
+
+        let mut encoder = NetdocEncoder::new();
+
+        for caa_entry in self.caa_records {
+            encoder
+                .item(CAA)
+                .arg(&caa_entry.flags.bits())
+                .arg(&caa_entry.tag)
+                .arg(&caa_entry.value);
         }
 
         encoder.finish().map_err(|e| e.into())

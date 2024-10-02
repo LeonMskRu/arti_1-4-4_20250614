@@ -172,7 +172,13 @@ impl ItemArgument for str {
         if self.is_empty() || self.chars().any(|c| !(c.is_ascii_graphic() || c == ' ')) {
             return Err(internal!("invalid keyword argument syntax {:?}", self));
         }
-        out.args_raw_nonempty(&self);
+        let has_spaces = self.chars().any(|c| c == ' ');
+        if has_spaces {
+            let raw = format!("\"{}\"", self.replace("\"", "\\\""));
+            out.args_raw_nonempty(&raw);
+        } else {
+            out.args_raw_nonempty(&self);
+        }
         Ok(())
     }
 }

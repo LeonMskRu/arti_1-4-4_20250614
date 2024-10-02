@@ -3,7 +3,7 @@
 use super::*;
 use crate::config::OnionServiceConfigPublisherView;
 use tor_cell::chancell::msg::HandshakeType;
-use tor_netdoc::doc::hsdesc::{CAARecordBuilder, CAARecord};
+use tor_netdoc::doc::hsdesc::{CAARecord, CAARecordBuilder};
 
 /// Build the descriptor.
 ///

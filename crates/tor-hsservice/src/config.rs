@@ -2,14 +2,14 @@
 
 use crate::internal_prelude::*;
 
+use crate::config::restricted_discovery::{
+    RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder,
+};
 use amplify::Getters;
 use derive_deftly::derive_deftly_adhoc;
 use tor_cell::relaycell::hs::est_intro;
 use tor_config::define_list_builder_helper;
 use tor_netdoc::doc::hsdesc::CAAFlags;
-use crate::config::restricted_discovery::{
-    RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder,
-};
 
 #[cfg(feature = "restricted-discovery")]
 pub mod restricted_discovery;

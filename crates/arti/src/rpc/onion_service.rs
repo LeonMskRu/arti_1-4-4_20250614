@@ -134,6 +134,8 @@ enum OnionServiceCaaError {
     KeyNotFound,
     #[error("The system clock time makes no sense")]
     InvalidSystemTime,
+    #[error("The CAA record set couldn't be built")]
+    EncodeError(String),
 }
 
 impl HasKind for OnionServiceCaaError {
@@ -141,6 +143,7 @@ impl HasKind for OnionServiceCaaError {
         match self {
             Self::KeyNotFound => ErrorKind::Internal,
             Self::InvalidSystemTime => ErrorKind::Internal,
+            Self::EncodeError(_) => ErrorKind::Internal,
         }
     }
 }
@@ -225,6 +228,7 @@ async fn rpc_onion_service_caa(
         .map_err(|e| match e {
             OnionCaaError::KeyNotFound => OnionServiceCaaError::KeyNotFound,
             OnionCaaError::InvalidSystemTime => OnionServiceCaaError::InvalidSystemTime,
+            OnionCaaError::EncodeError(e) => OnionServiceCaaError::EncodeError(e.to_string()),
         })?;
 
     Ok(OnionServiceCaaResponse {

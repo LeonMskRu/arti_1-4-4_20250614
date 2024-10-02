@@ -4,7 +4,7 @@ mod inner;
 mod middle;
 mod outer;
 
-use crate::doc::hsdesc::{IntroAuthType, IntroPointDesc, CAARecord};
+use crate::doc::hsdesc::{CAARecord, IntroAuthType, IntroPointDesc};
 use crate::NetdocBuilder;
 use rand::{CryptoRng, RngCore};
 use tor_bytes::EncodeError;
@@ -23,6 +23,7 @@ use smallvec::SmallVec;
 use std::borrow::{Borrow, Cow};
 use std::time::SystemTime;
 
+pub use self::inner::CAARecordSet;
 use self::inner::HsDescInner;
 use self::middle::HsDescMiddle;
 use self::outer::HsDescOuter;

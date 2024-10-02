@@ -371,8 +371,11 @@ mod test {
     use tor_error::ErrorReport as _;
 
     use super::*;
-    use tor_hsservice::config::CAARecordBuilder;
-    use tor_netdoc::doc::hsdesc::CAAFlags;
+    #[cfg(feature = "onion-service-service")]
+    use {
+        tor_hsservice::config::CAARecordBuilder,
+        tor_netdoc::doc::hsdesc::CAAFlags,
+    };
     #[cfg(feature = "restricted-discovery")]
     use {
         arti_client::HsClientDescEncKey,
