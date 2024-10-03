@@ -115,7 +115,7 @@ use tracing::trace;
 
 // reexport
 use crate::channel::unique_id::CircUniqIdContext;
-pub use handshake::{OutboundClientHandshake, UnverifiedChannel, VerifiedChannel};
+pub use handshake::{ClientInitiatorHandshake, UnverifiedChannel, VerifiedChannel};
 
 restricted_msg! {
     /// A channel message that we allow to be sent from a server to a client on
@@ -487,12 +487,12 @@ impl ChannelBuilder {
         tls: T,
         sleep_prov: S,
         memquota: ChannelAccount,
-    ) -> OutboundClientHandshake<T, S>
+    ) -> ClientInitiatorHandshake<T, S>
     where
         T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
         S: CoarseTimeProvider + SleepProvider,
     {
-        handshake::OutboundClientHandshake::new(tls, self.target, sleep_prov, memquota)
+        handshake::ClientInitiatorHandshake::new(tls, self.target, sleep_prov, memquota)
     }
 }
 
@@ -894,7 +894,7 @@ pub(crate) mod test {
     // reactor code; there are just a few more cases to examine here.
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::channel::codec::test::MsgBuf;
+    use crate::channel::handler::test::MsgBuf;
     pub(crate) use crate::channel::reactor::test::{new_reactor, CodecResult};
     use crate::util::fake_mq;
     use tor_cell::chancell::msg::HandshakeType;
