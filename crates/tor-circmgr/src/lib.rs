@@ -813,7 +813,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     /// Switch from having an unowned persistent state to having an owned one.
     ///
     /// Requires that we hold the lock on the state files.
-    pub(crate) fn upgrade_to_owned_persistent_state(&self) -> Result<()> {
+    fn upgrade_to_owned_persistent_state(&self) -> Result<()> {
         self.mgr.peek_builder().upgrade_to_owned_state()?;
         Ok(())
     }
@@ -822,7 +822,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     ///
     /// We only call this method if we _don't_ have the lock on the state
     /// files.  If we have the lock, we only want to save.
-    pub(crate) fn reload_persistent_state(&self) -> Result<()> {
+    fn reload_persistent_state(&self) -> Result<()> {
         self.mgr.peek_builder().reload_state()?;
         Ok(())
     }
@@ -993,7 +993,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     /// we have the lock.
     ///
     /// Return true if we saved something; false if we didn't have the lock.
-    pub(crate) fn store_persistent_state(&self) -> Result<bool> {
+    fn store_persistent_state(&self) -> Result<bool> {
         self.mgr.peek_builder().save_state()
     }
 
