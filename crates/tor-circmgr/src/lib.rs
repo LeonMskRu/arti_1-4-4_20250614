@@ -1189,4 +1189,37 @@ mod test {
             ret_rx.await.unwrap().unwrap();
         });
     }
+
+    #[test]
+    fn test_get_or_launch_dir() {
+        tor_rtmock::MockRuntime::test_with_various(|runtime| async move {
+            let circmgr = make_circmgr(runtime.clone());
+
+            let (finished_tx, finished_rx) = tor_async_utils::oneshot::channel();
+            runtime.spawn_identified("get_or_launch_dir", async move {
+                let circ1 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+                let circ2 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+                assert_eq!(circ1, circ2);
+
+                circmgr.retire_all_circuits();
+
+                let circ3 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+
+                assert_ne!(circ1, circ3);
+                assert_ne!(circ2, circ3);
+
+                circmgr.retire_circ(&circ3.id);
+
+                let circ4 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+
+                assert_ne!(circ1, circ4);
+                assert_ne!(circ2, circ4);
+                assert_ne!(circ3, circ4);
+
+                finished_tx.send(true).unwrap();
+            });
+            runtime.advance_by(Duration::from_secs(1)).await;
+            assert!(finished_rx.await.unwrap());
+        });
+    }
 }
