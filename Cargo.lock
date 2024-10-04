@@ -5641,6 +5641,7 @@ name = "tor-hsservice"
 version = "0.23.0"
 dependencies = [
  "amplify",
+ "asn1-rs",
  "async-trait",
  "base64ct",
  "cfg-if",

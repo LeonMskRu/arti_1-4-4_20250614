@@ -82,6 +82,7 @@ pub mod time_store_for_doctests_unstable_no_semver_guarantees {
     pub use crate::time_store::*;
 }
 
+use asn1_rs::ToDer;
 use internal_prelude::*;
 
 // ---------- public exports ----------
@@ -641,7 +642,7 @@ fn onion_csr(
     nickname: &HsNickname,
     ca_nonce: &[u8],
 ) -> Result<Vec<u8>, OnionCsrError> {
-    if ca_nonce.len() > 32 {
+    if ca_nonce.len() > 128 {
         return Err(OnionCsrError::CANonceTooLong);
     }
 
@@ -659,78 +660,72 @@ fn onion_csr(
     drop(rng);
 
     // See RFC 2986 for format details
-    #[rustfmt::skip]
-    let mut csr = vec![
-        // CertificationRequest SEQUENCE
-        48, 129, 161,
-            // CertificationRequestInfo SEQUENCE
-            48, 85,
-                // version INTEGER
-                2, 1, 0,
-                // subject Name
-                48, 0,
-                // subjectPKInfo SubjectPublicKeyInfo
-                48, 42,
-                    // algorithm AlgorithmIdentifier
-                    48, 5,
-                        // algorithm OBJECT IDENTIFIER - id-Ed25519
-                        6, 3, 43, 101, 112,
-                    // subjectPublicKey BIT STRING
-                    3, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                // attributes [0] Attributes
-                160, 34,
-                    // Attribute SEQUENCE
-                    48, 20,
-                        // type OBJECT IDENTIFIER - cabf-caApplicantNonce
-                        6, 4, 103, 129, 12, 42,
-                        // values SET
-                        49, 12,
-                            // OCTET STRING
-                            4, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    // Attribute SEQUENCE
-                    48, 10,
-                        // type OBJECT IDENTIFIER - cabf-caSigningNonce
-                        6, 4, 103, 129, 12, 41,
-                        // values SET
-                        49, 2,
-                            // OCTET STRING
-                            4, 0,
-    ];
-    // Copy public key into subjectPublicKey
-    csr[22..54].copy_from_slice(&hs_key.public().to_bytes());
-    // Copy random value into cabf-caApplicantNonce
-    csr[68..78].copy_from_slice(&applicant_nonce);
 
-    // Copy CA random value into cabf-caSigningNonce
-    csr.extend_from_slice(&ca_nonce);
-    let ca_nonce_len = ca_nonce.len() as u8;
-    // Update DER lengths to accommodate CA random value length
-    csr[89] += ca_nonce_len;
-    csr[87] += ca_nonce_len;
-    csr[79] += ca_nonce_len;
-    csr[55] += ca_nonce_len;
-    csr[4] += ca_nonce_len;
-    csr[2] += ca_nonce_len;
+    // CertificationRequestInfo SEQUENCE
+    let mut tbs_csr_contents = Vec::new();
+    // version INTEGER
+    0.write_der(&mut tbs_csr_contents).unwrap();
+    // subject Name
+    asn1_rs::Sequence::new((&[]).into()).write_der(&mut tbs_csr_contents).unwrap();
 
-    // Sign TBS part
-    let signature = hs_key.sign(&csr[3..]);
+    let mut subject_pk_contents = Vec::new();
+    // algorithm AlgorithmIdentifier
+    asn1_rs::Sequence::from_iter_to_der([
+        // algorithm OBJECT IDENTIFIER - id-Ed25519
+        asn1_rs::oid!(1.3.101.112)
+    ].iter()).unwrap().write_der(&mut subject_pk_contents).unwrap();
+    // subjectPublicKey BIT STRING
+    asn1_rs::BitString::new(0, &hs_key.public().to_bytes())
+        .write_der(&mut subject_pk_contents).unwrap();
+    // subjectPKInfo SubjectPublicKeyInfo
+    asn1_rs::Sequence::new(subject_pk_contents.into()).write_der(&mut tbs_csr_contents).unwrap();
 
-    // Add objects that come after TBS part
-    #[rustfmt::skip]
-    csr.extend_from_slice(&[
-            // signatureAlgorithm AlgorithmIdentifier
-            48, 5,
-                // algorithm OBJECT IDENTIFIER - id-Ed25519
-                6, 3, 43, 101, 112,
-            // signature BIT STRING
-            3, 65, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ]);
+    let mut ca_nonce_contents = Vec::new();
+    // type OBJECT IDENTIFIER - cabf-caSigningNonce
+    asn1_rs::oid!(2.23.140.41).write_der(&mut ca_nonce_contents).unwrap();
+    // values SET
+    asn1_rs::Set::from_iter_to_der([
+        asn1_rs::OctetString::new(&ca_nonce)
+    ].iter()).unwrap().write_der(&mut ca_nonce_contents).unwrap();
 
-    // Insert signature
-    csr[100 + ca_nonce_len as usize..164 + ca_nonce_len as usize]
-        .copy_from_slice(signature.to_bytes().as_slice());
+    let mut applicant_nonce_contents = Vec::new();
+    // type OBJECT IDENTIFIER - cabf-applicantSigningNonce
+    asn1_rs::oid!(2.23.140.42).write_der(&mut applicant_nonce_contents).unwrap();
+    // values SET
+    asn1_rs::Set::from_iter_to_der([
+        asn1_rs::OctetString::new(&applicant_nonce)
+    ].iter()).unwrap().write_der(&mut applicant_nonce_contents).unwrap();
+
+    // attributes [0] Attributes
+    asn1_rs::TaggedImplicit::<asn1_rs::Set, asn1_rs::Error, 0>::implicit(
+        asn1_rs::Set::from_iter_to_der([
+            // Attribute SEQUENCE
+            asn1_rs::Sequence::new(ca_nonce_contents.into()),
+            // Attribute SEQUENCE
+            asn1_rs::Sequence::new(applicant_nonce_contents.into()),
+        ].iter()).unwrap()
+    ).write_der(&mut tbs_csr_contents).unwrap();
+
+    let tbs_csr = asn1_rs::Sequence::new(tbs_csr_contents.into());
+    let mut tbs = Vec::new();
+    tbs_csr.write_der(&mut tbs).unwrap();
+    let signature = hs_key.sign(&tbs);
+
+    let mut csr_contents = Vec::new();
+    tbs_csr.write_der(&mut csr_contents).unwrap();
+    // signatureAlgorithm AlgorithmIdentifier
+    asn1_rs::Sequence::from_iter_to_der([
+        // algorithm OBJECT IDENTIFIER - id-Ed25519
+        asn1_rs::oid!(1.3.101.112)
+    ].iter()).unwrap().write_der(&mut csr_contents).unwrap();
+    // signature BIT STRING
+    asn1_rs::BitString::new(0, signature.to_bytes().as_slice())
+        .write_der(&mut csr_contents).unwrap();
+
+    let mut csr = Vec::new();
+    // CertificationRequest SEQUENCE
+    asn1_rs::Sequence::new(csr_contents.into()).write_der(&mut csr).unwrap();
+
     Ok(csr)
 }
 
