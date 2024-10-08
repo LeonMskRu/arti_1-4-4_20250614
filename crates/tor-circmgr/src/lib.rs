@@ -1195,7 +1195,6 @@ mod test {
         tor_rtmock::MockRuntime::test_with_various(|runtime| async move {
             let circmgr = make_circmgr(runtime.clone());
 
-            let (finished_tx, finished_rx) = tor_async_utils::oneshot::channel();
             runtime.spawn_identified("get_or_launch_dir", async move {
                 let circ1 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
                 let circ2 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
@@ -1215,11 +1214,8 @@ mod test {
                 assert_ne!(circ1, circ4);
                 assert_ne!(circ2, circ4);
                 assert_ne!(circ3, circ4);
-
-                finished_tx.send(true).unwrap();
             });
-            runtime.advance_by(Duration::from_secs(1)).await;
-            assert!(finished_rx.await.unwrap());
+            runtime.advance_until_stalled().await;
         });
     }
 }
