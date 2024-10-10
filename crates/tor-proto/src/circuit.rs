@@ -1361,8 +1361,7 @@ mod test {
     //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
 
     use super::*;
-    use crate::channel::OpenChanCellS2C;
-    use crate::channel::{test::new_reactor, CodecError};
+    use crate::channel::test::{new_reactor, CodecResult};
     use crate::crypto::cell::RelayCellBody;
     #[cfg(feature = "ntor_v3")]
     use crate::crypto::handshake::ntor_v3::NtorV3Server;
@@ -1458,11 +1457,7 @@ mod test {
 
     fn working_fake_channel<R: Runtime>(
         rt: &R,
-    ) -> (
-        Arc<Channel>,
-        Receiver<AnyChanCell>,
-        Sender<std::result::Result<OpenChanCellS2C, CodecError>>,
-    ) {
+    ) -> (Arc<Channel>, Receiver<AnyChanCell>, Sender<CodecResult>) {
         let (channel, chan_reactor, rx, tx) = new_reactor(rt.clone());
         rt.spawn(async {
             let _ignore = chan_reactor.run().await;
@@ -2083,7 +2078,7 @@ mod test {
         Option<StreamId>,
         usize,
         Receiver<AnyChanCell>,
-        Sender<std::result::Result<OpenChanCellS2C, CodecError>>,
+        Sender<CodecResult>,
     ) {
         let (chan, mut rx, sink2) = working_fake_channel(rt);
         let (circ, mut sink) = newcirc(rt, chan).await;
