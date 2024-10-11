@@ -136,7 +136,6 @@ pub struct RunningOnionService {
 struct SvcInner {
     /// Configuration information about this service.
     config_tx: postage::watch::Sender<Arc<OnionServiceConfig>>,
-    config: Arc<OnionServiceConfig>,
 
     /// A oneshot that will be dropped when this object is dropped.
     _shutdown_tx: postage::broadcast::Sender<void::Void>,
@@ -293,7 +292,7 @@ impl OnionService {
         let (rend_req_tx, rend_req_rx) = mpsc::channel(32);
         let (shutdown_tx, shutdown_rx) = broadcast::channel(0);
         let config = Arc::new(config);
-        let (config_tx, config_rx) = postage::watch::channel_with(config.clone());
+        let (config_tx, config_rx) = postage::watch::channel_with(config);
 
         let (ipt_mgr_view, publisher_view) =
             crate::ipt_set::ipts_channel(&runtime, iptpub_storage_handle)?;
@@ -331,7 +330,6 @@ impl OnionService {
             keymgr,
             inner: Mutex::new(SvcInner {
                 config_tx,
-                config,
                 _shutdown_tx: shutdown_tx,
                 status_tx,
                 unlaunched: Some((
@@ -428,25 +426,15 @@ impl RunningOnionService {
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
-        // The weak Arc creation and then immediate upgrade is a workaround not being able to
-        // hold mutable borrows on inner.config_tx and inner.config at the same time.
-        let mut new_config_w = std::sync::Weak::<OnionServiceConfig>::new();
         inner.config_tx.try_maybe_send(|cur_config| {
             let new_config = cur_config.for_transition_to(new_config, how)?;
             Ok::<_, ReconfigureError>(match how {
                 // We're only checking, so return the current configuration.
                 tor_config::Reconfigure::CheckAllOrNothing => Arc::clone(cur_config),
                 // We're replacing the configuration, and we didn't get an error.
-                _ => {
-                    let config = Arc::new(new_config);
-                    new_config_w = Arc::downgrade(&config);
-                    config
-                }
+                _ => Arc::new(new_config),
             })
         })?;
-        if let Some(new_config) = new_config_w.upgrade() {
-            inner.config = new_config;
-        }
         Ok(())
 
         // TODO (#1153, #1209): We need to make sure that the various tasks listening on
@@ -540,11 +528,12 @@ impl RunningOnionService {
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
     pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
-        let inner = self.inner.lock().expect("lock poisoned");
+        let mut inner = self.inner.lock().expect("lock poisoned");
+        let config = inner.config_tx.borrow();
         onion_caa(
             &self.keymgr,
             &self.nickname,
-            &inner.config.caa_records,
+            &config.caa_records,
             expiry,
         )
     }
