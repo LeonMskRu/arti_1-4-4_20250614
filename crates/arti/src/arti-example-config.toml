@@ -501,7 +501,10 @@
 #    alice = "descriptor:x25519:PU63REQUH4PP464E2Y7AVQ35HBB5DXDH5XEUVUNP3KCPNOXZGIBA"
 #    bob = "descriptor:x25519:B5ZQGTPERMMUDA6VC63LHJUF5IHPOKJMUK26LY2XKSF7VG52AESQ"
 
-
+# Certification Authority Authorization records to publish for the onion service as per RFC 6844
+# The named flag supported is "Critical" but custom flags can be added with e.g. "Critical | 4"
+# `tag` must be US-ASCII
+# `value` can include binary data encoded as per RFC1035 § 5.1
 #    [[onion_services."allium-cepa".caa_records]]
 #    flags = "Critical"
 #    tag = "issue"
