@@ -361,6 +361,7 @@ pub struct CAARecord {
 }
 
 impl CAARecordBuilder {
+    /// Check that the CAA record conforms to [RFC6844 § 5.1](https://datatracker.ietf.org/doc/html/rfc6844#section-5.1).
     fn validate(&self) -> Result<(), ConfigBuildError> {
         if let Some(tag) = &self.tag {
             if !tag.is_ascii() {

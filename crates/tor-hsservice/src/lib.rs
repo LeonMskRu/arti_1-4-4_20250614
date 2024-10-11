@@ -779,9 +779,7 @@ fn onion_caa(
         })
         .collect::<Result<Vec<CAARecord>, CAARecordBuilderError>>()
         .expect("unable to build CAA record");
-    let caa_rrset = CAARecordSet {
-        caa_records: &caa_records,
-    };
+    let caa_rrset = CAARecordSet::new(&caa_records);
     let tbs_caa_rrset = caa_rrset.build_sign(&mut rng)?;
 
     let tbs = format!("onion-caa|{}|{}", expiry_unix, tbs_caa_rrset);

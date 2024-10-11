@@ -194,9 +194,19 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
 
 /// Helper for building a textual representation of a set of CAA records
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct CAARecordSet<'a> {
     /// CAA records
-    pub caa_records: &'a [CAARecord],
+    caa_records: &'a [CAARecord],
+}
+
+impl<'a> CAARecordSet<'a> {
+    /// Wrap a slice of CAARecords for encoding into Netdoc format
+    pub fn new(caa_records: &'a[CAARecord]) -> Self {
+        Self {
+            caa_records
+        }
+    }
 }
 
 impl<'a> NetdocBuilder for CAARecordSet<'a> {
