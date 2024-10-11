@@ -242,7 +242,7 @@ impl Proxy {
     /// Reconfigure this proxy, using the new configuration `config` and the
     /// rules in `how`.
     fn reconfigure(
-        &mut self,
+        &self,
         config: OnionServiceProxyConfig,
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
@@ -255,7 +255,7 @@ impl Proxy {
 
     /// Helper for reconfigure: Run `reconfigure` on each part of this `Proxy`.
     fn reconfigure_inner(
-        &mut self,
+        &self,
         config: OnionServiceProxyConfig,
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
@@ -274,7 +274,7 @@ pub(crate) struct ProxySet<R: Runtime> {
     /// The arti_client that we use to launch proxies.
     client: arti_client::TorClient<R>,
     /// The proxies themselves, indexed by nickname.
-    proxies: Arc<Mutex<BTreeMap<HsNickname, Proxy>>>,
+    proxies: Arc<Mutex<BTreeMap<HsNickname, Arc<Proxy>>>>,
 }
 
 impl<R: Runtime> ProxySet<R> {
@@ -286,7 +286,7 @@ impl<R: Runtime> ProxySet<R> {
 
         let proxies = Arc::new(Mutex::new(config_list
             .into_iter()
-            .map(|(nickname, cfg)| Ok((nickname, Proxy::launch_new(client, cfg)?)))
+            .map(|(nickname, cfg)| Ok((nickname, Arc::new(Proxy::launch_new(client, cfg)?))))
             .collect::<anyhow::Result<BTreeMap<_, _>>>()?));
 
         Ok(Self {
@@ -318,11 +318,11 @@ impl<R: Runtime> ProxySet<R> {
             defunct_nicknames.remove(&nickname);
 
             match proxy_map.entry(nickname) {
-                Entry::Occupied(mut existing_proxy) => {
+                Entry::Occupied(existing_proxy) => {
                     // We already have a proxy by this name, so we try to
                     // reconfigure it.
                     existing_proxy
-                        .get_mut()
+                        .get()
                         .reconfigure(cfg, Reconfigure::WarnOnFailures)?;
                 }
                 Entry::Vacant(ent) => {
@@ -330,7 +330,7 @@ impl<R: Runtime> ProxySet<R> {
                     // one.
                     match Proxy::launch_new(&self.client, cfg) {
                         Ok(new_proxy) => {
-                            ent.insert(new_proxy);
+                            ent.insert(Arc::new(new_proxy));
                         }
                         Err(err) => {
                             warn_report!(err, "Unable to launch onion service {}", ent.key());
@@ -370,7 +370,7 @@ impl<R: Runtime> crate::reload_cfg::ReconfigurableModule for ProxySet<R> {
 #[derive(Clone, Debug)]
 pub(crate) struct RPCProxySet {
     /// The running onion services
-    proxies: Arc<Mutex<BTreeMap<HsNickname, Proxy>>>,
+    proxies: Arc<Mutex<BTreeMap<HsNickname, Arc<Proxy>>>>,
 }
 
 impl<R: Runtime> From<&ProxySet<R>> for RPCProxySet {
@@ -383,9 +383,9 @@ impl<R: Runtime> From<&ProxySet<R>> for RPCProxySet {
 
 impl RPCProxySet {
     /// Find an onion service by its public key
-    pub(crate) fn get_by_hsid(&self, hsid: &HsId) -> Option<Proxy> {
+    pub(crate) fn get_by_hsid(&self, hsid: &HsId) -> Option<Arc<Proxy>> {
         self.proxies.lock().expect("lock poisoned").values().find(|p| {
             p.svc.onion_name().map(|id| &id == hsid).unwrap_or(false)
-        }).map(|p| p.to_owned())
+        }).cloned()
     }
 }

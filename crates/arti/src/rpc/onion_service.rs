@@ -7,7 +7,7 @@ use base64ct::Encoding;
 use std::sync::Arc;
 use tor_error::{ErrorKind, HasKind};
 use tor_hsservice::{HsId, OnionCaaError, OnionCsrError};
-use tor_rpcbase::{self as rpc, ObjectId};
+use tor_rpcbase::{self as rpc, SingleIdResponse};
 
 /// Get an onion service by its domain
 #[derive(Debug, serde::Deserialize, derive_deftly::Deftly)]
@@ -19,15 +19,8 @@ struct GetOnionService {
 }
 
 impl rpc::RpcMethod for GetOnionService {
-    type Output = OnionServiceInfo;
+    type Output = SingleIdResponse;
     type Update = rpc::NoUpdates;
-}
-
-/// A reference to an onion service
-#[derive(serde::Serialize, Clone, Debug)]
-pub(super) struct OnionServiceInfo {
-    /// The onion services object ID in this RPC session
-    service: ObjectId,
 }
 
 /// An error occurred getting the onion service object
@@ -200,7 +193,7 @@ async fn rpc_session_get_onion_service(
     session: Arc<ArtiRpcSession>,
     method: Box<GetOnionService>,
     ctx: Arc<dyn rpc::Context>,
-) -> Result<OnionServiceInfo, GetOnionServiceError> {
+) -> Result<SingleIdResponse, GetOnionServiceError> {
     let rhs = method
         .domain
         .rmatch_indices('.')
@@ -216,14 +209,12 @@ async fn rpc_session_get_onion_service(
         .await
         .map_err(|_| GetOnionServiceError::Shutdown)?;
 
-    let onion_service = match onion_services.get_by_hsid(&hsid) {
+    let onion_service: Arc<Proxy> = match onion_services.get_by_hsid(&hsid) {
         Some(s) => s,
         None => return Err(GetOnionServiceError::NotFound),
     };
 
-    Ok(OnionServiceInfo {
-        service: ctx.register_owned(Arc::new(onion_service)),
-    })
+    Ok(SingleIdResponse::from(ctx.register_weak(onion_service)))
 }
 rpc::static_rpc_invoke_fn! {rpc_session_get_onion_service;}
 
