@@ -45,6 +45,7 @@ pub(crate) struct RpcVisibleArtiState {
     ///
     /// Right now it only lists Socks; in the future it may list more.
     proxy_info: postage::watch::Receiver<ProxyInfoState>,
+    /// An `RPCProxySet` used for requests about running onion services
     onion_services: postage::watch::Receiver<OnionServicesState>,
 }
 
@@ -54,6 +55,7 @@ pub(crate) struct RpcVisibleArtiState {
 pub(crate) struct RpcStateSender {
     /// Sender for setting our list of proxy ports.
     proxy_info_sender: DropNotifyWatchSender<ProxyInfoState>,
+    /// Sender for running onion services
     onion_services_sender: DropNotifyWatchSender<OnionServicesState>,
 }
 
@@ -97,10 +99,14 @@ impl DropNotifyEofSignallable for ProxyInfoState {
     }
 }
 
+/// Possible state for a watched onion_services
 #[derive(Debug, Clone)]
 enum OnionServicesState {
+    /// We haven't set it yet.
     Unset,
+    /// We've set it to a given value.
     Set(RPCProxySet),
+    /// The sender has been dropped.
     Eof,
 }
 
@@ -147,6 +153,7 @@ impl RpcVisibleArtiState {
         Err(())
     }
 
+    /// Gets the latest onion services, busy waiting until available
     pub(super) async fn get_onion_services(&self) -> Result<RPCProxySet, ()> {
         let mut onion_services = self.onion_services.clone();
         while let Some(v) = onion_services.next().await {
@@ -180,6 +187,7 @@ impl RpcStateSender {
         *self.proxy_info_sender.borrow_mut() = ProxyInfoState::Set(Arc::new(info));
     }
 
+    /// Sets the list of onion services, this method may only be called once per state.
     pub(crate) fn set_onion_services(&mut self, onion_services: RPCProxySet) {
         *self.onion_services_sender.borrow_mut() = OnionServicesState::Set(onion_services);
     }

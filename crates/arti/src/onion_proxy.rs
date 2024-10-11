@@ -366,8 +366,10 @@ impl<R: Runtime> crate::reload_cfg::ReconfigurableModule for ProxySet<R> {
     }
 }
 
+/// A reference to the running onion services for use in the RPC server
 #[derive(Clone, Debug)]
 pub(crate) struct RPCProxySet {
+    /// The running onion services
     proxies: Arc<Mutex<BTreeMap<HsNickname, Proxy>>>,
 }
 
@@ -380,6 +382,7 @@ impl<R: Runtime> From<&ProxySet<R>> for RPCProxySet {
 }
 
 impl RPCProxySet {
+    /// Find an onion service by its public key
     pub(crate) fn get_by_hsid(&self, hsid: &HsId) -> Option<Proxy> {
         self.proxies.lock().expect("lock poisoned").values().find(|p| {
             p.svc.onion_name().map(|id| &id == hsid).unwrap_or(false)
