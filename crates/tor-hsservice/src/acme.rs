@@ -43,6 +43,7 @@ pub(crate) fn onion_csr(
     );
 
     let mut rng = rand::thread_rng();
+    // 10 bytes is a mostly arbitrary amount of entropy. It can be changed but MUST be 8 or more.
     let mut applicant_nonce = [0_u8; 10];
     rng.fill(&mut applicant_nonce);
     drop(rng);
