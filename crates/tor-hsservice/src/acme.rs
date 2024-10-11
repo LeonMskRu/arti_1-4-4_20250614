@@ -196,14 +196,17 @@ pub(crate) fn onion_caa(
             .ok_or(OnionCaaError::KeyNotFound)?,
     );
 
+    let mut rng = rand::thread_rng();
+    // Vary expiry timestamp by up to 15 minutes to obscure local clock skew
+    let expiry_jitter = Duration::from_secs(rng.gen_range(0..=900));
+
     let now = SystemTime::now();
-    let expiry = now + Duration::from_secs(expiry);
+    let expiry = now + Duration::from_secs(expiry) + expiry_jitter;
     let expiry_unix = expiry
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| OnionCaaError::InvalidSystemTime)?
         .as_secs();
 
-    let mut rng = rand::thread_rng();
     let caa_records = caa
         .iter()
         .map(|r| {
