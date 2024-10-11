@@ -357,6 +357,8 @@ pub struct CAARecord {
     /// The property identifier, a sequence of US-ASCII characters.
     pub(crate) tag: String,
     /// A sequence of octets representing the property value.
+    /// Non US-ASCII bytes are encoded as per [RFC 1035 § 5.1](https://datatracker.ietf.org/doc/html/rfc1035#section-5.1);
+    /// i.e. `\DDD` where `DDD` is the decimal octet.
     pub(crate) value: String,
 }
 
