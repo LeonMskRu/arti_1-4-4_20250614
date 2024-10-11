@@ -199,7 +199,10 @@ pub(crate) fn onion_caa(
 
     let mut rng = rand::thread_rng();
     // Vary expiry timestamp by up to 15 minutes to obscure local clock skew
-    let expiry_jitter = Duration::from_secs(rng.gen_range(0..=900));
+    let expiry_jitter = Duration::from_secs(
+        rng.gen_range_checked(0..=900)
+            .expect("generate random expiry jitter")
+    );
 
     let now = SystemTime::now();
     let expiry = now + Duration::from_secs(expiry) + expiry_jitter;
