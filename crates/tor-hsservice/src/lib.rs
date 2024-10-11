@@ -618,11 +618,14 @@ fn onion_name(keymgr: &KeyMgr, nickname: &HsNickname) -> Option<HsId> {
 }
 
 /// Possible errors when creating a CSR for an Onion Service
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Error)]
+#[non_exhaustive]
 pub enum OnionCsrError {
     /// Arti can't find the key for this service
+    #[error("Arti can't find the key for this service")]
     KeyNotFound,
     /// The CA nonce was too long to fit
+    #[error("The CA nonce was too long to fit")]
     CANonceTooLong,
 }
 
@@ -644,7 +647,7 @@ fn onion_csr(
     );
 
     let mut rng = rand::thread_rng();
-    let mut applicant_nonce = [0u8; 10];
+    let mut applicant_nonce = [0_u8; 10];
     rng.fill(&mut applicant_nonce);
     drop(rng);
 
@@ -653,37 +656,52 @@ fn onion_csr(
     // CertificationRequestInfo SEQUENCE
     let mut tbs_csr_contents = Vec::new();
     // version INTEGER
-    0.write_der(&mut tbs_csr_contents).unwrap();
+    0.write_der(&mut tbs_csr_contents)
+        .expect("serialize version INTEGER");
     // subject Name
-    asn1_rs::Sequence::new((&[]).into()).write_der(&mut tbs_csr_contents).unwrap();
+    asn1_rs::Sequence::new((&[]).into()).write_der(&mut tbs_csr_contents)
+        .expect("serialize subject Name");
 
     let mut subject_pk_contents = Vec::new();
     // algorithm AlgorithmIdentifier
     asn1_rs::Sequence::from_iter_to_der([
         // algorithm OBJECT IDENTIFIER - id-Ed25519
         asn1_rs::oid!(1.3.101.112)
-    ].iter()).unwrap().write_der(&mut subject_pk_contents).unwrap();
+    ].iter())
+        .expect("create algorithm AlgorithmIdentifier")
+        .write_der(&mut subject_pk_contents)
+        .expect("serialize algorithm AlgorithmIdentifier");
     // subjectPublicKey BIT STRING
     asn1_rs::BitString::new(0, &hs_key.public().to_bytes())
-        .write_der(&mut subject_pk_contents).unwrap();
+        .write_der(&mut subject_pk_contents)
+        .expect("serialize subjectPublicKey BIT STRING");
     // subjectPKInfo SubjectPublicKeyInfo
-    asn1_rs::Sequence::new(subject_pk_contents.into()).write_der(&mut tbs_csr_contents).unwrap();
+    asn1_rs::Sequence::new(subject_pk_contents.into()).write_der(&mut tbs_csr_contents)
+        .expect("serialize subjectPKInfo SubjectPublicKeyInfo");
 
     let mut ca_nonce_contents = Vec::new();
     // type OBJECT IDENTIFIER - cabf-caSigningNonce
-    asn1_rs::oid!(2.23.140.41).write_der(&mut ca_nonce_contents).unwrap();
+    asn1_rs::oid!(2.23.140.41).write_der(&mut ca_nonce_contents)
+        .expect("serialize type OBJECT IDENTIFIER - cabf-caSigningNonce");
     // values SET
     asn1_rs::Set::from_iter_to_der([
-        asn1_rs::OctetString::new(&ca_nonce)
-    ].iter()).unwrap().write_der(&mut ca_nonce_contents).unwrap();
+        asn1_rs::OctetString::new(ca_nonce)
+    ].iter())
+        .expect("create values SET")
+        .write_der(&mut ca_nonce_contents)
+        .expect("serialize values SET");
 
     let mut applicant_nonce_contents = Vec::new();
     // type OBJECT IDENTIFIER - cabf-applicantSigningNonce
-    asn1_rs::oid!(2.23.140.42).write_der(&mut applicant_nonce_contents).unwrap();
+    asn1_rs::oid!(2.23.140.42).write_der(&mut applicant_nonce_contents)
+        .expect("serialize type OBJECT IDENTIFIER - cabf-applicantSigningNonce");
     // values SET
     asn1_rs::Set::from_iter_to_der([
         asn1_rs::OctetString::new(&applicant_nonce)
-    ].iter()).unwrap().write_der(&mut applicant_nonce_contents).unwrap();
+    ].iter())
+        .expect("create values SET")
+        .write_der(&mut applicant_nonce_contents)
+        .expect("serialize values SET");
 
     // attributes [0] Attributes
     asn1_rs::TaggedImplicit::<asn1_rs::Set, asn1_rs::Error, 0>::implicit(
@@ -692,51 +710,55 @@ fn onion_csr(
             asn1_rs::Sequence::new(ca_nonce_contents.into()),
             // Attribute SEQUENCE
             asn1_rs::Sequence::new(applicant_nonce_contents.into()),
-        ].iter()).unwrap()
-    ).write_der(&mut tbs_csr_contents).unwrap();
+        ].iter()).expect("create attributes [0] Attributes")
+    ).write_der(&mut tbs_csr_contents).expect("serialize attributes [0] Attributes");
 
     let tbs_csr = asn1_rs::Sequence::new(tbs_csr_contents.into());
     let mut tbs = Vec::new();
-    tbs_csr.write_der(&mut tbs).unwrap();
+    tbs_csr.write_der(&mut tbs).expect("serialize CertificationRequestInfo SEQUENCE");
     let signature = hs_key.sign(&tbs);
 
     let mut csr_contents = Vec::new();
-    tbs_csr.write_der(&mut csr_contents).unwrap();
+    tbs_csr.write_der(&mut csr_contents)
+        .expect("serialize CertificationRequestInfo SEQUENCE");
     // signatureAlgorithm AlgorithmIdentifier
     asn1_rs::Sequence::from_iter_to_der([
         // algorithm OBJECT IDENTIFIER - id-Ed25519
         asn1_rs::oid!(1.3.101.112)
-    ].iter()).unwrap().write_der(&mut csr_contents).unwrap();
+    ].iter())
+        .expect("create signatureAlgorithm AlgorithmIdentifier")
+        .write_der(&mut csr_contents)
+        .expect("serialize signatureAlgorithm AlgorithmIdentifier");
     // signature BIT STRING
     asn1_rs::BitString::new(0, signature.to_bytes().as_slice())
-        .write_der(&mut csr_contents).unwrap();
+        .write_der(&mut csr_contents).expect("serialize signature BIT STRING");
 
     let mut csr = Vec::new();
     // CertificationRequest SEQUENCE
-    asn1_rs::Sequence::new(csr_contents.into()).write_der(&mut csr).unwrap();
+    asn1_rs::Sequence::new(csr_contents.into()).write_der(&mut csr)
+        .expect("serialize CertificationRequest SEQUENCE");
 
     Ok(csr)
 }
 
 /// Possible errors when creating a CAA document for an Onion Service
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[non_exhaustive]
 pub enum OnionCaaError {
     /// Arti can't find the key for this service
+    #[error("Arti can't find the key for this service")]
     KeyNotFound,
     /// The system clock is bogus
+    #[error("The system clock is bogus")]
     InvalidSystemTime,
     /// The CAA records couldn't be serialized
-    EncodeError(EncodeError),
-}
-
-impl From<EncodeError> for OnionCaaError {
-    fn from(value: EncodeError) -> Self {
-        Self::EncodeError(value)
-    }
+    #[error("The CAA records couldn't be serialized")]
+    EncodeError(#[from] EncodeError),
 }
 
 /// A CAA document per draft-ietf-acme-onion
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct OnionCaa {
     /// CAA RRSet
     pub caa: String,
