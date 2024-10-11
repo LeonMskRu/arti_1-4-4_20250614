@@ -729,6 +729,17 @@ pub enum ErrorKind {
     #[cfg(feature = "rpc")]
     RpcObjectNotFound,
 
+    /// An RPC request was cancelled before it could finish.
+    #[display("RPC request cancelled")]
+    #[cfg(feature = "rpc")]
+    RpcRequestCancelled,
+
+    /// An RPC request failed because a user listed a required feature
+    /// that is not implemented by the subsystem, or the invoked method.
+    #[display("Requested RPC feature is not implemented")]
+    #[cfg(feature = "rpc")]
+    RpcFeatureNotPresent,
+
     /// Internal error (bug) in Arti.
     ///
     /// A supposedly impossible problem has arisen.  This indicates a bug in
@@ -758,6 +769,7 @@ pub trait HasKind {
     fn kind(&self) -> ErrorKind;
 }
 
+#[cfg(feature = "futures")]
 impl HasKind for futures::task::SpawnError {
     fn kind(&self) -> ErrorKind {
         use ErrorKind as EK;

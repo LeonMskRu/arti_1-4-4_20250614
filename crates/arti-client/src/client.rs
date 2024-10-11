@@ -21,12 +21,14 @@ use tor_dirmgr::bridgedesc::BridgeDescMgr;
 use tor_dirmgr::{DirMgrStore, Timeliness};
 use tor_error::{error_report, internal, Bug};
 use tor_guardmgr::{GuardMgr, RetireCircuits};
+use tor_keymgr::Keystore;
 use tor_memquota::MemoryQuotaTracker;
 use tor_netdir::{params::NetParameters, NetDirProvider};
 #[cfg(feature = "onion-service-service")]
 use tor_persist::state_dir::StateDirectory;
 use tor_persist::{FsStateMgr, StateMgr};
 use tor_proto::circuit::ClientCirc;
+use tor_proto::memquota::{SpecificAccount as _, ToplevelAccount};
 use tor_proto::stream::{DataStream, IpVersionPreference, StreamParameters};
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
@@ -42,16 +44,18 @@ use {
     tor_netdir::DirEvent,
 };
 
+#[cfg(all(feature = "onion-service-service", feature = "experimental-api"))]
+use tor_hsservice::HsIdKeypairSpecifier;
 #[cfg(all(feature = "onion-service-client", feature = "experimental-api"))]
-use {
-    tor_hscrypto::pk::HsId, tor_hscrypto::pk::HsIdKeypair, tor_hsservice::HsIdKeypairSpecifier,
-    tor_keymgr::KeystoreSelector,
-};
+use {tor_hscrypto::pk::HsId, tor_hscrypto::pk::HsIdKeypair, tor_keymgr::KeystoreSelector};
 
-use tor_keymgr::{config::arti::ArtiKeystoreKind, ArtiNativeKeystore, KeyMgr, KeyMgrBuilder};
+use tor_keymgr::{config::ArtiKeystoreKind, ArtiNativeKeystore, KeyMgr, KeyMgrBuilder};
 
 #[cfg(feature = "ephemeral-keystore")]
 use tor_keymgr::ArtiEphemeralKeystore;
+
+#[cfg(feature = "ctor-keystore")]
+use tor_keymgr::{CTorClientKeystore, CTorServiceKeystore};
 
 use futures::lock::Mutex as AsyncMutex;
 use futures::task::SpawnExt;
@@ -76,6 +80,18 @@ use tracing::{debug, info};
 /// Cloning this object makes a new reference to the same underlying
 /// handles: it's usually better to clone the `TorClient` than it is to
 /// create a new one.
+///
+/// # In the Arti RPC System
+///
+/// An open client on the Tor network.
+///
+/// A `TorClient` can be used to open anonymous connections,
+/// and (eventually) perform other activities.
+///
+/// You can use an `RpcSession` as a `TorClient`, or use the `isolated_client` method
+/// to create a new `TorClient` whose stream will not share circuits with any other Tor client.
+///
+/// This ObjectID for this object can be used as the target of a SOCKS stream.
 // TODO(nickm): This type now has 5 Arcs inside it, and 2 types that have
 // implicit Arcs inside them! maybe it's time to replace much of the insides of
 // this with an Arc<TorClientInner>?
@@ -195,8 +211,8 @@ pub struct InertTorClient {
     /// The key manager.
     ///
     /// This is used for retrieving private keys, certificates, and other sensitive data (for
-    /// example, for retrieving the keys necessary for connecting to hidden services that require
-    /// client authentication).
+    /// example, for retrieving the keys necessary for connecting to hidden services that are
+    /// running in restricted discovery mode).
     ///
     /// If this crate is compiled _with_ the `keymgr` feature, [`TorClient`] will use a functional
     /// key manager implementation.
@@ -221,41 +237,63 @@ impl InertTorClient {
     /// Returns `Ok(None)` if keystore use is disabled.
     fn create_keymgr(config: &TorClientConfig) -> StdResult<Option<Arc<KeyMgr>>, ErrorDetail> {
         let keystore = config.storage.keystore();
-        match keystore.primary_kind() {
+        let permissions = config.storage.permissions();
+        let primary_store: Box<dyn Keystore> = match keystore.primary_kind() {
             Some(ArtiKeystoreKind::Native) => {
                 let (state_dir, _mistrust) = config.state_dir()?;
                 let key_store_dir = state_dir.join("keystore");
-                let permissions = config.storage.permissions();
 
                 let native_store =
                     ArtiNativeKeystore::from_path_and_mistrust(&key_store_dir, permissions)?;
                 info!("Using keystore from {key_store_dir:?}");
 
-                let keymgr = KeyMgrBuilder::default()
-                    .primary_store(Box::new(native_store))
-                    .build()
-                    .map_err(|_| internal!("failed to build keymgr"))?;
-
-                // TODO #858: add support for the C Tor key store
-                Ok(Some(Arc::new(keymgr)))
+                Box::new(native_store)
             }
             #[cfg(feature = "ephemeral-keystore")]
             Some(ArtiKeystoreKind::Ephemeral) => {
                 // TODO: make the keystore ID somehow configurable
                 let ephemeral_store: ArtiEphemeralKeystore =
                     ArtiEphemeralKeystore::new("ephemeral".to_string());
-                let keymgr = KeyMgrBuilder::default()
-                    .primary_store(Box::new(ephemeral_store))
-                    .build()
-                    .map_err(|_| internal!("failed to build keymgr"))?;
-                Ok(Some(Arc::new(keymgr)))
+                Box::new(ephemeral_store)
             }
             None => {
                 info!("Running without a keystore");
-                Ok(None)
+                return Ok(None);
             }
-            ty => Err(internal!("unrecognized keystore type {ty:?}").into()),
+            ty => return Err(internal!("unrecognized keystore type {ty:?}").into()),
+        };
+
+        let mut builder = KeyMgrBuilder::default().primary_store(primary_store);
+
+        #[cfg(feature = "ctor-keystore")]
+        for config in config.storage.keystore().ctor_svc_stores() {
+            let store: Box<dyn Keystore> = Box::new(CTorServiceKeystore::from_path_and_mistrust(
+                config.path(),
+                permissions,
+                config.id().clone(),
+                // TODO: these nicknames should be cross-checked with configured
+                // svc nicknames as part of config validation!!!
+                config.nickname().clone(),
+            )?);
+
+            builder.secondary_stores().push(store);
         }
+
+        #[cfg(feature = "ctor-keystore")]
+        for config in config.storage.keystore().ctor_client_stores() {
+            let store: Box<dyn Keystore> = Box::new(CTorClientKeystore::from_path_and_mistrust(
+                config.path(),
+                permissions,
+                config.id().clone(),
+            )?);
+
+            builder.secondary_stores().push(store);
+        }
+
+        let keymgr = builder
+            .build()
+            .map_err(|_| internal!("failed to build keymgr"))?;
+        Ok(Some(Arc::new(keymgr)))
     }
 
     /// Generate a service discovery keypair for connecting to a hidden service running in
@@ -825,6 +863,7 @@ impl<R: Runtime> TorClient<R> {
             &config.channel,
             dormant.into(),
             &NetParameters::from_map(&config.override_net_params),
+            ToplevelAccount::new(&memquota).map_err(ErrorDetail::MemquotaDuringStartup)?,
         ));
         let guardmgr = tor_guardmgr::GuardMgr::new(runtime.clone(), statemgr.clone(), config)
             .map_err(ErrorDetail::GuardMgrSetup)?;
@@ -851,7 +890,7 @@ impl<R: Runtime> TorClient<R> {
                 statemgr.clone(),
                 &runtime,
                 Arc::clone(&chanmgr),
-                guardmgr.clone(),
+                &guardmgr,
             )
             .map_err(ErrorDetail::CircMgrSetup)?,
         );
@@ -1657,6 +1696,14 @@ impl<R: Runtime> TorClient<R> {
     /// [`HsIdKeypair`]. If an onion service with the given nickname already has an
     /// associated `HsIdKeypair`  in this `TorClient`'s `KeyMgr`, then this operation
     /// fails rather than overwriting the existing key.
+    ///
+    /// The specified `HsIdKeypair` will be inserted in the primary keystore.
+    ///
+    /// **Important**: depending on the configuration of your
+    /// [primary keystore](tor_keymgr::config::PrimaryKeystoreConfig),
+    /// the `HsIdKeypair` **may** get persisted to disk.
+    /// By default, Arti's primary keystore is the [native](ArtiKeystoreKind::Native),
+    /// disk-based keystore.
     ///
     /// This onion service will not actually handle any requests on its own: you
     /// will need to

@@ -51,6 +51,9 @@
 //!    When a tracker requests memory reclamation from a Parent,
 //!    it will also request it of all that Parent's Children (but not vice versa).
 //!
+//!    The account structure and reclamation strategy for Arti is defined in
+//!    `tor-proto`, and documented in `tor_proto::memquota`.
+//!
 //!  * **Data age**:
 //!    Each Participant must be able to say what the oldest data is, that it is storing.
 //!    The reclamation policy is to try to free the oldest data.
@@ -68,10 +71,11 @@
 //!    To avoid too-frequent reclamation, once reclamation has started,
 //!    it will continue until a low-water mark is reached, significantly lower than the quota.
 //!    I.e. the system has a hysteresis.
-// TODO we haven't implemented the queue wrapper yet
-// !    The only currently implemented higher-level Participant is
-// !    a queue which responds to a reclamation request
-// !    by completely destroying itself and freeing all its data.
+//!
+//!    The only currently implemented higher-level Participant is
+//!    [`mq_queue`], a queue which responds to a reclamation request
+//!    by completely destroying itself, freeing all its data,
+//!    and reporting it has been closed.
 //!
 //!  * <div id="is-approximate">
 //!
@@ -165,6 +169,11 @@
 //! a Participant, or a whole Account, or the whole MemoryQuotaTracker,
 //! may become unuseable,
 //! in which case methods will return errors with kind [`tor_error::ErrorKind::Internal`].
+//
+// TODO MEMQUOTA: We ought to account for the fixed overhead of each stream, circuit, and
+// channel.  For example, DataWriterImpl holds a substantial fixed-length buffer.  A
+// complication is that we want to know the "data age", which is possibly the time this stream
+// was last used.
 
 // @@ begin lint list maintained by maint/add_warning @@
 #![allow(renamed_and_removed_lints)] // @@REMOVE_WHEN(ci_arti_stable)
@@ -224,6 +233,8 @@
 mod drop_bomb;
 #[macro_use]
 mod refcount;
+#[macro_use]
+mod memory_cost_derive;
 
 mod drop_reentrancy;
 mod if_enabled;
@@ -256,7 +267,11 @@ pub use config::{Config, ConfigBuilder};
 pub use error::{Error, MemoryReclaimedError, StartupError};
 pub use if_enabled::EnabledToken;
 pub use memory_cost::HasMemoryCost;
-pub use mtracker::MemoryQuotaTracker;
+pub use memory_cost_derive::{assert_copy_static, HasMemoryCostStructural};
+pub use mtracker::{Account, MemoryQuotaTracker};
+
+#[doc(hidden)]
+pub use derive_deftly;
 
 /// `Result` whose `Err` is [`tor_memtrack::Error`](Error)
 pub type Result<T> = std::result::Result<T, Error>;

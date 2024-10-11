@@ -153,6 +153,15 @@ impl<T, S: Sink<T>> SometimesUnboundedSink<T, S> {
         // Waker invariant: buffer is empty, and we're not about to return Pending
         Ready(Ok(()))
     }
+
+    /// Obtain a reference to the inner `Sink`, `S`
+    ///
+    /// This method should be used with a little care, since it bypasses the wrapper.
+    /// For example, if `S` has interior mutability, and this method is used to
+    /// modify it, the `SometimesUnboundedSink` may malfunction.
+    pub(crate) fn as_inner(&self) -> &S {
+        &self.inner
+    }
 }
 
 // Waker invariant for all these impls:

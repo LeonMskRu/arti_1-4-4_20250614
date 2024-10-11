@@ -25,7 +25,8 @@ use crate::circuit::celltypes::{ClientCircChanMsg, CreateResponse};
 use crate::circuit::handshake::{BoxedClientLayer, HandshakeRole};
 use crate::circuit::unique_id::UniqId;
 use crate::circuit::{
-    sendme, streammap, CircParameters, Create2Wrap, CreateFastWrap, CreateHandshakeWrap,
+    sendme, streammap, CircParameters, CircuitRxReceiver, Create2Wrap, CreateFastWrap,
+    CreateHandshakeWrap,
 };
 use crate::crypto::binding::CircuitBinding;
 use crate::crypto::cell::{
@@ -35,6 +36,7 @@ use crate::crypto::cell::{
 use crate::crypto::handshake::fast::CreateFastClient;
 #[cfg(feature = "ntor_v3")]
 use crate::crypto::handshake::ntor_v3::{NtorV3Client, NtorV3PublicKey};
+use crate::memquota::{CircuitAccount, SpecificAccount as _, StreamAccount};
 use crate::stream::{AnyCmdChecker, StreamStatus};
 use crate::util::err::{ChannelClosed, ReactorError};
 use crate::util::sometimes_unbounded_sink::SometimesUnboundedSink;
@@ -42,6 +44,7 @@ use crate::util::SinkExt as _;
 use crate::{Error, Result};
 use std::borrow::Borrow;
 use std::marker::PhantomData;
+use std::mem::size_of;
 use std::pin::Pin;
 use tor_cell::chancell::msg::{AnyChanMsg, HandshakeType, Relay};
 use tor_cell::relaycell::msg::{AnyRelayMsg, End, Sendme};
@@ -69,14 +72,19 @@ use crate::circuit::path;
 #[cfg(test)]
 use crate::circuit::sendme::CircTag;
 use crate::circuit::sendme::StreamSendWindow;
+use crate::circuit::{StreamMpscReceiver, StreamMpscSender};
 use crate::crypto::handshake::ntor::{NtorClient, NtorPublicKey};
 use crate::crypto::handshake::{ClientHandshake, KeyGenerator};
+use derive_deftly::Deftly;
 use safelog::sensitive as sv;
+use tor_async_utils::{SinkTrySend as _, SinkTrySendError as _};
 use tor_cell::chancell::{self, BoxedCellBody, ChanMsg};
 use tor_cell::chancell::{AnyChanCell, CircId};
 use tor_cell::relaycell::extend::NtorV3Extension;
 use tor_linkspec::{EncodedLinkSpec, OwnedChanTarget, RelayIds};
 use tor_llcrypto::pk;
+use tor_memquota::derive_deftly_template_HasMemoryCost;
+use tor_memquota::mq_queue::{self, ChannelSpec as _, MpscSpec};
 use tracing::{debug, trace, warn};
 
 /// Initial value for outbound flow-control window on streams.
@@ -92,6 +100,10 @@ pub(super) const STREAM_READER_BUFFER: usize = (2 * RECV_WINDOW_INIT) as usize;
 
 /// The type of a oneshot channel used to inform reactor users of the result of an operation.
 pub(super) type ReactorResultChannel<T> = oneshot::Sender<Result<T>>;
+
+/// MPSC queue containing stream requests
+#[cfg(feature = "hs-service")]
+type StreamReqSender = mq_queue::Sender<StreamReqInfo, MpscSpec>;
 
 /// A handshake type, to be used when creating circuit hops.
 #[derive(Clone, Debug)]
@@ -216,9 +228,9 @@ pub(super) enum CtrlMsg {
         /// SENDME cells once we've read enough out of the other end. If it *does* block, we
         /// can assume someone is trying to send us more cells than they should, and abort
         /// the stream.
-        sender: mpsc::Sender<UnparsedRelayMsg>,
+        sender: StreamMpscSender<UnparsedRelayMsg>,
         /// A channel to receive messages to send on this stream from.
-        rx: mpsc::Receiver<AnyRelayMsg>,
+        rx: StreamMpscReceiver<AnyRelayMsg>,
         /// Oneshot channel to notify on completion, with the allocated stream ID.
         done: ReactorResultChannel<StreamId>,
         /// A `CmdChecker` to keep track of which message types are acceptable.
@@ -246,7 +258,7 @@ pub(super) enum CtrlMsg {
     #[cfg(feature = "hs-service")]
     AwaitStreamRequest {
         /// A channel for sending information about an incoming stream request.
-        incoming_sender: mpsc::Sender<StreamReqInfo>,
+        incoming_sender: StreamReqSender,
         /// A `CmdChecker` to keep track of which message types are acceptable.
         cmd_checker: AnyCmdChecker,
         /// Oneshot channel to notify on completion.
@@ -703,7 +715,7 @@ pub struct Reactor {
     /// Input stream, on which we receive ChanMsg objects from this circuit's
     /// channel.
     // TODO: could use a SPSC channel here instead.
-    input: mpsc::Receiver<ClientCircChanMsg>,
+    input: CircuitRxReceiver,
     /// The cryptographic state for this circuit for inbound cells.
     /// This object is divided into multiple layers, each of which is
     /// shared with one hop of the circuit.
@@ -724,11 +736,15 @@ pub struct Reactor {
     /// A handler for incoming stream requests.
     #[cfg(feature = "hs-service")]
     incoming_stream_req_handler: Option<IncomingStreamRequestHandler>,
+    /// Memory quota account
+    #[allow(dead_code)] // Partly here to keep it alive as long as the circuit
+    memquota: CircuitAccount,
 }
 
 /// Information about an incoming stream request.
 #[cfg(feature = "hs-service")]
-#[derive(Debug)]
+#[derive(Debug, Deftly)]
+#[derive_deftly(HasMemoryCost)]
 pub(super) struct StreamReqInfo {
     /// The [`IncomingStreamRequest`].
     pub(super) req: IncomingStreamRequest,
@@ -743,9 +759,14 @@ pub(super) struct StreamReqInfo {
     // incoming stream request from two separate hops.  (There is only one that's valid.)
     pub(super) hop_num: HopNum,
     /// A channel for receiving messages from this stream.
-    pub(super) receiver: mpsc::Receiver<UnparsedRelayMsg>,
+    #[deftly(has_memory_cost(indirect_size = "0"))] // estimate
+    pub(super) receiver: StreamMpscReceiver<UnparsedRelayMsg>,
     /// A channel for sending messages to be sent on this stream.
-    pub(super) msg_tx: mpsc::Sender<AnyRelayMsg>,
+    #[deftly(has_memory_cost(indirect_size = "size_of::<AnyRelayMsg>()"))] // estimate
+    pub(super) msg_tx: StreamMpscSender<AnyRelayMsg>,
+    /// The memory quota account to be used for this stream
+    #[deftly(has_memory_cost(indirect_size = "0"))] // estimate (it contains an Arc)
+    pub(super) memquota: StreamAccount,
 }
 
 /// Data required for handling an incoming stream request.
@@ -754,7 +775,7 @@ pub(super) struct StreamReqInfo {
 #[educe(Debug)]
 struct IncomingStreamRequestHandler {
     /// A sender for sharing information about an incoming stream request.
-    incoming_sender: mpsc::Sender<StreamReqInfo>,
+    incoming_sender: StreamReqSender,
     /// A [`AnyCmdChecker`] for validating incoming stream requests.
     cmd_checker: AnyCmdChecker,
     /// The hop to expect incoming stream requests from.
@@ -777,7 +798,8 @@ impl Reactor {
         channel: Arc<Channel>,
         channel_id: CircId,
         unique_id: UniqId,
-        input: mpsc::Receiver<ClientCircChanMsg>,
+        input: CircuitRxReceiver,
+        memquota: CircuitAccount,
     ) -> (
         Self,
         mpsc::UnboundedSender<CtrlMsg>,
@@ -809,6 +831,7 @@ impl Reactor {
             #[cfg(feature = "hs-service")]
             incoming_stream_req_handler: None,
             mutable: mutable.clone(),
+            memquota,
         };
 
         (reactor, control_tx, reactor_closed_rx, mutable)
@@ -1692,8 +1715,8 @@ impl Reactor {
         cx: &mut Context<'_>,
         hopnum: HopNum,
         message: AnyRelayMsg,
-        sender: mpsc::Sender<UnparsedRelayMsg>,
-        rx: mpsc::Receiver<AnyRelayMsg>,
+        sender: StreamMpscSender<UnparsedRelayMsg>,
+        rx: StreamMpscReceiver<AnyRelayMsg>,
         cmd_checker: AnyCmdChecker,
     ) -> Result<StreamId> {
         let hop = self
@@ -1902,7 +1925,7 @@ impl Reactor {
                 let message_closes_stream =
                     ent.cmd_checker.check_msg(&msg)? == StreamStatus::Closed;
 
-                if let Err(e) = ent.sink.try_send(msg) {
+                if let Err(e) = Pin::new(&mut ent.sink).try_send(msg) {
                     if e.is_full() {
                         // If we get here, we either have a logic bug (!), or an attacker
                         // is sending us more cells than we asked for via congestion control.
@@ -2044,24 +2067,27 @@ impl Reactor {
             .get_mut(Into::<usize>::into(hop_num))
             .ok_or(Error::CircuitClosed)?;
 
-        let (sender, receiver) = mpsc::channel(STREAM_READER_BUFFER);
-        let (msg_tx, msg_rx) = mpsc::channel(super::CIRCUIT_BUFFER_SIZE);
+        let memquota = StreamAccount::new(&self.memquota)?;
+        let time_prov = self.chan_sender.as_inner().time_provider().clone();
+
+        let (sender, receiver) = MpscSpec::new(STREAM_READER_BUFFER)
+            .new_mq(time_prov.clone(), memquota.as_raw_account())?;
+        let (msg_tx, msg_rx) = MpscSpec::new(super::CIRCUIT_BUFFER_SIZE)
+            .new_mq(time_prov, memquota.as_raw_account())?;
 
         let send_window = StreamSendWindow::new(SEND_WINDOW_INIT);
         let cmd_checker = DataCmdChecker::new_connected();
         hop.map
             .add_ent_with_id(sender, msg_rx, send_window, stream_id, cmd_checker)?;
 
-        let outcome = handler
-            .incoming_sender
-            .try_send(StreamReqInfo {
-                req,
-                stream_id,
-                hop_num,
-                msg_tx,
-                receiver,
-            })
-            .map_err(|e| e.into_send_error());
+        let outcome = Pin::new(&mut handler.incoming_sender).try_send(StreamReqInfo {
+            req,
+            stream_id,
+            hop_num,
+            msg_tx,
+            receiver,
+            memquota,
+        });
 
         log_ratelim!("Delivering message to incoming stream handler"; outcome);
 

@@ -22,7 +22,7 @@ pub(crate) use std::{
     fmt::{self, Debug},
     future::Future,
     marker::PhantomData,
-    mem,
+    mem::{self, size_of},
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
     sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
@@ -36,9 +36,12 @@ pub(crate) use futures::{
 };
 
 pub(crate) use {
-    derive_deftly::{define_derive_deftly, Deftly},
+    derive_deftly::{define_derive_deftly, derive_deftly_adhoc, Deftly},
     derive_more::{Constructor, Deref, DerefMut},
+    dyn_clone::DynClone,
     educe::Educe,
+    itertools::chain,
+    paste::paste,
     pin_project::pin_project,
     serde::{Deserialize, Serialize},
     slotmap::SlotMap,
@@ -54,7 +57,7 @@ pub(crate) use {
     tor_config::{ConfigBuildError, ReconfigureError},
     tor_error::{error_report, internal, into_internal, Bug, ErrorKind, HasKind},
     tor_log_ratelim::log_ratelim,
-    tor_rtcompat::{CoarseInstant, CoarseTimeProvider},
+    tor_rtcompat::{CoarseInstant, CoarseTimeProvider, DynTimeProvider},
 };
 
 pub(crate) use crate::{

@@ -24,7 +24,7 @@ use crate::{
     cancel::{Cancel, CancelHandle},
     err::RequestParseError,
     globalid::{GlobalId, MacKey},
-    msgs::{BoxedResponse, FlexibleRequest, Request, RequestId, ResponseBody},
+    msgs::{BoxedResponse, FlexibleRequest, ReqMeta, Request, RequestId, ResponseBody},
     objmap::{GenIdx, ObjMap},
     RpcMgr,
 };
@@ -41,6 +41,18 @@ use tor_rpcbase::templates::*;
 /// Specifically, the `objects` table in `Inner` hold capabilities
 /// that the client will use to do things,
 /// including an `RpcSession`.
+///
+/// # In the Arti RPC System
+///
+/// A connection to Arti.
+///
+/// This object is available as soon as you open a connection to Arti RPC,
+/// even before you authenticate.  Its ObjectId is always `"connection"`.
+///
+/// Because this object is available before authentication,
+/// it provides only those methods that you need
+/// in order to perform authentication
+/// and receive an `RpcSession`.
 #[derive(Deftly)]
 #[derive_deftly(Object)]
 pub struct Connection {
@@ -377,7 +389,7 @@ impl Connection {
         };
 
         // Create `run_method_lowlevel` future, and make it cancellable.
-        let fut = self.run_method_lowlevel(update_sender, obj, method);
+        let fut = self.run_method_lowlevel(update_sender, obj, method, meta);
         let (handle, fut) = Cancel::new(fut);
         self.register_request(id.clone(), handle);
 
@@ -425,8 +437,16 @@ impl Connection {
         tx_updates: rpc::dispatch::BoxedUpdateSink,
         obj: rpc::ObjectId,
         method: Box<dyn rpc::DeserMethod>,
+        meta: ReqMeta,
     ) -> Result<Box<dyn erased_serde::Serialize + Send + 'static>, rpc::RpcError> {
         let obj = self.lookup_object(&obj)?;
+
+        if !meta.require.is_empty() {
+            // TODO RPC: Eventually, we will need a way to tell which "features" are actually
+            // available.  But for now, we have no features, so if the require list is nonempty,
+            // we can safely reject the request.
+            return Err(MissingFeaturesError(meta.require).into());
+        }
 
         let context: Arc<dyn rpc::Context> = self.clone() as Arc<_>;
         let invoke_future = rpc::invoke_rpc_method(context, obj, method.upcast_box(), tx_updates)?;
@@ -441,6 +461,21 @@ impl Connection {
         self.mgr
             .upgrade()
             .ok_or(MgrDisappearedError::RpcMgrDisappeared)
+    }
+}
+
+/// An error returned when an RPC request lists some feature as required, but we don't have that
+/// feature.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("Required features not available")]
+struct MissingFeaturesError(
+    // TODO RPC: We need a way to put this into the error's "data" field.  But first we need to specify that.
+    Vec<String>,
+);
+
+impl tor_error::HasKind for MissingFeaturesError {
+    fn kind(&self) -> tor_error::ErrorKind {
+        tor_error::ErrorKind::RpcFeatureNotPresent
     }
 }
 

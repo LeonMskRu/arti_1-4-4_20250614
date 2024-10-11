@@ -1,8 +1,4 @@
-pub mod builder;
-mod config;
-mod err;
-
-pub use err::Error;
+//! Entry point of a Tor relay that is the [`TorRelay`] objects
 
 use std::sync::Arc;
 
@@ -12,6 +8,7 @@ use tor_keymgr::{
     ArtiEphemeralKeystore, ArtiNativeKeystore, KeyMgr, KeyMgrBuilder, KeystoreSelector,
 };
 use tor_netdir::params::NetParameters;
+use tor_proto::memquota::{SpecificAccount as _, ToplevelAccount};
 use tor_relay_crypto::pk::{RelayIdentityKeySpecifier, RelayIdentityKeypair};
 use tor_rtcompat::Runtime;
 use tracing::info;
@@ -38,6 +35,7 @@ pub struct TorRelay<R: Runtime> {
 
 /// TorRelay can't be used with native-tls due to the lack of RFC5705 (keying material exporter).
 #[cfg(all(feature = "rustls", any(feature = "async-std", feature = "tokio")))]
+#[allow(unused)] // TODO: Remove me when used.
 impl TorRelay<PreferredRuntime> {
     /// Return a new builder for creating a TorRelay object.
     ///
@@ -58,6 +56,7 @@ impl TorRelay<PreferredRuntime> {
     }
 }
 
+#[allow(unused)] // TODO: Remove me when used.
 impl<R: Runtime> TorRelay<R> {
     /// Return a new builder for creating TorRelay objects, with a custom provided [`Runtime`].
     ///
@@ -74,6 +73,7 @@ impl<R: Runtime> TorRelay<R> {
             &config.channel,
             Dormancy::Active,
             &NetParameters::from_map(&config.override_net_params),
+            ToplevelAccount::new_noop(), // TODO RELAY get mq from TorRelay
         ));
         Ok(Self {
             runtime,

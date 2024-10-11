@@ -22,7 +22,7 @@ use tor_error::warn_report;
 #[cfg(feature = "rpc")]
 use tor_rpcbase::{self as rpc};
 use tor_rtcompat::{NetStreamListener, Runtime};
-use tor_socksproto::{SocksAddr, SocksAuth, SocksCmd, SocksRequest, SOCKS_BUF_LEN};
+use tor_socksproto::{Handshake as _, SocksAddr, SocksAuth, SocksCmd, SocksRequest, SOCKS_BUF_LEN};
 
 use anyhow::{anyhow, Context, Result};
 
@@ -175,9 +175,25 @@ struct AuthInterpretation {
 ///
 /// ## The SOCKS protocol
 ///
-/// See [proposal 351](https://spec.torproject.org/proposals/351-socks-auth-extensions.html) for now.
-/// Once it is merged, see the
-/// [SOCKS extensions spec](https://spec.torproject.org/socks-extensions.html).
+/// See the specification for
+/// [SOCKS extended authentication](https://spec.torproject.org/socks-extensions.html#extended-auth)
+/// for full details.
+///
+/// ### Further restrictions on Object IDs and isolation
+///
+/// In some cases,
+/// the RPC Object ID may denote an object
+/// that already includes information about its intended stream isolation.
+/// In such cases, the stream isolation MUST be blank.
+/// Implementations MUST reject non-blank stream isolation in such cases.
+///
+/// In some cases, the RPC object ID may denote an object
+/// that already includes information
+/// about its intended destination address and port.
+/// In such cases, the destination address MUST be `0.0.0.0` or `::`
+/// (encoded either as an IPv4 address, an IPv6 address, or a hostname)
+/// and the destination port MUST be 0.
+/// Implementations MUST reject other addresses in such cases.
 ///
 /// ### Another proposed change
 ///
@@ -269,7 +285,9 @@ mod socks_and_rpc {}
 /// (In no case is it actually SOCKS authentication: it can either be a message
 /// to the stream isolation system or the RPC system.)
 fn interpret_socks_auth(auth: &SocksAuth) -> Result<AuthInterpretation> {
-    /// Interpretation of a SOCKS5 username according to Prop351.
+    /// Interpretation of a SOCKS5 username according to
+    /// the [SOCKS extended authentication](https://spec.torproject.org/socks-extensions.html#extended-auth)
+    /// specification.
     enum Uname<'a> {
         /// This is a legacy username; it's just part of the
         /// isolation information.
@@ -279,14 +297,14 @@ fn interpret_socks_auth(auth: &SocksAuth) -> Result<AuthInterpretation> {
         // in a `ProvidedAuthentication::Legacy``.
         // TODO RPC: Find a more idiomatic way to express this data flow.
         Legacy,
-        /// This is using the prop351 socks extension: contains the extension
+        /// This is using the socks extension: contains the extension
         /// format code and the remaining information from the username.
         Extended(u8, &'a [u8]),
     }
     /// Helper: Try to interpret a SOCKS5 username field as indicating the start of a set of
     /// extended socks authentication information.
     ///
-    /// Implements Prop351.
+    /// Implements [SOCKS extended authentication](https://spec.torproject.org/socks-extensions.html#extended-auth).
     ///
     /// If it does indicate that extensions are in use,
     /// return a `Uname::Extended` containing
@@ -297,7 +315,8 @@ fn interpret_socks_auth(auth: &SocksAuth) -> Result<AuthInterpretation> {
     ///
     /// If it is badly formatted, return an error.
     fn interpret_socks5_username(username: &[u8]) -> Result<Uname<'_>> {
-        /// 8-byte "magic" sequence from Prop351.
+        /// 8-byte "magic" sequence from
+        /// [SOCKS extended authentication](https://spec.torproject.org/socks-extensions.html#extended-auth).
         /// When it appears at the start of a username,
         /// indicates that the username/password are to be interpreted as
         /// as encoding SOCKS5 extended parameters,
@@ -434,7 +453,7 @@ impl<R: Runtime> SocksConnContext<R> {
 async fn handle_socks_conn<R, S>(
     runtime: R,
     context: SocksConnContext<R>,
-    socks_stream: S,
+    mut socks_stream: S,
     isolation_info: ConnIsolation,
 ) -> Result<()>
 where
@@ -450,75 +469,41 @@ where
     // loop.
     let mut handshake = tor_socksproto::SocksProxyHandshake::new();
 
-    let (mut socks_r, mut socks_w) = socks_stream.split();
-    let mut inbuf = [0_u8; 1024];
-    let mut n_read = 0;
+    let mut inbuf = tor_socksproto::Buffer::new();
     let request = loop {
-        if n_read == inbuf.len() {
-            // We would like to read more of this SOCKS request, but there is no
-            // more space in the buffer.  If we try to keep reading into an
-            // empty buffer, we'll just read nothing, try to parse it, and learn
-            // that we still wish we had more to read.
-            //
-            // In theory we might want to resize the buffer.  Right now, though,
-            // we just reject handshakes that don't fit into 1k.
-            return Err(anyhow!("Socks handshake did not fit in 1KiB buffer"));
-        }
-        // Read some more stuff.
-        let n = socks_r
-            .read(&mut inbuf[n_read..])
-            .await
-            .context("Error while reading SOCKS handshake")?;
-        if n == 0 {
-            debug!("Socks connection closed");
-            return Ok(());
-        }
-        n_read += n;
+        use tor_socksproto::NextStep as NS;
 
-        // try to advance the handshake to the next state.
-        let action = match handshake.handshake(&inbuf[..n_read]) {
-            Err(_) => continue, // Message truncated.
-            Ok(Err(e)) => {
+        let rv = handshake.step(&mut inbuf);
+
+        let step = match rv {
+            Err(e) => {
                 if let tor_socksproto::Error::BadProtocol(version) = e {
                     // check for HTTP methods: CONNECT, DELETE, GET, HEAD, OPTION, PUT, POST, PATCH and
                     // TRACE.
                     // To do so, check the first byte of the connection, which happen to be placed
                     // where SOCKs version field is.
                     if [b'C', b'D', b'G', b'H', b'O', b'P', b'T'].contains(&version) {
-                        write_all_and_close(&mut socks_w, WRONG_PROTOCOL_PAYLOAD).await?;
+                        write_all_and_close(&mut socks_stream, WRONG_PROTOCOL_PAYLOAD).await?;
                     }
                 }
                 // if there is an handshake error, don't reply with a Socks error, remote does not
                 // seems to speak Socks.
                 return Err(e.into());
             }
-            Ok(Ok(action)) => action,
+            Ok(y) => y,
         };
 
-        // reply if needed.
-        if action.drain > 0 {
-            inbuf.copy_within(action.drain..n_read, 0);
-            n_read -= action.drain;
-        }
-        if !action.reply.is_empty() {
-            write_all_and_flush(&mut socks_w, &action.reply).await?;
-        }
-        if action.finished {
-            break handshake.into_request();
-        }
-    };
-    let request = match request {
-        Some(r) => r,
-        None => {
-            warn!("SOCKS handshake succeeded, but couldn't convert into a request.");
-            return Ok(());
+        match step {
+            NS::Recv(mut recv) => {
+                let n = socks_stream.read(recv.buf())
+                    .await
+                    .context("Error while reading SOCKS handshake")?;
+                recv.note_received(n)?;
+            },
+            NS::Send(data) => write_all_and_flush(&mut socks_stream, &data).await?,
+            NS::Finished(fin) => break fin.into_output_forbid_pipelining()?,
         }
     };
-    if n_read != 0 {
-        // TODO this is not great, we should actually *support* optimistic data.
-        // But this is an easy way to mitigate #1627 aka TROVE-2024-010 for now.
-        return Err(anyhow!("Optimistic data received - sent by client before SOCKS handshake completed.  This is not supported in this version of Arti, sorry."));
-    }
 
     // Unpack the socks request and find out where we're connecting to.
     let addr = request.addr().to_string();
@@ -540,7 +525,7 @@ where
             let tor_stream = tor_client.connect_with_prefs(&tor_addr, &prefs).await;
             let tor_stream = match tor_stream {
                 Ok(s) => s,
-                Err(e) => return reply_error(&mut socks_w, &request, e.kind()).await,
+                Err(e) => return reply_error(&mut socks_stream, &request, e.kind()).await,
             };
             // Okay, great! We have a connection over the Tor network.
             debug!("Got a stream for {}:{}", sensitive(&addr), port);
@@ -550,8 +535,9 @@ where
             let reply = request
                 .reply(tor_socksproto::SocksStatus::SUCCEEDED, None)
                 .context("Encoding socks reply")?;
-            write_all_and_flush(&mut socks_w, &reply[..]).await?;
+            write_all_and_flush(&mut socks_stream, &reply[..]).await?;
 
+            let (socks_r, socks_w) = socks_stream.split();
             let (tor_r, tor_w) = tor_stream.split();
 
             // Finally, spawn two background tasks to relay traffic between
@@ -581,9 +567,9 @@ where
                             Some(&SocksAddr::Ip(addr)),
                         )
                         .context("Encoding socks reply")?;
-                    write_all_and_close(&mut socks_w, &reply[..]).await?;
+                    write_all_and_close(&mut socks_stream, &reply[..]).await?;
                 }
-                Err(e) => return reply_error(&mut socks_w, &request, e).await,
+                Err(e) => return reply_error(&mut socks_stream, &request, e).await,
             }
         }
         SocksCmd::RESOLVE_PTR => {
@@ -595,13 +581,13 @@ where
                     let reply = request
                         .reply(tor_socksproto::SocksStatus::ADDRTYPE_NOT_SUPPORTED, None)
                         .context("Encoding socks reply")?;
-                    write_all_and_close(&mut socks_w, &reply[..]).await?;
+                    write_all_and_close(&mut socks_stream, &reply[..]).await?;
                     return Err(anyhow!(e));
                 }
             };
             let hosts = match tor_client.resolve_ptr_with_prefs(addr, &prefs).await {
                 Ok(hosts) => hosts,
-                Err(e) => return reply_error(&mut socks_w, &request, e.kind()).await,
+                Err(e) => return reply_error(&mut socks_stream, &request, e.kind()).await,
             };
             if let Some(host) = hosts.into_iter().next() {
                 // this conversion should never fail, legal DNS names len must be <= 253 but Socks
@@ -610,7 +596,7 @@ where
                 let reply = request
                     .reply(tor_socksproto::SocksStatus::SUCCEEDED, Some(&hostname))
                     .context("Encoding socks reply")?;
-                write_all_and_close(&mut socks_w, &reply[..]).await?;
+                write_all_and_close(&mut socks_stream, &reply[..]).await?;
             }
         }
         _ => {
@@ -619,7 +605,7 @@ where
             let reply = request
                 .reply(tor_socksproto::SocksStatus::COMMAND_NOT_SUPPORTED, None)
                 .context("Encoding socks reply")?;
-            write_all_and_close(&mut socks_w, &reply[..]).await?;
+            write_all_and_close(&mut socks_stream, &reply[..]).await?;
         }
     };
 

@@ -37,7 +37,13 @@ pub(crate) enum RequestId {
 pub(crate) struct ReqMeta {
     /// If true, the client will accept intermediate Updates other than the
     /// final Request or Response.
+    #[serde(default)]
     pub(crate) updates: bool,
+
+    /// A list of features which must be implemented in order to understand the request.
+    /// If any feature in this list is not available, the request must be rejected.
+    #[serde(default)]
+    pub(crate) require: Vec<String>,
 }
 
 /// A single Request received from an RPC client.
@@ -55,9 +61,6 @@ pub(crate) struct Request {
     /// The method to actually execute.
     ///
     /// Using "flatten" here will make it expand to "method" and "params".
-    ///
-    /// TODO RPC: Note that our spec says that "params" can be omitted, but I
-    /// don't think we support that right now.
     #[serde(flatten)]
     pub(crate) method: Box<dyn rpc::DeserMethod>,
 }

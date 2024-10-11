@@ -12,13 +12,13 @@ use std::sync::Arc;
 #[allow(deprecated)]
 use tor_hscrypto::pk::HsClientIntroAuthKeypair;
 use tor_hscrypto::pk::{HsClientDescEncKeypair, HsId};
-use tor_keymgr::derive_deftly_template_KeySpecifier;
+use tor_keymgr::{derive_deftly_template_KeySpecifier, CTorPath};
 
 use derive_deftly::Deftly;
 use derive_more::Constructor;
 use tor_keymgr::KeySpecifier;
 
-/// Keys (if any) to use when connecting to a specific onion service.
+/// Service discovery keys (if any) to use when connecting to a specific onion service.
 ///
 /// Represents a possibly empty subset of the following keys:
 ///  * `KS_hsc_desc_enc`, [`HsClientDescEncKeypair`]
@@ -82,11 +82,12 @@ impl Hash for HsClientSecretKeys {
 }
 
 impl HsClientSecretKeys {
-    /// Create a new `HsClientSecretKeys`, for making unauthenticated connections
+    /// Create a new `HsClientSecretKeys`, for making connections to services
+    /// that are not running in restricted discovery mode.
     ///
     /// Creates a `HsClientSecretKeys` which has no actual keys,
-    /// so will make connections to hidden services
-    /// without any Tor-protocol-level client authentication.
+    /// so will not use a descriptor cookie when decrypting the second layer
+    /// of descriptor encryption.
     pub fn none() -> Self {
         Self::default()
     }
@@ -150,8 +151,15 @@ impl HsClientSecretKeysBuilder {
 #[deftly(prefix = "client")]
 #[deftly(role = "KS_hsc_desc_enc")]
 #[deftly(summary = "Descriptor decryption key")]
+#[deftly(ctor_path = "client_desc_enc_keypair_key_specifier_ctor_path")]
 /// A key for deriving keys for decrypting HS descriptors (KS_hsc_desc_enc).
 pub struct HsClientDescEncKeypairSpecifier {
     /// The hidden service this authorization key is for.
     pub(crate) hs_id: HsId,
+}
+/// The `CTorPath` of HsClientDescEncKeypairSpecifier
+fn client_desc_enc_keypair_key_specifier_ctor_path(
+    spec: &HsClientDescEncKeypairSpecifier,
+) -> CTorPath {
+    CTorPath::ClientHsDescEncKey(spec.hs_id)
 }

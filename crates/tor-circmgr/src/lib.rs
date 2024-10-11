@@ -99,7 +99,7 @@ use safelog::sensitive as sv;
 #[cfg(feature = "geoip")]
 use tor_geoip::CountryCode;
 pub use tor_guardmgr::{ExternalActivity, FirstHopId};
-use tor_persist::{FsStateMgr, StateMgr};
+use tor_persist::StateMgr;
 use tor_rtcompat::scheduler::{TaskHandle, TaskSchedule};
 
 #[cfg(feature = "hs-common")]
@@ -181,7 +181,7 @@ impl<R: Runtime> CircMgr<R> {
         storage: SM,
         runtime: &R,
         chanmgr: Arc<ChanMgr<R>>,
-        guardmgr: tor_guardmgr::GuardMgr<R>,
+        guardmgr: &tor_guardmgr::GuardMgr<R>,
     ) -> Result<Self>
     where
         SM: tor_persist::StateMgr + Clone + Send + Sync + 'static,
@@ -240,14 +240,15 @@ impl<R: Runtime> CircMgr<R> {
     /// Returns a set of [`TaskHandle`]s that can be used to manage the daemon tasks.
     //
     // NOTE(eta): The ?Sized on D is so we can pass a trait object in.
-    pub fn launch_background_tasks<D>(
+    pub fn launch_background_tasks<D, S>(
         self: &Arc<Self>,
         runtime: &R,
         dir_provider: &Arc<D>,
-        state_mgr: FsStateMgr,
+        state_mgr: S,
     ) -> Result<Vec<TaskHandle>>
     where
         D: NetDirProvider + 'static + ?Sized,
+        S: StateMgr + std::marker::Send + 'static,
     {
         CircMgrInner::launch_background_tasks(&self.0.clone(), runtime, dir_provider, state_mgr)
     }
@@ -343,9 +344,8 @@ impl<R: Runtime> CircMgr<R> {
 
     /// Return a reference to the associated CircuitBuilder that this CircMgr
     /// will use to create its circuits.
-    #[cfg_attr(docsrs, doc(cfg(feature = "experimental-api")))]
-    #[cfg_attr(feature = "experimental-api", visibility::make(pub))]
-    pub(crate) fn builder(&self) -> &CircuitBuilder<R> {
+    #[cfg(feature = "experimental-api")]
+    pub fn builder(&self) -> &CircuitBuilder<R> {
         CircMgrInner::builder(&self.0)
     }
 }
@@ -371,17 +371,11 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
         storage: SM,
         runtime: &R,
         chanmgr: Arc<ChanMgr<R>>,
-        guardmgr: tor_guardmgr::GuardMgr<R>,
+        guardmgr: &tor_guardmgr::GuardMgr<R>,
     ) -> Result<Self>
     where
         SM: tor_persist::StateMgr + Clone + Send + Sync + 'static,
     {
-        let preemptive = Arc::new(Mutex::new(PreemptiveCircuitPredictor::new(
-            config.preemptive_circuits().clone(),
-        )));
-
-        guardmgr.set_filter(config.path_rules().build_guard_filter());
-
         #[cfg(all(feature = "vanguards", feature = "hs-common"))]
         let vanguardmgr = {
             // TODO(#1382): we need a way of checking if this arti instance
@@ -404,18 +398,36 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
             chanmgr,
             config.path_rules().clone(),
             storage_handle,
-            guardmgr,
+            guardmgr.clone(),
             #[cfg(all(feature = "vanguards", feature = "hs-common"))]
             vanguardmgr,
         );
+
+        Ok(Self::new_generic(config, runtime, guardmgr, builder))
+    }
+}
+
+impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
+    /// Generic implementation for [`CircMgrInner::new`]
+    pub(crate) fn new_generic<CFG: CircMgrConfig>(
+        config: &CFG,
+        runtime: &R,
+        guardmgr: &tor_guardmgr::GuardMgr<R>,
+        builder: B,
+    ) -> Self {
+        let preemptive = Arc::new(Mutex::new(PreemptiveCircuitPredictor::new(
+            config.preemptive_circuits().clone(),
+        )));
+
+        guardmgr.set_filter(config.path_rules().build_guard_filter());
+
         let mgr =
             mgr::AbstractCircMgr::new(builder, runtime.clone(), config.circuit_timing().clone());
-        let circmgr = CircMgrInner {
+
+        CircMgrInner {
             mgr: Arc::new(mgr),
             predictor: preemptive,
-        };
-
-        Ok(circmgr)
+        }
     }
 
     /// Launch the periodic daemon tasks required by the manager to function properly.
@@ -423,14 +435,15 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
     /// Returns a set of [`TaskHandle`]s that can be used to manage the daemon tasks.
     //
     // NOTE(eta): The ?Sized on D is so we can pass a trait object in.
-    pub(crate) fn launch_background_tasks<D>(
+    pub(crate) fn launch_background_tasks<D, S>(
         self: &Arc<Self>,
         runtime: &R,
         dir_provider: &Arc<D>,
-        state_mgr: FsStateMgr,
+        state_mgr: S,
     ) -> Result<Vec<TaskHandle>>
     where
         D: NetDirProvider + 'static + ?Sized,
+        S: StateMgr + std::marker::Send + 'static,
     {
         let mut ret = vec![];
 
@@ -490,6 +503,77 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
         }
 
         Ok(ret)
+    }
+
+    /// Return a circuit suitable for sending one-hop BEGINDIR streams,
+    /// launching it if necessary.
+    pub(crate) async fn get_or_launch_dir(&self, netdir: DirInfo<'_>) -> Result<Arc<B::Circ>> {
+        self.expire_circuits();
+        let usage = TargetCircUsage::Dir;
+        self.mgr.get_or_launch(&usage, netdir).await.map(|(c, _)| c)
+    }
+
+    /// Return a circuit suitable for exiting to all of the provided
+    /// `ports`, launching it if necessary.
+    ///
+    /// If the list of ports is empty, then the chosen circuit will
+    /// still end at _some_ exit.
+    pub(crate) async fn get_or_launch_exit(
+        &self,
+        netdir: DirInfo<'_>, // TODO: This has to be a NetDir.
+        ports: &[TargetPort],
+        isolation: StreamIsolation,
+        // TODO GEOIP: this cannot be stabilised like this, since Cargo features need to be
+        //             additive. The function should be refactored to be builder-like.
+        #[cfg(feature = "geoip")] country_code: Option<CountryCode>,
+    ) -> Result<Arc<B::Circ>> {
+        self.expire_circuits();
+        let time = Instant::now();
+        {
+            let mut predictive = self.predictor.lock().expect("preemptive lock poisoned");
+            if ports.is_empty() {
+                predictive.note_usage(None, time);
+            } else {
+                for port in ports.iter() {
+                    predictive.note_usage(Some(*port), time);
+                }
+            }
+        }
+        let require_stability = ports.iter().any(|p| {
+            self.mgr
+                .peek_builder()
+                .path_config()
+                .long_lived_ports
+                .contains(&p.port)
+        });
+        let ports = ports.iter().map(Clone::clone).collect();
+        #[cfg(not(feature = "geoip"))]
+        let country_code = None;
+        let usage = TargetCircUsage::Exit {
+            ports,
+            isolation,
+            country_code,
+            require_stability,
+        };
+        self.mgr.get_or_launch(&usage, netdir).await.map(|(c, _)| c)
+    }
+
+    /// Return a circuit to a specific relay, suitable for using for direct
+    /// (one-hop) directory downloads.
+    ///
+    /// This could be used, for example, to download a descriptor for a bridge.
+    #[cfg_attr(docsrs, doc(cfg(feature = "specific-relay")))]
+    #[cfg(feature = "specific-relay")]
+    pub(crate) async fn get_or_launch_dir_specific<T: IntoOwnedChanTarget>(
+        &self,
+        target: T,
+    ) -> Result<Arc<B::Circ>> {
+        self.expire_circuits();
+        let usage = TargetCircUsage::DirSpecificTarget(target.to_owned());
+        self.mgr
+            .get_or_launch(&usage, DirInfo::Nothing)
+            .await
+            .map(|(c, _)| c)
     }
 
     /// Try to change our configuration settings to `new_config`.
@@ -559,13 +643,171 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
         Ok(RetireCircuits::None)
     }
 
-    /// Reload state from the state manager.
+    /// Whenever a [`DirEvent::NewConsensus`] arrives on `events`, update
+    /// `circmgr` with the consensus parameters from `dirmgr`.
     ///
-    /// We only call this method if we _don't_ have the lock on the state
-    /// files.  If we have the lock, we only want to save.
-    pub(crate) fn reload_persistent_state(&self) -> Result<()> {
-        self.mgr.peek_builder().reload_state()?;
+    /// Exit when `events` is closed, or one of `circmgr` or `dirmgr` becomes
+    /// dangling.
+    ///
+    /// This is a daemon task: it runs indefinitely in the background.
+    async fn keep_circmgr_params_updated<D>(
+        mut events: impl futures::Stream<Item = DirEvent> + Unpin,
+        circmgr: Weak<Self>,
+        dirmgr: Weak<D>,
+    ) where
+        D: NetDirProvider + 'static + ?Sized,
+    {
+        use DirEvent::*;
+        while let Some(event) = events.next().await {
+            if matches!(event, NewConsensus) {
+                if let (Some(cm), Some(dm)) = (Weak::upgrade(&circmgr), Weak::upgrade(&dirmgr)) {
+                    if let Ok(netdir) = dm.netdir(Timeliness::Timely) {
+                        cm.update_network_parameters(netdir.params());
+                    }
+                } else {
+                    debug!("Circmgr or dirmgr has disappeared; task exiting.");
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Reconfigure this circuit manager using the latest set of
+    /// network parameters.
+    fn update_network_parameters(&self, p: &tor_netdir::params::NetParameters) {
+        self.mgr.update_network_parameters(p);
+        self.mgr.peek_builder().update_network_parameters(p);
+    }
+
+    /// Run indefinitely, launching circuits as needed to get a good
+    /// estimate for our circuit build timeouts.
+    ///
+    /// Exit when we notice that `circmgr` or `dirmgr` has been dropped.
+    ///
+    /// This is a daemon task: it runs indefinitely in the background.
+    async fn continually_launch_timeout_testing_circuits<D>(
+        mut sched: TaskSchedule<R>,
+        circmgr: Weak<Self>,
+        dirmgr: Weak<D>,
+    ) where
+        D: NetDirProvider + 'static + ?Sized,
+    {
+        while sched.next().await.is_some() {
+            if let (Some(cm), Some(dm)) = (Weak::upgrade(&circmgr), Weak::upgrade(&dirmgr)) {
+                if let Ok(netdir) = dm.netdir(Timeliness::Unchecked) {
+                    if let Err(e) = cm.launch_timeout_testing_circuit_if_appropriate(&netdir) {
+                        warn_report!(e, "Problem launching a timeout testing circuit");
+                    }
+                    let delay = netdir
+                        .params()
+                        .cbt_testing_delay
+                        .try_into()
+                        .expect("Out-of-bounds value from BoundedInt32");
+
+                    drop((cm, dm));
+                    sched.fire_in(delay);
+                } else {
+                    // wait for the provider to announce some event, which will probably be
+                    // NewConsensus; this is therefore a decent yardstick for rechecking
+                    let _ = dm.events().next().await;
+                    sched.fire();
+                }
+            } else {
+                return;
+            }
+        }
+    }
+
+    /// If we need to launch a testing circuit to judge our circuit
+    /// build timeouts timeouts, do so.
+    ///
+    /// # Note
+    ///
+    /// This function is invoked periodically from
+    /// `continually_launch_timeout_testing_circuits`.
+    fn launch_timeout_testing_circuit_if_appropriate(&self, netdir: &NetDir) -> Result<()> {
+        if !self.mgr.peek_builder().learning_timeouts() {
+            return Ok(());
+        }
+        // We expire any too-old circuits here, so they don't get
+        // counted towards max_circs.
+        self.expire_circuits();
+        let max_circs: u64 = netdir
+            .params()
+            .cbt_max_open_circuits_for_testing
+            .try_into()
+            .expect("Out-of-bounds result from BoundedInt32");
+        if (self.mgr.n_circs() as u64) < max_circs {
+            // Actually launch the circuit!
+            let usage = TargetCircUsage::TimeoutTesting;
+            let dirinfo = netdir.into();
+            let mgr = Arc::clone(&self.mgr);
+            debug!("Launching a circuit to test build times.");
+            let receiver = mgr.launch_by_usage(&usage, dirinfo)?;
+            // We don't actually care when this circuit is done,
+            // so it's okay to drop the Receiver without awaiting it.
+            drop(receiver);
+        }
+
         Ok(())
+    }
+
+    /// Run forever, periodically telling `circmgr` to update its persistent
+    /// state.
+    ///
+    /// Exit when we notice that `circmgr` has been dropped.
+    ///
+    /// This is a daemon task: it runs indefinitely in the background.
+    async fn update_persistent_state<S>(
+        mut sched: TaskSchedule<R>,
+        circmgr: Weak<Self>,
+        statemgr: S,
+    ) where
+        S: StateMgr + std::marker::Send,
+    {
+        while sched.next().await.is_some() {
+            if let Some(circmgr) = Weak::upgrade(&circmgr) {
+                use tor_persist::LockStatus::*;
+
+                match statemgr.try_lock() {
+                    Err(e) => {
+                        error_report!(e, "Problem with state lock file");
+                        break;
+                    }
+                    Ok(NewlyAcquired) => {
+                        info!("We now own the lock on our state files.");
+                        if let Err(e) = circmgr.upgrade_to_owned_persistent_state() {
+                            error_report!(e, "Unable to upgrade to owned state files");
+                            break;
+                        }
+                    }
+                    Ok(AlreadyHeld) => {
+                        if let Err(e) = circmgr.store_persistent_state() {
+                            error_report!(e, "Unable to flush circmgr state");
+                            break;
+                        }
+                    }
+                    Ok(NoLock) => {
+                        if let Err(e) = circmgr.reload_persistent_state() {
+                            error_report!(e, "Unable to reload circmgr state");
+                            break;
+                        }
+                    }
+                }
+            } else {
+                debug!("Circmgr has disappeared; task exiting.");
+                return;
+            }
+            // TODO(nickm): This delay is probably too small.
+            //
+            // Also, we probably don't even want a fixed delay here.  Instead,
+            // we should be updating more frequently when the data is volatile
+            // or has important info to save, and not at all when there are no
+            // changes.
+            sched.fire_in(Duration::from_secs(60));
+        }
+
+        debug!("State update task exiting (potentially due to handle drop).");
     }
 
     /// Switch from having an unowned persistent state to having an owned one.
@@ -576,100 +818,62 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
         Ok(())
     }
 
-    /// Reconfigure this circuit manager using the latest set of
-    /// network parameters.
+    /// Reload state from the state manager.
     ///
-    /// This is deprecated as a public function: `launch_background_tasks` now
-    /// ensures that this happens as needed.
-    #[deprecated(
-        note = "There is no need to call this function if you have used launch_background_tasks"
-    )]
-    pub(crate) fn update_network_parameters(&self, p: &tor_netdir::params::NetParameters) {
-        self.mgr.update_network_parameters(p);
-        self.mgr.peek_builder().update_network_parameters(p);
+    /// We only call this method if we _don't_ have the lock on the state
+    /// files.  If we have the lock, we only want to save.
+    pub(crate) fn reload_persistent_state(&self) -> Result<()> {
+        self.mgr.peek_builder().reload_state()?;
+        Ok(())
     }
 
-    /// Return true if `netdir` has enough information to be used for this
-    /// circuit manager.
+    /// Run indefinitely, launching circuits where the preemptive circuit
+    /// predictor thinks it'd be a good idea to have them.
     ///
-    /// (This will check whether the netdir is missing any primary guard
-    /// microdescriptors)
-    pub(crate) fn netdir_is_sufficient(&self, netdir: &NetDir) -> bool {
-        self.mgr
-            .peek_builder()
-            .guardmgr()
-            .netdir_is_sufficient(netdir)
-    }
-
-    /// Return a circuit suitable for sending one-hop BEGINDIR streams,
-    /// launching it if necessary.
-    pub(crate) async fn get_or_launch_dir(&self, netdir: DirInfo<'_>) -> Result<Arc<ClientCirc>> {
-        self.expire_circuits();
-        let usage = TargetCircUsage::Dir;
-        self.mgr.get_or_launch(&usage, netdir).await.map(|(c, _)| c)
-    }
-
-    /// Return a circuit suitable for exiting to all of the provided
-    /// `ports`, launching it if necessary.
+    /// Exit when we notice that `circmgr` or `dirmgr` has been dropped.
     ///
-    /// If the list of ports is empty, then the chosen circuit will
-    /// still end at _some_ exit.
-    pub(crate) async fn get_or_launch_exit(
-        &self,
-        netdir: DirInfo<'_>, // TODO: This has to be a NetDir.
-        ports: &[TargetPort],
-        isolation: StreamIsolation,
-        // TODO GEOIP: this cannot be stabilised like this, since Cargo features need to be
-        //             additive. The function should be refactored to be builder-like.
-        #[cfg(feature = "geoip")] country_code: Option<CountryCode>,
-    ) -> Result<Arc<ClientCirc>> {
-        self.expire_circuits();
-        let time = Instant::now();
-        {
-            let mut predictive = self.predictor.lock().expect("preemptive lock poisoned");
-            if ports.is_empty() {
-                predictive.note_usage(None, time);
-            } else {
-                for port in ports.iter() {
-                    predictive.note_usage(Some(*port), time);
+    /// This is a daemon task: it runs indefinitely in the background.
+    ///
+    /// # Note
+    ///
+    /// This would be better handled entirely within `tor-circmgr`, like
+    /// other daemon tasks.
+    async fn continually_preemptively_build_circuits<D>(
+        mut sched: TaskSchedule<R>,
+        circmgr: Weak<Self>,
+        dirmgr: Weak<D>,
+    ) where
+        D: NetDirProvider + 'static + ?Sized,
+    {
+        let base_delay = Duration::from_secs(10);
+        let mut retry = RetryDelay::from_duration(base_delay);
+
+        while sched.next().await.is_some() {
+            if let (Some(cm), Some(dm)) = (Weak::upgrade(&circmgr), Weak::upgrade(&dirmgr)) {
+                if let Ok(netdir) = dm.netdir(Timeliness::Timely) {
+                    let result = cm
+                        .launch_circuits_preemptively(DirInfo::Directory(&netdir))
+                        .await;
+
+                    let delay = match result {
+                        Ok(()) => {
+                            retry.reset();
+                            base_delay
+                        }
+                        Err(_) => retry.next_delay(&mut rand::thread_rng()),
+                    };
+
+                    sched.fire_in(delay);
+                } else {
+                    // wait for the provider to announce some event, which will probably be
+                    // NewConsensus; this is therefore a decent yardstick for rechecking
+                    let _ = dm.events().next().await;
+                    sched.fire();
                 }
+            } else {
+                return;
             }
         }
-        let require_stability = ports.iter().any(|p| {
-            self.mgr
-                .peek_builder()
-                .path_config()
-                .long_lived_ports
-                .contains(&p.port)
-        });
-        let ports = ports.iter().map(Clone::clone).collect();
-        #[cfg(not(feature = "geoip"))]
-        let country_code = None;
-        let usage = TargetCircUsage::Exit {
-            ports,
-            isolation,
-            country_code,
-            require_stability,
-        };
-        self.mgr.get_or_launch(&usage, netdir).await.map(|(c, _)| c)
-    }
-
-    /// Return a circuit to a specific relay, suitable for using for direct
-    /// (one-hop) directory downloads.
-    ///
-    /// This could be used, for example, to download a descriptor for a bridge.
-    #[cfg_attr(docsrs, doc(cfg(feature = "specific-relay")))]
-    #[cfg(feature = "specific-relay")]
-    pub(crate) async fn get_or_launch_dir_specific<T: IntoOwnedChanTarget>(
-        &self,
-        target: T,
-    ) -> Result<Arc<ClientCirc>> {
-        self.expire_circuits();
-        let usage = TargetCircUsage::DirSpecificTarget(target.to_owned());
-        self.mgr
-            .get_or_launch(&usage, DirInfo::Nothing)
-            .await
-            .map(|(c, _)| c)
     }
 
     /// Launch circuits preemptively, using the preemptive circuit predictor's
@@ -729,285 +933,6 @@ impl<R: Runtime> CircMgrInner<CircuitBuilder<R>, R> {
         }
     }
 
-    /// If `circ_id` is the unique identifier for a circuit that we're
-    /// keeping track of, don't give it out for any future requests.
-    pub(crate) fn retire_circ(&self, circ_id: &UniqId) {
-        let _ = self.mgr.take_circ(circ_id);
-    }
-
-    /// Mark every circuit that we have launched so far as unsuitable for
-    /// any future requests.  This won't close existing circuits that have
-    /// streams attached to them, but it will prevent any future streams from
-    /// being attached.
-    ///
-    /// TODO: we may want to expose this eventually.  If we do, we should
-    /// be very clear that you don't want to use it haphazardly.
-    pub(crate) fn retire_all_circuits(&self) {
-        self.mgr.retire_all_circuits();
-    }
-
-    /// Expire every circuit that has been dirty for too long.
-    ///
-    /// Expired circuits are not closed while they still have users,
-    /// but they are no longer given out for new requests.
-    fn expire_circuits(&self) {
-        // TODO: I would prefer not to call this at every request, but
-        // it should be fine for now.  (At some point we may no longer
-        // need this, or might not need to call it so often, now that
-        // our circuit expiration runs on scheduled timers via
-        // spawn_expiration_task.)
-        let now = self.mgr.peek_runtime().now();
-        self.mgr.expire_circs(now);
-    }
-
-    /// If we need to launch a testing circuit to judge our circuit
-    /// build timeouts timeouts, do so.
-    ///
-    /// # Note
-    ///
-    /// This function is invoked periodically from
-    /// `continually_launch_timeout_testing_circuits`.
-    fn launch_timeout_testing_circuit_if_appropriate(&self, netdir: &NetDir) -> Result<()> {
-        if !self.mgr.peek_builder().learning_timeouts() {
-            return Ok(());
-        }
-        // We expire any too-old circuits here, so they don't get
-        // counted towards max_circs.
-        self.expire_circuits();
-        let max_circs: u64 = netdir
-            .params()
-            .cbt_max_open_circuits_for_testing
-            .try_into()
-            .expect("Out-of-bounds result from BoundedInt32");
-        if (self.mgr.n_circs() as u64) < max_circs {
-            // Actually launch the circuit!
-            let usage = TargetCircUsage::TimeoutTesting;
-            let dirinfo = netdir.into();
-            let mgr = Arc::clone(&self.mgr);
-            debug!("Launching a circuit to test build times.");
-            let receiver = mgr.launch_by_usage(&usage, dirinfo)?;
-            // We don't actually care when this circuit is done,
-            // so it's okay to drop the Receiver without awaiting it.
-            drop(receiver);
-        }
-
-        Ok(())
-    }
-
-    /// Whenever a [`DirEvent::NewConsensus`] arrives on `events`, update
-    /// `circmgr` with the consensus parameters from `dirmgr`.
-    ///
-    /// Exit when `events` is closed, or one of `circmgr` or `dirmgr` becomes
-    /// dangling.
-    ///
-    /// This is a daemon task: it runs indefinitely in the background.
-    async fn keep_circmgr_params_updated<D>(
-        mut events: impl futures::Stream<Item = DirEvent> + Unpin,
-        circmgr: Weak<Self>,
-        dirmgr: Weak<D>,
-    ) where
-        D: NetDirProvider + 'static + ?Sized,
-    {
-        use DirEvent::*;
-        while let Some(event) = events.next().await {
-            if matches!(event, NewConsensus) {
-                if let (Some(cm), Some(dm)) = (Weak::upgrade(&circmgr), Weak::upgrade(&dirmgr)) {
-                    if let Ok(netdir) = dm.netdir(Timeliness::Timely) {
-                        #[allow(deprecated)]
-                        cm.update_network_parameters(netdir.params());
-                    }
-                } else {
-                    debug!("Circmgr or dirmgr has disappeared; task exiting.");
-                    break;
-                }
-            }
-        }
-    }
-
-    /// Run indefinitely, launching circuits as needed to get a good
-    /// estimate for our circuit build timeouts.
-    ///
-    /// Exit when we notice that `circmgr` or `dirmgr` has been dropped.
-    ///
-    /// This is a daemon task: it runs indefinitely in the background.
-    async fn continually_launch_timeout_testing_circuits<D>(
-        mut sched: TaskSchedule<R>,
-        circmgr: Weak<Self>,
-        dirmgr: Weak<D>,
-    ) where
-        D: NetDirProvider + 'static + ?Sized,
-    {
-        while sched.next().await.is_some() {
-            if let (Some(cm), Some(dm)) = (Weak::upgrade(&circmgr), Weak::upgrade(&dirmgr)) {
-                if let Ok(netdir) = dm.netdir(Timeliness::Unchecked) {
-                    if let Err(e) = cm.launch_timeout_testing_circuit_if_appropriate(&netdir) {
-                        warn_report!(e, "Problem launching a timeout testing circuit");
-                    }
-                    let delay = netdir
-                        .params()
-                        .cbt_testing_delay
-                        .try_into()
-                        .expect("Out-of-bounds value from BoundedInt32");
-
-                    drop((cm, dm));
-                    sched.fire_in(delay);
-                } else {
-                    // wait for the provider to announce some event, which will probably be
-                    // NewConsensus; this is therefore a decent yardstick for rechecking
-                    let _ = dm.events().next().await;
-                    sched.fire();
-                }
-            } else {
-                return;
-            }
-        }
-    }
-
-    /// Run forever, periodically telling `circmgr` to update its persistent
-    /// state.
-    ///
-    /// Exit when we notice that `circmgr` has been dropped.
-    ///
-    /// This is a daemon task: it runs indefinitely in the background.
-    async fn update_persistent_state(
-        mut sched: TaskSchedule<R>,
-        circmgr: Weak<Self>,
-        statemgr: FsStateMgr,
-    ) {
-        while sched.next().await.is_some() {
-            if let Some(circmgr) = Weak::upgrade(&circmgr) {
-                use tor_persist::LockStatus::*;
-
-                match statemgr.try_lock() {
-                    Err(e) => {
-                        error_report!(e, "Problem with state lock file");
-                        break;
-                    }
-                    Ok(NewlyAcquired) => {
-                        info!("We now own the lock on our state files.");
-                        if let Err(e) = circmgr.upgrade_to_owned_persistent_state() {
-                            error_report!(e, "Unable to upgrade to owned state files");
-                            break;
-                        }
-                    }
-                    Ok(AlreadyHeld) => {
-                        if let Err(e) = circmgr.store_persistent_state() {
-                            error_report!(e, "Unable to flush circmgr state");
-                            break;
-                        }
-                    }
-                    Ok(NoLock) => {
-                        if let Err(e) = circmgr.reload_persistent_state() {
-                            error_report!(e, "Unable to reload circmgr state");
-                            break;
-                        }
-                    }
-                }
-            } else {
-                debug!("Circmgr has disappeared; task exiting.");
-                return;
-            }
-            // TODO(nickm): This delay is probably too small.
-            //
-            // Also, we probably don't even want a fixed delay here.  Instead,
-            // we should be updating more frequently when the data is volatile
-            // or has important info to save, and not at all when there are no
-            // changes.
-            sched.fire_in(Duration::from_secs(60));
-        }
-
-        debug!("State update task exiting (potentially due to handle drop).");
-    }
-
-    /// Run indefinitely, launching circuits where the preemptive circuit
-    /// predictor thinks it'd be a good idea to have them.
-    ///
-    /// Exit when we notice that `circmgr` or `dirmgr` has been dropped.
-    ///
-    /// This is a daemon task: it runs indefinitely in the background.
-    ///
-    /// # Note
-    ///
-    /// This would be better handled entirely within `tor-circmgr`, like
-    /// other daemon tasks.
-    async fn continually_preemptively_build_circuits<D>(
-        mut sched: TaskSchedule<R>,
-        circmgr: Weak<Self>,
-        dirmgr: Weak<D>,
-    ) where
-        D: NetDirProvider + 'static + ?Sized,
-    {
-        let base_delay = Duration::from_secs(10);
-        let mut retry = RetryDelay::from_duration(base_delay);
-
-        while sched.next().await.is_some() {
-            if let (Some(cm), Some(dm)) = (Weak::upgrade(&circmgr), Weak::upgrade(&dirmgr)) {
-                if let Ok(netdir) = dm.netdir(Timeliness::Timely) {
-                    let result = cm
-                        .launch_circuits_preemptively(DirInfo::Directory(&netdir))
-                        .await;
-
-                    let delay = match result {
-                        Ok(()) => {
-                            retry.reset();
-                            base_delay
-                        }
-                        Err(_) => retry.next_delay(&mut rand::thread_rng()),
-                    };
-
-                    sched.fire_in(delay);
-                } else {
-                    // wait for the provider to announce some event, which will probably be
-                    // NewConsensus; this is therefore a decent yardstick for rechecking
-                    let _ = dm.events().next().await;
-                    sched.fire();
-                }
-            } else {
-                return;
-            }
-        }
-    }
-
-    /// Record that a failure occurred on a circuit with a given guard, in a way
-    /// that makes us unwilling to use that guard for future circuits.
-    ///
-    pub(crate) fn note_external_failure(
-        &self,
-        target: &impl ChanTarget,
-        external_failure: ExternalActivity,
-    ) {
-        self.mgr
-            .peek_builder()
-            .guardmgr()
-            .note_external_failure(target, external_failure);
-    }
-
-    /// Record that a success occurred on a circuit with a given guard, in a way
-    /// that makes us possibly willing to use that guard for future circuits.
-    pub(crate) fn note_external_success(
-        &self,
-        target: &impl ChanTarget,
-        external_activity: ExternalActivity,
-    ) {
-        self.mgr
-            .peek_builder()
-            .guardmgr()
-            .note_external_success(target, external_activity);
-    }
-
-    /// Return a stream of events about our estimated clock skew; these events
-    /// are `None` when we don't have enough information to make an estimate,
-    /// and `Some(`[`SkewEstimate`]`)` otherwise.
-    ///
-    /// Note that this stream can be lossy: if the estimate changes more than
-    /// one before you read from the stream, you might only get the most recent
-    /// update.
-    pub(crate) fn skew_events(&self) -> ClockSkewEvents {
-        self.mgr.peek_builder().guardmgr().skew_events()
-    }
-}
-
-impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     /// Create and return a new (typically anonymous) circuit for use as an
     /// onion service circuit of type `kind`.
     ///
@@ -1038,6 +963,18 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
         Ok(client_circ)
     }
 
+    /// Return true if `netdir` has enough information to be used for this
+    /// circuit manager.
+    ///
+    /// (This will check whether the netdir is missing any primary guard
+    /// microdescriptors)
+    pub(crate) fn netdir_is_sufficient(&self, netdir: &NetDir) -> bool {
+        self.mgr
+            .peek_builder()
+            .guardmgr()
+            .netdir_is_sufficient(netdir)
+    }
+
     /// Internal implementation for [`CircMgr::estimate_timeout`].
     pub(crate) fn estimate_timeout(
         &self,
@@ -1058,6 +995,75 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     /// Return true if we saved something; false if we didn't have the lock.
     pub(crate) fn store_persistent_state(&self) -> Result<bool> {
         self.mgr.peek_builder().save_state()
+    }
+
+    /// Expire every circuit that has been dirty for too long.
+    ///
+    /// Expired circuits are not closed while they still have users,
+    /// but they are no longer given out for new requests.
+    fn expire_circuits(&self) {
+        // TODO: I would prefer not to call this at every request, but
+        // it should be fine for now.  (At some point we may no longer
+        // need this, or might not need to call it so often, now that
+        // our circuit expiration runs on scheduled timers via
+        // spawn_expiration_task.)
+        let now = self.mgr.peek_runtime().now();
+        self.mgr.expire_circs(now);
+    }
+
+    /// Mark every circuit that we have launched so far as unsuitable for
+    /// any future requests.  This won't close existing circuits that have
+    /// streams attached to them, but it will prevent any future streams from
+    /// being attached.
+    ///
+    /// TODO: we may want to expose this eventually.  If we do, we should
+    /// be very clear that you don't want to use it haphazardly.
+    pub(crate) fn retire_all_circuits(&self) {
+        self.mgr.retire_all_circuits();
+    }
+
+    /// If `circ_id` is the unique identifier for a circuit that we're
+    /// keeping track of, don't give it out for any future requests.
+    pub(crate) fn retire_circ(&self, circ_id: &<B::Circ as AbstractCirc>::Id) {
+        let _ = self.mgr.take_circ(circ_id);
+    }
+
+    /// Return a stream of events about our estimated clock skew; these events
+    /// are `None` when we don't have enough information to make an estimate,
+    /// and `Some(`[`SkewEstimate`]`)` otherwise.
+    ///
+    /// Note that this stream can be lossy: if the estimate changes more than
+    /// one before you read from the stream, you might only get the most recent
+    /// update.
+    pub(crate) fn skew_events(&self) -> ClockSkewEvents {
+        self.mgr.peek_builder().guardmgr().skew_events()
+    }
+
+    /// Record that a failure occurred on a circuit with a given guard, in a way
+    /// that makes us unwilling to use that guard for future circuits.
+    ///
+    pub(crate) fn note_external_failure(
+        &self,
+        target: &impl ChanTarget,
+        external_failure: ExternalActivity,
+    ) {
+        self.mgr
+            .peek_builder()
+            .guardmgr()
+            .note_external_failure(target, external_failure);
+    }
+
+    /// Record that a success occurred on a circuit with a given guard, in a way
+    /// that makes us possibly willing to use that guard for future circuits.
+    pub(crate) fn note_external_success(
+        &self,
+        target: &impl ChanTarget,
+        external_activity: ExternalActivity,
+    ) {
+        self.mgr
+            .peek_builder()
+            .guardmgr()
+            .note_external_success(target, external_activity);
     }
 }
 
@@ -1086,6 +1092,12 @@ mod test {
     #![allow(clippy::useless_vec)]
     #![allow(clippy::needless_pass_by_value)]
     //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
+    use mocks::FakeBuilder;
+    use tor_guardmgr::GuardMgr;
+    use tor_linkspec::OwnedChanTarget;
+    use tor_netdir::testprovider::TestNetDirProvider;
+    use tor_persist::TestingStateMgr;
+
     use super::*;
 
     #[test]
@@ -1129,5 +1141,52 @@ mod test {
         let p2 = di.circ_params();
         assert_eq!(p2.initial_send_window(), 1000); // Not 100_000
         assert!(p2.extend_by_ed25519_id());
+    }
+
+    fn make_circmgr<R: Runtime>(runtime: R) -> Arc<CircMgrInner<FakeBuilder<R>, R>> {
+        let config = crate::config::test_config::TestConfig::default();
+        let statemgr = TestingStateMgr::new();
+        let guardmgr =
+            GuardMgr::new(runtime.clone(), statemgr.clone(), &config).expect("Create GuardMgr");
+        let builder = FakeBuilder::new(
+            &runtime,
+            statemgr.clone(),
+            &tor_guardmgr::TestConfig::default(),
+        );
+        let circmgr = Arc::new(CircMgrInner::new_generic(
+            &config, &runtime, &guardmgr, builder,
+        ));
+        let netdir = Arc::new(TestNetDirProvider::new());
+        CircMgrInner::launch_background_tasks(&circmgr, &runtime, &netdir, statemgr)
+            .expect("launch CircMgrInner background tasks");
+        circmgr
+    }
+
+    #[test]
+    #[cfg(feature = "hs-common")]
+    fn test_launch_hs_unmanaged() {
+        tor_rtmock::MockRuntime::test_with_various(|runtime| async move {
+            let circmgr = make_circmgr(runtime.clone());
+            let netdir = tor_netdir::testnet::construct_netdir()
+                .unwrap_if_sufficient()
+                .unwrap();
+
+            let (ret_tx, ret_rx) = tor_async_utils::oneshot::channel();
+            runtime.spawn_identified("launch_hs_unamanged", async move {
+                ret_tx
+                    .send(
+                        circmgr
+                            .launch_hs_unmanaged::<OwnedChanTarget>(
+                                None,
+                                &netdir,
+                                HsCircStubKind::Short,
+                            )
+                            .await,
+                    )
+                    .unwrap();
+            });
+            runtime.advance_by(Duration::from_millis(60)).await;
+            ret_rx.await.unwrap().unwrap();
+        });
     }
 }

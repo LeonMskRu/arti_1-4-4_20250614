@@ -23,7 +23,7 @@
 //!
 //! ```
 //! use tor_memquota::{MemoryQuotaTracker, HasMemoryCost, EnabledToken};
-//! use tor_rtcompat::PreferredRuntime;
+//! use tor_rtcompat::{DynTimeProvider, PreferredRuntime};
 //! use tor_memquota::mq_queue::{MpscSpec, ChannelSpec as _};
 //! # fn m() -> tor_memquota::Result<()> {
 //!
@@ -34,6 +34,7 @@
 //! }
 //!
 //! let runtime = PreferredRuntime::create().unwrap();
+//! let time_prov = DynTimeProvider::new(runtime.clone());
 #![cfg_attr(
     feature = "memquota",
     doc = "let config  = tor_memquota::Config::builder().max(1024*1024*1024).build().unwrap();",
@@ -45,7 +46,7 @@
 )]
 //! let account = trk.new_account(None).unwrap();
 //!
-//! let (tx, rx) = MpscSpec { buffer: 10 }.new_mq::<Message, _>(&runtime, account)?;
+//! let (tx, rx) = MpscSpec { buffer: 10 }.new_mq::<Message>(time_prov, &account)?;
 //! #
 //! # Ok(())
 //! # }
@@ -65,36 +66,15 @@
 //! then the memory tracking can be based on an underestimate.
 //! (This is significantly mitigated if the bulk of the memory use
 //! for each item is separately boxed.)
-//!
-//! # Use in Arti
-//!
-//! Here are some things that have queued data:
-//!
-//!   * Each Tor stream has a queue or two.
-//!   * Each circuit also has one or more queues _not_ associated with a single stream.
-//!   * Tor channels themselves also can have one or more queues.
-//!   * Each TLS connection can itself have internal buffers.  We can also consider these queues.
-//!   * Each TCP socket can also be buffered.  We can also consider these buffers to be queues.
-//!
-//! When we run out of memory, we find the queues above that have the oldest data.
-//! When we find one, we will kill it.
-//!
-//! If we kill a stream, we will also kill the circuit that it is on.
-//! Killing a circuit queue kills every queue associated with that circuit,
-//! and every queue associated with every one of its Tor streams.
-//! Killing a channel kills every queue associated with that channel,
-//! as well as every circuit associated with that channel,
-//! and every Tor stream associated with one of those circuits.
-//!
-//! Thus, killing a single queue will reclaim the memory associated with several other queues.
-//!
-//! **TODO - this is not yet actually implemented**
+
+#![forbid(unsafe_code)] // if you remove this, enable (or write) miri tests (git grep miri)
 
 use tor_async_utils::peekable_stream::UnobtrusivePeekableStream;
 
 use crate::internal_prelude::*;
 
 use std::task::{Context, Poll, Poll::*};
+use tor_async_utils::{ErasedSinkTrySendError, SinkCloseChannel, SinkTrySend};
 
 //---------- Sender ----------
 
@@ -104,7 +84,7 @@ use std::task::{Context, Poll, Poll::*};
 /// See the [module-level docs](crate::mq_queue).
 #[derive(Educe)]
 #[educe(Debug, Clone(bound = "C::Sender<Entry<T>>: Clone"))]
-pub struct Sender<T: Debug + Send + 'static, C: ChannelSpec, R: CoarseTimeProvider + Unpin> {
+pub struct Sender<T: Debug + Send + 'static, C: ChannelSpec> {
     /// The inner sink
     tx: C::Sender<Entry<T>>,
 
@@ -113,7 +93,7 @@ pub struct Sender<T: Debug + Send + 'static, C: ChannelSpec, R: CoarseTimeProvid
 
     /// Time provider for getting the data age
     #[educe(Debug(ignore))] // CoarseTimeProvider isn't Debug
-    runtime: R,
+    runtime: DynTimeProvider,
 }
 
 //---------- Receiver ----------
@@ -292,13 +272,12 @@ pub trait ChannelSpec: Sealed /* see Correctness, above */ + Sized + 'static {
     //
     // This method is supposed to be called by the user, not overridden.
     #[allow(clippy::type_complexity)] // the Result; not sensibly reducible or aliasable
-    fn new_mq<T, R>(self, runtime: &R, account: Account) -> crate::Result<(
-        Sender<T, Self, R>,
+    fn new_mq<T>(self, runtime: DynTimeProvider, account: &Account) -> crate::Result<(
+        Sender<T, Self>,
         Receiver<T, Self>,
     )>
     where
         T: HasMemoryCost + Debug + Send + 'static,
-        R: CoarseTimeProvider + Unpin
     {
         let (rx, (tx, mq)) = account.register_participant_with(
             runtime.now_coarse(),
@@ -397,11 +376,10 @@ impl ChannelSpec for MpscUnboundedSpec {
 
 //---------- Sender ----------
 
-impl<T, C, R> Sink<T> for Sender<T, C, R>
+impl<T, C> Sink<T> for Sender<T, C>
 where
     T: HasMemoryCost + Debug + Send + 'static,
     C: ChannelSpec,
-    R: CoarseTimeProvider + Unpin,
 {
     type Error = SendError<C::SendError>;
 
@@ -433,6 +411,61 @@ where
         self.tx
             .poll_close_unpin(cx)
             .map(|r| r.map_err(SendError::Channel))
+    }
+}
+
+impl<T, C> SinkTrySend<T> for Sender<T, C>
+where
+    T: HasMemoryCost + Debug + Send + 'static,
+    C: ChannelSpec,
+    C::Sender<Entry<T>>: SinkTrySend<Entry<T>>,
+    <C::Sender<Entry<T>> as SinkTrySend<Entry<T>>>::Error: Send + Sync,
+{
+    type Error = ErasedSinkTrySendError;
+    fn try_send_or_return(
+        self: Pin<&mut Self>,
+        item: T,
+    ) -> Result<(), (<Self as SinkTrySend<T>>::Error, T)> {
+        let self_ = self.get_mut();
+        let item = Entry {
+            t: item,
+            when: self_.runtime.now_coarse(),
+        };
+
+        use ErasedSinkTrySendError as ESTSE;
+
+        self_
+            .mq
+            .try_claim_or_return(item, |item| {
+                Pin::new(&mut self_.tx).try_send_or_return(item)
+            })
+            .map_err(|(mqe, unsent)| (ESTSE::Other(Arc::new(mqe)), unsent.t))?
+            .map_err(|(tse, unsent)| (ESTSE::from(tse), unsent.t))
+    }
+}
+
+impl<T, C> SinkCloseChannel<T> for Sender<T, C>
+where
+    T: HasMemoryCost + Debug + Send, //Debug + 'static,
+    C: ChannelSpec,
+    C::Sender<Entry<T>>: SinkCloseChannel<Entry<T>>,
+{
+    fn close_channel(self: Pin<&mut Self>) {
+        Pin::new(&mut self.get_mut().tx).close_channel();
+    }
+}
+
+impl<T, C> Sender<T, C>
+where
+    T: Debug + Send + 'static,
+    C: ChannelSpec,
+{
+    /// Obtain a reference to the `Sender`'s [`DynTimeProvider`]
+    ///
+    /// (This can sometimes be used to avoid having to keep
+    /// a separate clone of the time provider.)
+    pub fn time_provider(&self) -> &DynTimeProvider {
+        &self.runtime
     }
 }
 
@@ -600,7 +633,7 @@ impl From<CollapsedDueToReclaim> for CollapseReason {
     }
 }
 
-#[cfg(all(test, feature = "memquota"))]
+#[cfg(all(test, feature = "memquota", not(miri) /* coarsetime */))]
 mod test {
     // @@ begin test lint list maintained by maint/add_warning @@
     #![allow(clippy::bool_assert_comparison)]
@@ -675,16 +708,31 @@ mod test {
     }
 
     struct Setup {
+        dtp: DynTimeProvider,
         trk: Arc<mtracker::MemoryQuotaTracker>,
         acct: Account,
         itrk: Arc<ItemTracker>,
     }
 
     fn setup(rt: &MockRuntime) -> Setup {
+        let dtp = DynTimeProvider::new(rt.clone());
         let trk = mk_tracker(rt);
         let acct = trk.new_account(None).unwrap();
         let itrk = ItemTracker::new_tracker();
-        Setup { trk, acct, itrk }
+        Setup {
+            dtp,
+            trk,
+            acct,
+            itrk,
+        }
+    }
+
+    #[derive(Debug)]
+    struct Gigantic;
+    impl HasMemoryCost for Gigantic {
+        fn memory_cost(&self, _et: EnabledToken) -> usize {
+            mbytes(100)
+        }
     }
 
     impl Setup {
@@ -708,7 +756,7 @@ mod test {
     fn lifecycle() {
         MockRuntime::test_with_various(|rt| async move {
             let s = setup(&rt);
-            let (mut tx, mut rx) = MpscUnboundedSpec.new_mq(&rt, s.acct.clone()).unwrap();
+            let (mut tx, mut rx) = MpscUnboundedSpec.new_mq(s.dtp.clone(), &s.acct).unwrap();
 
             tx.send(s.itrk.new_item()).await.unwrap();
             let _: Item = rx.next().await.unwrap();
@@ -738,7 +786,7 @@ mod test {
     fn fill_and_empty() {
         MockRuntime::test_with_various(|rt| async move {
             let s = setup(&rt);
-            let (mut tx, mut rx) = MpscUnboundedSpec.new_mq(&rt, s.acct.clone()).unwrap();
+            let (mut tx, mut rx) = MpscUnboundedSpec.new_mq(s.dtp.clone(), &s.acct).unwrap();
 
             const COUNT: usize = 19;
 
@@ -762,8 +810,10 @@ mod test {
     #[traced_test]
     #[test]
     fn sink_error() {
-        #[derive(Default, Debug)]
-        struct BustedSink;
+        #[derive(Debug, Copy, Clone)]
+        struct BustedSink {
+            error: BustedError,
+        }
 
         impl<T> Sink<T> for BustedSink {
             type Error = BustedError;
@@ -772,7 +822,7 @@ mod test {
                 self: Pin<&mut Self>,
                 _: &mut Context<'_>,
             ) -> Poll<Result<(), Self::Error>> {
-                Ready(Err(BustedError))
+                Ready(Err(self.error))
             }
             fn start_send(self: Pin<&mut Self>, _item: T) -> Result<(), Self::Error> {
                 panic!("poll_ready always gives error, start_send should not be called");
@@ -791,34 +841,107 @@ mod test {
             }
         }
 
-        #[derive(Error, Debug)]
-        #[error("busted, for testing")]
-        struct BustedError;
+        impl<T> SinkTrySend<T> for BustedSink {
+            type Error = BustedError;
 
-        struct BustedQueueSpec;
+            fn try_send_or_return(self: Pin<&mut Self>, item: T) -> Result<(), (BustedError, T)> {
+                Err((self.error, item))
+            }
+        }
+
+        impl tor_async_utils::SinkTrySendError for BustedError {
+            fn is_disconnected(&self) -> bool {
+                self.is_disconnected
+            }
+            fn is_full(&self) -> bool {
+                false
+            }
+        }
+
+        #[derive(Error, Debug, Clone, Copy)]
+        #[error("busted, for testing, dc={is_disconnected:?}")]
+        struct BustedError {
+            is_disconnected: bool,
+        }
+
+        struct BustedQueueSpec {
+            error: BustedError,
+        }
         impl Sealed for BustedQueueSpec {}
         impl ChannelSpec for BustedQueueSpec {
             type Sender<T: Debug + Send + 'static> = BustedSink;
             type Receiver<T: Debug + Send + 'static> = futures::stream::Pending<T>;
             type SendError = BustedError;
             fn raw_channel<T: Debug + Send + 'static>(self) -> (BustedSink, Self::Receiver<T>) {
-                (BustedSink, futures::stream::pending())
+                (BustedSink { error: self.error }, futures::stream::pending())
             }
             fn close_receiver<T: Debug + Send + 'static>(_rx: &mut Self::Receiver<T>) {}
         }
 
+        use ErasedSinkTrySendError as ESTSE;
+
         MockRuntime::test_with_various(|rt| async move {
+            let error = BustedError {
+                is_disconnected: true,
+            };
+
             let s = setup(&rt);
-            let (mut tx, _rx) = BustedQueueSpec.new_mq(&rt, s.acct.clone()).unwrap();
+            let (mut tx, _rx) = BustedQueueSpec { error }
+                .new_mq(s.dtp.clone(), &s.acct)
+                .unwrap();
 
             let e = tx.send(s.itrk.new_item()).await.unwrap_err();
-            assert!(matches!(e, SendError::Channel(BustedError)));
+            assert!(matches!(e, SendError::Channel(BustedError { .. })));
 
             // item should have been destroyed
             assert_eq!(s.itrk.lock().existing, 0);
 
+            // ---- Test try_send error handling ----
+
+            fn error_is_other_of<E>(e: ESTSE) -> Result<(), impl Debug>
+            where
+                E: std::error::Error + 'static,
+            {
+                match e {
+                    ESTSE::Other(e) if e.is::<E>() => Ok(()),
+                    other => Err(other),
+                }
+            }
+
+            let item = s.itrk.new_item();
+
+            // Test try_send failure due to BustedError, is_disconnected: true
+
+            let (e, item) = Pin::new(&mut tx).try_send_or_return(item).unwrap_err();
+            assert!(matches!(e, ESTSE::Disconnected), "{e:?}");
+
+            // Test try_send failure due to BustedError, is_disconnected: false (ie, Other)
+
+            let error = BustedError {
+                is_disconnected: false,
+            };
+            let (mut tx, _rx) = BustedQueueSpec { error }
+                .new_mq(s.dtp.clone(), &s.acct)
+                .unwrap();
+            let (e, item) = Pin::new(&mut tx).try_send_or_return(item).unwrap_err();
+            error_is_other_of::<BustedError>(e).unwrap();
+
             // no memory should be claimed
             s.check_zero_claimed(1);
+
+            // Test try_send failure due to memory quota collapse
+
+            // cause reclaim
+            {
+                let (mut tx, _rx) = MpscUnboundedSpec.new_mq(s.dtp.clone(), &s.acct).unwrap();
+                tx.send(Gigantic).await.unwrap();
+                rt.advance_until_stalled().await;
+            }
+
+            let (e, item) = Pin::new(&mut tx).try_send_or_return(item).unwrap_err();
+            error_is_other_of::<crate::Error>(e).unwrap();
+
+            drop::<Item>(item);
         });
     }
 }

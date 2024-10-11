@@ -5,11 +5,14 @@ use bitvec::prelude::*;
 use super::{AnyCmdChecker, DataStream, StreamReader, StreamStatus};
 use crate::circuit::reactor::CloseStreamBehavior;
 use crate::circuit::{ClientCircSyncView, StreamTarget};
+use crate::memquota::StreamAccount;
 use crate::{Error, Result};
+use derive_deftly::Deftly;
 use oneshot_fused_workaround as oneshot;
 use tor_cell::relaycell::{msg, RelayCmd, UnparsedRelayMsg};
 use tor_cell::restricted_msg;
 use tor_error::internal;
+use tor_memquota::derive_deftly_template_HasMemoryCost;
 
 /// A pending request from the other end of the circuit for us to open a new
 /// stream.
@@ -28,6 +31,8 @@ pub struct IncomingStream {
     stream: StreamTarget,
     /// The underlying `StreamReader`.
     reader: StreamReader,
+    /// The memory quota account that should be used for this stream's data
+    memquota: StreamAccount,
 }
 
 impl IncomingStream {
@@ -36,11 +41,13 @@ impl IncomingStream {
         request: IncomingStreamRequest,
         stream: StreamTarget,
         reader: StreamReader,
+        memquota: StreamAccount,
     ) -> Self {
         Self {
             request,
             stream,
             reader,
+            memquota,
         }
     }
 
@@ -56,12 +63,13 @@ impl IncomingStream {
             request,
             mut stream,
             reader,
+            memquota,
         } = self;
 
         match request {
             IncomingStreamRequest::Begin(_) | IncomingStreamRequest::BeginDir(_) => {
                 stream.send(message.into()).await?;
-                Ok(DataStream::new_connected(reader, stream))
+                Ok(DataStream::new_connected(reader, stream, memquota))
             }
             IncomingStreamRequest::Resolve(_) => {
                 Err(internal!("Cannot accept data on a RESOLVE stream").into())
@@ -105,7 +113,8 @@ impl IncomingStream {
 
 restricted_msg! {
     /// The allowed incoming messages on an `IncomingStream`.
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Deftly)]
+    #[derive_deftly(HasMemoryCost)]
     #[non_exhaustive]
     pub enum IncomingStreamRequest: RelayMsg {
         /// A BEGIN message.

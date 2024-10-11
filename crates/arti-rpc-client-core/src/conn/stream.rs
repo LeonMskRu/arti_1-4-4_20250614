@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use super::{ErrorResponse, RpcConn};
 use crate::{msgs::request::Request, ObjectId};
 
+use tor_error::ErrorReport as _;
+
 /// An error encountered while trying to open a data stream.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -67,10 +69,6 @@ pub enum StreamError {
     /// The other side gave us a SOCKS error.
     #[error("SOCKS error code {0}")]
     SocksError(tor_socksproto::SocksStatus),
-
-    /// The other side closed the SOCKS connection before we finished the handshake.
-    #[error("SOCKS proxy closed unexpectedly")]
-    SocksClosed,
 }
 
 impl From<IoError> for StreamError {
@@ -96,6 +94,10 @@ struct SingleIdResponse {
     /// The object ID of the response.
     id: ObjectId,
 }
+
+/// A response with no data.
+#[derive(Deserialize, Debug)]
+struct EmptyResponse {}
 
 /// Representation of a single proxy, as delivered by the RPC API.
 // TODO RPC: This is duplicated from proxyinfo.rs; decide on our strategy for this stuff.
@@ -171,9 +173,8 @@ impl RpcConn {
         let new_stream_request =
             Request::new(on_object.clone(), "arti:new_stream_handle", NoParameters {});
         let stream_id = self
-            .execute(&new_stream_request.encode()?)?
+            .execute_internal::<SingleIdResponse>(&new_stream_request.encode()?)?
             .map_err(StreamError::NewStreamRejected)?
-            .deserialize_as::<SingleIdResponse>()?
             .id;
 
         match self.open_stream(Some(&stream_id), target, isolation) {
@@ -208,7 +209,8 @@ impl RpcConn {
         let socks_proxy_addr = self.lookup_socks_proxy_addr()?;
         let mut stream = TcpStream::connect(socks_proxy_addr)?;
 
-        // See prop351 for information about this encoding.
+        // For information about this encoding,
+        // see https://spec.torproject.org/socks-extensions.html#extended-auth
         let username = format!("<torS0X>1{}", on_object.as_ref());
         let password = isolation;
         negotiate_socks(&mut stream, hostname, port, &username, password)?;
@@ -225,10 +227,7 @@ impl RpcConn {
 
         let proxy_info_request: Request<NoParameters> =
             Request::new(session_id, "arti:get_rpc_proxy_info", NoParameters {});
-        let proxy_info = self
-            .execute(&proxy_info_request.encode()?)?
-            .map_err(StreamError::ProxyInfoRejected)?
-            .deserialize_as::<ProxyInfo>()?;
+        let proxy_info = self.execute_internal_ok::<ProxyInfo>(&proxy_info_request.encode()?)?;
         let socks_proxy_addr = proxy_info.find_socks_addr().ok_or(StreamError::NoProxy)?;
 
         Ok(socks_proxy_addr)
@@ -251,10 +250,8 @@ impl RpcConn {
     fn release_obj(&self, obj: ObjectId) -> Result<(), StreamError> {
         let session_id = self.session_id_required()?;
         let release_request = Request::new(session_id.clone(), "rpc:release", ReleaseObj { obj });
-        let _ignore_success = self
-            .execute(&release_request.encode()?)?
-            .map_err(StreamError::StreamReleaseRejected)?;
-
+        let _empty_response: EmptyResponse =
+            self.execute_internal_ok(&release_request.encode()?)?;
         Ok(())
     }
 }
@@ -272,8 +269,8 @@ fn negotiate_socks(
     password: &str,
 ) -> Result<(), StreamError> {
     use tor_socksproto::{
-        SocksAddr, SocksAuth, SocksClientHandshake, SocksCmd, SocksHostname, SocksRequest,
-        SocksStatus, SocksVersion, SOCKS_BUF_LEN,
+        Handshake as _, SocksAddr, SocksAuth, SocksClientHandshake, SocksCmd, SocksHostname,
+        SocksRequest, SocksStatus, SocksVersion,
     };
     use StreamError as E;
 
@@ -289,50 +286,25 @@ fn negotiate_socks(
     )
     .map_err(E::SocksRequest)?;
 
-    let mut buf = [0_u8; SOCKS_BUF_LEN];
-    let mut n_in_buf = 0;
+    let mut buf = tor_socksproto::Buffer::new_precise();
     let mut state = SocksClientHandshake::new(request);
     let reply = loop {
-        let action = match state.handshake(&buf[..n_in_buf]) {
-            Err(_truncated) => continue, // need to read more.
-            Ok(Err(e)) => return Err(E::SocksProtocol(e)),
-            Ok(Ok(action)) => action,
-        };
-        if action.drain > 0 {
-            buf.copy_within(action.drain..n_in_buf, 0);
-            n_in_buf -= action.drain;
+        use tor_socksproto::NextStep as NS;
+        match state.step(&mut buf).map_err(E::SocksProtocol)? {
+            NS::Recv(mut recv) => {
+                let n = stream.read(recv.buf())?;
+                recv.note_received(n).map_err(E::SocksProtocol)?;
+            }
+            NS::Send(send) => stream.write_all(&send)?,
+            NS::Finished(fin) => {
+                break fin
+                    .into_output()
+                    .map_err(|bug| E::Internal(bug.report().to_string()))?
+            }
         }
-        if !action.reply.is_empty() {
-            stream.write_all(&action.reply)?;
-        }
-        if action.finished {
-            break state.into_reply();
-        }
-
-        if buf[n_in_buf..].is_empty() {
-            return Err(E::Internal(
-                "Buffer not large enough to perform SOCKS request!?".to_owned(),
-            ));
-        }
-
-        let n = stream.read(&mut buf[n_in_buf..])?;
-        if n == 0 {
-            return Err(StreamError::SocksClosed);
-        }
-        n_in_buf += n;
     };
 
-    let status = reply
-        .ok_or_else(|| {
-            E::Internal("SOCKS handshake finished, but didn't give a SocksReply!?".to_owned())
-        })?
-        .status();
-
-    if n_in_buf != 0 {
-        return Err(E::Internal(
-            "Unconsumed bytes left after SOCKS handshake!".to_owned(),
-        ));
-    }
+    let status = reply.status();
 
     if status == SocksStatus::SUCCEEDED {
         Ok(())

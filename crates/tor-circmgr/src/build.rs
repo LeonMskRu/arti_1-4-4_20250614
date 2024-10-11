@@ -445,6 +445,7 @@ impl<R: Runtime> CircuitBuilder<R> {
         self.guardmgr.upgrade_to_owned_persistent_state()?;
         Ok(())
     }
+
     /// Reload persistent state from disk, if we don't have storage permission.
     pub(crate) fn reload_state(&self) -> Result<()> {
         if !self.storage.can_store() {
@@ -602,6 +603,7 @@ mod test {
     use tor_chanmgr::ChannelUsage as CU;
     use tor_linkspec::{HasRelayIds, RelayIdType, RelayIds};
     use tor_llcrypto::pk::ed25519::Ed25519Identity;
+    use tor_proto::memquota::{SpecificAccount as _, ToplevelAccount};
     use tor_rtcompat::SleepProvider;
     use tracing::trace;
 
@@ -931,6 +933,7 @@ mod test {
             &ChannelConfig::default(),
             Default::default(),
             &Default::default(),
+            ToplevelAccount::new_noop(),
         ));
         // always has 3 second timeout, 100 second abandon.
         let timeouts = match advance_on_timeout {

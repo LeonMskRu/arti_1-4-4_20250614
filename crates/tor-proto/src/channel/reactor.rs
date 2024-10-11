@@ -16,6 +16,7 @@ use tor_async_utils::SinkPrepareExt as _;
 use tor_cell::chancell::msg::{Destroy, DestroyReason, PaddingNegotiate};
 use tor_cell::chancell::ChanMsg;
 use tor_cell::chancell::{msg::AnyChanMsg, AnyChanCell, CircId};
+use tor_memquota::mq_queue;
 use tor_rtcompat::SleepProvider;
 
 use futures::channel::mpsc;
@@ -34,7 +35,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::channel::{codec::CodecError, padding, params::*, unique_id, ChannelDetails};
-use crate::circuit::celltypes::{ClientCircChanMsg, CreateResponse};
+use crate::circuit::{celltypes::CreateResponse, CircuitRxSender};
 use tracing::{debug, trace};
 
 /// A boxed trait object that can provide `ChanCell`s.
@@ -73,7 +74,7 @@ pub enum CtrlMsg {
         /// Channel to send the circuit's `CreateResponse` down.
         created_sender: oneshot::Sender<CreateResponse>,
         /// Channel to send other messages from this circuit down.
-        sender: mpsc::Sender<ClientCircChanMsg>,
+        sender: CircuitRxSender,
         /// Oneshot channel to send the new circuit's identifiers down.
         tx: ReactorResultChannel<(CircId, crate::circuit::UniqId)>,
     },
@@ -106,7 +107,7 @@ pub struct Reactor<S: SleepProvider> {
     /// A receiver for cells to be sent on this reactor's sink.
     ///
     /// `Channel` objects have a sender that can send cells here.
-    pub(super) cells: mpsc::Receiver<AnyChanCell>,
+    pub(super) cells: mq_queue::Receiver<AnyChanCell, mq_queue::MpscSpec>,
     /// A Stream from which we can read `ChanCell`s.
     ///
     /// This should be backed by a TLS connection if you want it to be secure.
@@ -474,6 +475,8 @@ pub(crate) mod test {
     use super::*;
     use crate::channel::UniqId;
     use crate::circuit::CircParameters;
+    use crate::fake_mpsc;
+    use crate::util::fake_mq;
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
     use futures::task::SpawnExt;
@@ -511,7 +514,9 @@ pub(crate) mod test {
             dummy_target,
             crate::ClockSkew::None,
             runtime,
-        );
+            fake_mq(),
+        )
+        .expect("channel create failed");
         (chan, reactor, recv1, send2)
     }
 
@@ -693,12 +698,12 @@ pub(crate) mod test {
 
             let (_circ_stream_7, mut circ_stream_13) = {
                 let (snd1, _rcv1) = oneshot::channel();
-                let (snd2, rcv2) = mpsc::channel(64);
+                let (snd2, rcv2) = fake_mpsc(64);
                 reactor
                     .circs
                     .put_unchecked(CircId::new(7).unwrap(), CircEnt::Opening(snd1, snd2));
 
-                let (snd3, rcv3) = mpsc::channel(64);
+                let (snd3, rcv3) = fake_mpsc(64);
                 reactor
                     .circs
                     .put_unchecked(CircId::new(13).unwrap(), CircEnt::Open(snd3));
@@ -782,12 +787,12 @@ pub(crate) mod test {
 
             let (circ_oneshot_7, mut circ_stream_13) = {
                 let (snd1, rcv1) = oneshot::channel();
-                let (snd2, _rcv2) = mpsc::channel(64);
+                let (snd2, _rcv2) = fake_mpsc(64);
                 reactor
                     .circs
                     .put_unchecked(CircId::new(7).unwrap(), CircEnt::Opening(snd1, snd2));
 
-                let (snd3, rcv3) = mpsc::channel(64);
+                let (snd3, rcv3) = fake_mpsc(64);
                 reactor
                     .circs
                     .put_unchecked(CircId::new(13).unwrap(), CircEnt::Open(snd3));

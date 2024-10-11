@@ -850,9 +850,9 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
                     })?
                     // TODO: Maybe try, once, to extend-and-reuse the intro circuit.
                     //
-	            // If the introduction fails, the introduction circuit is in principle
+                    // If the introduction fails, the introduction circuit is in principle
                     // still usable.  We believe that in this case, C Tor extends the intro
-	            // circuit by one hop to the next IPT to try.  That saves on building a
+                    // circuit by one hop to the next IPT to try.  That saves on building a
                     // whole new 3-hop intro circuit.  However, our HS experts tell us that
                     // if introduction fails at one IPT it is likely to fail at the others too,
                     // so that optimisation might reduce our network impact and time to failure,
@@ -949,7 +949,7 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
     async fn establish_rendezvous(
         &'c self,
         using_rend_pt: &mut Option<RendPtIdentityForError>,
-    ) -> Result<Rendezvous<R, M>, FAE> {
+    ) -> Result<Rendezvous<'c, R, M>, FAE> {
         let (rend_circ, rend_relay) = self
             .circpool
             .m_get_or_launch_client_rend(&self.netdir)
@@ -1045,7 +1045,7 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
         &'c self,
         ipt: &UsableIntroPt<'_>,
         rendezvous: &mut Option<Rendezvous<'c, R, M>>,
-    ) -> Result<(Rendezvous<R, M>, Introduced<R, M>), FAE> {
+    ) -> Result<(Rendezvous<'c, R, M>, Introduced<R, M>), FAE> {
         let intro_index = ipt.intro_index;
 
         debug!(

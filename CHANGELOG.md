@@ -3,6 +3,15 @@
 This file describes changes in Arti through the current release.  Once Arti
 is more mature, we may switch to using a separate changelog for each crate.
 
+# UNRELEASED
+
+### Breaking changes
+
+ * Several methods in (mostly in `tor-chanmgr` and `tor-proto`)
+   take new memory quota tracking arguments.
+   If memory tracking is not required, you can create a no-op memory
+   quota account with `SpecificAccount::new_noop()` or `Account::new_noop().
+
 # Arti 1.2.8 — 1 October 2024
 
 Arti 1.2.8 continues development on onion services,
@@ -55,9 +64,13 @@ to 1.77, in accordance with our [MSRV policy].
   ([168f55df05f4b56f])
 - In `arti-client`, the type for `StorageConfig::keystore` has changed.
   ([5e4e7b69b8cd2791])
-- In `tor-circmgr`, the function `CircMgr::new` now returns a `CircMgr` rather than an
-  `Arc<CircMgr>`.
-  ([!2420])
+- In `tor-circmgr`, the `CircMgr` `reload_persistent_state`,
+  `store_persistent_state`, and `upgrade_to_owned_persistent_state` functions
+  have been removed. ([!2420])
+- In `tor-circmgr`, the function `CircMgr::new` now returns a `CircMgr` rather
+  than an `Arc<CircMgr>`. ([!2420])
+- In `tor-circmgr`, the deprecated `CircMgr::update_network_parameters`
+  function has been removed. ([!2420])
 - In `tor-hsservice`, numerous types related to initialization and status
   have been renamed or refactored.
   ([!2397], [!2413])

@@ -56,7 +56,6 @@ mod ipt_mgr;
 mod ipt_set;
 mod keys;
 mod netdir;
-mod nickname;
 mod publish;
 mod rend_handshake;
 mod replay;
@@ -96,10 +95,10 @@ pub use keys::{
     BlindIdKeypairSpecifier, BlindIdPublicKeySpecifier, DescSigningKeypairSpecifier,
     HsIdKeypairSpecifier, HsIdPublicKeySpecifier,
 };
-pub use nickname::{HsNickname, InvalidNickname};
 pub use publish::UploadError as DescUploadError;
 pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
+pub use tor_persist::hsnickname::{HsNickname, InvalidNickname};
 pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 
 pub use helpers::handle_rend_requests;
@@ -289,8 +288,7 @@ impl OnionService {
 
         let (rend_req_tx, rend_req_rx) = mpsc::channel(32);
         let (shutdown_tx, shutdown_rx) = broadcast::channel(0);
-        let config = Arc::new(config);
-        let (config_tx, config_rx) = postage::watch::channel_with(config);
+        let (config_tx, config_rx) = postage::watch::channel_with(Arc::new(config));
 
         let (ipt_mgr_view, publisher_view) =
             crate::ipt_set::ipts_channel(&runtime, iptpub_storage_handle)?;
@@ -426,14 +424,13 @@ impl RunningOnionService {
         let mut inner = self.inner.lock().expect("lock poisoned");
         inner.config_tx.try_maybe_send(|cur_config| {
             let new_config = cur_config.for_transition_to(new_config, how)?;
-            Ok::<_, ReconfigureError>(match how {
+            Ok(match how {
                 // We're only checking, so return the current configuration.
                 tor_config::Reconfigure::CheckAllOrNothing => Arc::clone(cur_config),
                 // We're replacing the configuration, and we didn't get an error.
                 _ => Arc::new(new_config),
             })
-        })?;
-        Ok(())
+        })
 
         // TODO (#1153, #1209): We need to make sure that the various tasks listening on
         // config_rx actually enforce the configuration, not only on new
@@ -614,7 +611,6 @@ fn onion_name(keymgr: &KeyMgr, nickname: &HsNickname) -> Option<HsId> {
         .ok()?
         .map(|hsid| hsid.id())
 }
-
 
 #[cfg(test)]
 pub(crate) mod test {

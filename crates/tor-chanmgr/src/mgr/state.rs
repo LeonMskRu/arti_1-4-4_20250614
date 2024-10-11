@@ -281,6 +281,10 @@ impl<C: AbstractChannelFactory> MgrState<C> {
     ///
     /// We provide this function rather than exposing the channels set directly,
     /// to make sure that the calling code doesn't await while holding the lock.
+    ///
+    /// # Deadlock
+    ///
+    /// Calling a method on [`MgrState`] from within `func` may cause a deadlock.
     pub(crate) fn with_channels<F, T>(&self, func: F) -> Result<T>
     where
         F: FnOnce(&mut ListByRelayIds<ChannelState<C::Channel>>) -> T,
@@ -299,6 +303,10 @@ impl<C: AbstractChannelFactory> MgrState<C> {
     }
 
     /// Run a function to modify the builder stored in this state.
+    ///
+    /// # Deadlock
+    ///
+    /// Calling a method on [`MgrState`] from within `func` may cause a deadlock.
     #[allow(dead_code)]
     pub(crate) fn with_mut_builder<F>(&self, func: F)
     where
@@ -314,6 +322,10 @@ impl<C: AbstractChannelFactory> MgrState<C> {
     ///
     /// We provide this function rather than exposing the channels set directly,
     /// to make sure that the calling code doesn't await while holding the lock.
+    ///
+    /// # Deadlock
+    ///
+    /// Calling a method on [`MgrState`] from within `func` may cause a deadlock.
     pub(crate) fn with_channels_and_params<F, T>(&self, func: F) -> Result<T>
     where
         F: FnOnce(&mut ListByRelayIds<ChannelState<C::Channel>>, &ChannelPaddingInstructions) -> T,
@@ -572,6 +584,7 @@ mod test {
     use std::sync::{Arc, Mutex};
     use tor_llcrypto::pk::ed25519::Ed25519Identity;
     use tor_proto::channel::params::ChannelPaddingInstructionsUpdates;
+    use tor_proto::memquota::ChannelAccount;
 
     fn new_test_state() -> MgrState<FakeChannelFactory> {
         MgrState::new(
@@ -598,6 +611,7 @@ mod test {
             &self,
             _target: &Self::BuildSpec,
             _reporter: BootstrapReporter,
+            _memquota: ChannelAccount,
         ) -> Result<Arc<FakeChannel>> {
             unimplemented!()
         }
@@ -607,6 +621,7 @@ mod test {
             &self,
             _peer: std::net::SocketAddr,
             _stream: Self::Stream,
+            _memquota: ChannelAccount,
         ) -> Result<Arc<Self::Channel>> {
             unimplemented!()
         }
