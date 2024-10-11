@@ -63,6 +63,7 @@ mod replay;
 mod req;
 pub mod status;
 mod timeout_track;
+mod acme;
 
 // rustdoc doctests can't use crate-public APIs, so are broken if provided for private items.
 // So we export the whole module again under this name.
@@ -82,7 +83,6 @@ pub mod time_store_for_doctests_unstable_no_semver_guarantees {
     pub use crate::time_store::*;
 }
 
-use asn1_rs::ToDer;
 use internal_prelude::*;
 
 // ---------- public exports ----------
@@ -100,11 +100,9 @@ pub use nickname::{HsNickname, InvalidNickname};
 pub use publish::UploadError as DescUploadError;
 pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
+pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 
-use crate::config::CAARecordList;
 pub use helpers::handle_rend_requests;
-use tor_bytes::EncodeError;
-use tor_netdoc::doc::hsdesc::{CAARecord, CAARecordBuilder, CAARecordBuilderError, CAARecordSet};
 //---------- top-level service implementation (types and methods) ----------
 
 /// Convenience alias for link specifiers of an intro point
@@ -363,14 +361,14 @@ impl OnionService {
     /// Baseline Requirements.
     ///
     /// The CA nonce must be equal to or less than 32 bytes.
-    pub fn onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
-        onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, acme::OnionCsrError> {
+        acme::onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
     }
 
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
-        onion_caa(
+    pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
+        acme::onion_caa(
             &self.keymgr,
             &self.config.nickname,
             &self.config.caa_records,
@@ -521,16 +519,16 @@ impl RunningOnionService {
     /// Baseline Requirements.
     ///
     /// The CA nonce must be equal to or less than 32 bytes.
-    pub fn onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
-        onion_csr(&self.keymgr, &self.nickname, ca_nonce)
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, acme::OnionCsrError> {
+        acme::onion_csr(&self.keymgr, &self.nickname, ca_nonce)
     }
 
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
+    pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
         let config = inner.config_tx.borrow();
-        onion_caa(
+        acme::onion_caa(
             &self.keymgr,
             &self.nickname,
             &config.caa_records,
@@ -617,202 +615,6 @@ fn onion_name(keymgr: &KeyMgr, nickname: &HsNickname) -> Option<HsId> {
         .map(|hsid| hsid.id())
 }
 
-/// Possible errors when creating a CSR for an Onion Service
-#[derive(Debug, Copy, Clone, Error)]
-#[non_exhaustive]
-pub enum OnionCsrError {
-    /// Arti can't find the key for this service
-    #[error("Arti can't find the key for this service")]
-    KeyNotFound,
-    /// The CA nonce was too long to fit
-    #[error("The CA nonce was too long to fit")]
-    CANonceTooLong,
-}
-
-fn onion_csr(
-    keymgr: &KeyMgr,
-    nickname: &HsNickname,
-    ca_nonce: &[u8],
-) -> Result<Vec<u8>, OnionCsrError> {
-    if ca_nonce.len() > 128 {
-        return Err(OnionCsrError::CANonceTooLong);
-    }
-
-    let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
-    let hs_key = Into::<ed25519::ExpandedKeypair>::into(
-        keymgr
-            .get::<HsIdKeypair>(&hsid_spec)
-            .map_err(|_| OnionCsrError::KeyNotFound)?
-            .ok_or(OnionCsrError::KeyNotFound)?,
-    );
-
-    let mut rng = rand::thread_rng();
-    let mut applicant_nonce = [0_u8; 10];
-    rng.fill(&mut applicant_nonce);
-    drop(rng);
-
-    // See RFC 2986 for format details
-
-    // CertificationRequestInfo SEQUENCE
-    let mut tbs_csr_contents = Vec::new();
-    // version INTEGER
-    0.write_der(&mut tbs_csr_contents)
-        .expect("serialize version INTEGER");
-    // subject Name
-    asn1_rs::Sequence::new((&[]).into()).write_der(&mut tbs_csr_contents)
-        .expect("serialize subject Name");
-
-    let mut subject_pk_contents = Vec::new();
-    // algorithm AlgorithmIdentifier
-    asn1_rs::Sequence::from_iter_to_der([
-        // algorithm OBJECT IDENTIFIER - id-Ed25519
-        asn1_rs::oid!(1.3.101.112)
-    ].iter())
-        .expect("create algorithm AlgorithmIdentifier")
-        .write_der(&mut subject_pk_contents)
-        .expect("serialize algorithm AlgorithmIdentifier");
-    // subjectPublicKey BIT STRING
-    asn1_rs::BitString::new(0, &hs_key.public().to_bytes())
-        .write_der(&mut subject_pk_contents)
-        .expect("serialize subjectPublicKey BIT STRING");
-    // subjectPKInfo SubjectPublicKeyInfo
-    asn1_rs::Sequence::new(subject_pk_contents.into()).write_der(&mut tbs_csr_contents)
-        .expect("serialize subjectPKInfo SubjectPublicKeyInfo");
-
-    let mut ca_nonce_contents = Vec::new();
-    // type OBJECT IDENTIFIER - cabf-caSigningNonce
-    asn1_rs::oid!(2.23.140.41).write_der(&mut ca_nonce_contents)
-        .expect("serialize type OBJECT IDENTIFIER - cabf-caSigningNonce");
-    // values SET
-    asn1_rs::Set::from_iter_to_der([
-        asn1_rs::OctetString::new(ca_nonce)
-    ].iter())
-        .expect("create values SET")
-        .write_der(&mut ca_nonce_contents)
-        .expect("serialize values SET");
-
-    let mut applicant_nonce_contents = Vec::new();
-    // type OBJECT IDENTIFIER - cabf-applicantSigningNonce
-    asn1_rs::oid!(2.23.140.42).write_der(&mut applicant_nonce_contents)
-        .expect("serialize type OBJECT IDENTIFIER - cabf-applicantSigningNonce");
-    // values SET
-    asn1_rs::Set::from_iter_to_der([
-        asn1_rs::OctetString::new(&applicant_nonce)
-    ].iter())
-        .expect("create values SET")
-        .write_der(&mut applicant_nonce_contents)
-        .expect("serialize values SET");
-
-    // attributes [0] Attributes
-    asn1_rs::TaggedImplicit::<asn1_rs::Set, asn1_rs::Error, 0>::implicit(
-        asn1_rs::Set::from_iter_to_der([
-            // Attribute SEQUENCE
-            asn1_rs::Sequence::new(ca_nonce_contents.into()),
-            // Attribute SEQUENCE
-            asn1_rs::Sequence::new(applicant_nonce_contents.into()),
-        ].iter()).expect("create attributes [0] Attributes")
-    ).write_der(&mut tbs_csr_contents).expect("serialize attributes [0] Attributes");
-
-    let tbs_csr = asn1_rs::Sequence::new(tbs_csr_contents.into());
-    let mut tbs = Vec::new();
-    tbs_csr.write_der(&mut tbs).expect("serialize CertificationRequestInfo SEQUENCE");
-    let signature = hs_key.sign(&tbs);
-
-    let mut csr_contents = Vec::new();
-    tbs_csr.write_der(&mut csr_contents)
-        .expect("serialize CertificationRequestInfo SEQUENCE");
-    // signatureAlgorithm AlgorithmIdentifier
-    asn1_rs::Sequence::from_iter_to_der([
-        // algorithm OBJECT IDENTIFIER - id-Ed25519
-        asn1_rs::oid!(1.3.101.112)
-    ].iter())
-        .expect("create signatureAlgorithm AlgorithmIdentifier")
-        .write_der(&mut csr_contents)
-        .expect("serialize signatureAlgorithm AlgorithmIdentifier");
-    // signature BIT STRING
-    asn1_rs::BitString::new(0, signature.to_bytes().as_slice())
-        .write_der(&mut csr_contents).expect("serialize signature BIT STRING");
-
-    let mut csr = Vec::new();
-    // CertificationRequest SEQUENCE
-    asn1_rs::Sequence::new(csr_contents.into()).write_der(&mut csr)
-        .expect("serialize CertificationRequest SEQUENCE");
-
-    Ok(csr)
-}
-
-/// Possible errors when creating a CAA document for an Onion Service
-#[derive(Debug, Clone, Error)]
-#[non_exhaustive]
-pub enum OnionCaaError {
-    /// Arti can't find the key for this service
-    #[error("Arti can't find the key for this service")]
-    KeyNotFound,
-    /// The system clock is bogus
-    #[error("The system clock is bogus")]
-    InvalidSystemTime,
-    /// The CAA records couldn't be serialized
-    #[error("The CAA records couldn't be serialized")]
-    EncodeError(#[from] EncodeError),
-}
-
-/// A CAA document per draft-ietf-acme-onion
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct OnionCaa {
-    /// CAA RRSet
-    pub caa: String,
-    /// Expiry UNIX timestamp
-    pub expiry: u64,
-    /// Document signature
-    pub signature: Vec<u8>,
-}
-
-fn onion_caa(
-    keymgr: &KeyMgr,
-    nickname: &HsNickname,
-    caa: &CAARecordList,
-    expiry: u64,
-) -> Result<OnionCaa, OnionCaaError> {
-    let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
-    let hs_key = Into::<ed25519::ExpandedKeypair>::into(
-        keymgr
-            .get::<HsIdKeypair>(&hsid_spec)
-            .map_err(|_| OnionCaaError::KeyNotFound)?
-            .ok_or(OnionCaaError::KeyNotFound)?,
-    );
-
-    let now = SystemTime::now();
-    let expiry = now + Duration::from_secs(expiry);
-    let expiry_unix = expiry
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| OnionCaaError::InvalidSystemTime)?
-        .as_secs();
-
-    let mut rng = rand::thread_rng();
-    let caa_records = caa
-        .iter()
-        .map(|r| {
-            CAARecordBuilder::default()
-                .flags(r.flags)
-                .tag(r.tag.clone())
-                .value(r.value.clone())
-                .build()
-        })
-        .collect::<Result<Vec<CAARecord>, CAARecordBuilderError>>()
-        .expect("unable to build CAA record");
-    let caa_rrset = CAARecordSet::new(&caa_records);
-    let tbs_caa_rrset = caa_rrset.build_sign(&mut rng)?;
-
-    let tbs = format!("onion-caa|{}|{}", expiry_unix, tbs_caa_rrset);
-    let signature = hs_key.sign(tbs.as_bytes());
-
-    Ok(OnionCaa {
-        caa: tbs_caa_rrset,
-        expiry: expiry_unix,
-        signature: signature.to_vec(),
-    })
-}
 
 #[cfg(test)]
 pub(crate) mod test {

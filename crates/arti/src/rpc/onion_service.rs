@@ -255,9 +255,10 @@ async fn rpc_onion_service_csr(
 
     let csr = onion_service
         .svc
-        .onion_csr(&ca_nonce)
+        .generate_onion_csr(&ca_nonce)
         .map_err(|e| match e {
             OnionCsrError::CANonceTooLong => OnionServiceCsrError::CANonceTooLong,
+            OnionCsrError::CANonceTooShort => OnionServiceCsrError::CANonceTooShort,
             OnionCsrError::KeyNotFound => OnionServiceCsrError::KeyNotFound,
             o => o.into(),
         })?;
@@ -276,7 +277,7 @@ async fn rpc_onion_service_caa(
 ) -> Result<OnionServiceCaa, OnionServiceCaaError> {
     let caa = onion_service
         .svc
-        .onion_caa(method.expiry)
+        .get_onion_caa(method.expiry)
         .map_err(|e| match e {
             OnionCaaError::KeyNotFound => OnionServiceCaaError::KeyNotFound,
             OnionCaaError::InvalidSystemTime => OnionServiceCaaError::InvalidSystemTime,
@@ -285,9 +286,9 @@ async fn rpc_onion_service_caa(
         })?;
 
     Ok(OnionServiceCaa {
-        caa: caa.caa,
-        expiry: caa.expiry,
-        signature: base64ct::Base64::encode_string(&caa.signature),
+        caa: caa.caa().to_owned(),
+        expiry: caa.expiry(),
+        signature: base64ct::Base64::encode_string(caa.signature()),
     })
 }
 rpc::static_rpc_invoke_fn! {rpc_onion_service_caa;}
