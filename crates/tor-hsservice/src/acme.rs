@@ -21,7 +21,7 @@ pub enum OnionCsrError {
     CANonceTooShort,
 }
 
-/// Create and sign a Certificate Signing Request
+/// Create and sign a Certificate Signing Request as per CA/BF Baseline Requirements Appendix B
 pub(crate) fn onion_csr(
     keymgr: &KeyMgr,
     nickname: &HsNickname,
@@ -181,7 +181,7 @@ impl OnionCaa {
     }
 }
 
-/// Create and sign a CAA RRSet document
+/// Create and sign a CAA RRSet document as per draft-ietf-acme-onion
 pub(crate) fn onion_caa(
     keymgr: &KeyMgr,
     nickname: &HsNickname,
