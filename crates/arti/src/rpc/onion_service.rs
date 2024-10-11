@@ -207,7 +207,7 @@ async fn rpc_session_get_onion_service(
         .arti_state
         .get_onion_services()
         .await
-        .map_err(|_| GetOnionServiceError::Shutdown)?;
+        .map_err(|()| GetOnionServiceError::Shutdown)?;
 
     let onion_service: Arc<Proxy> = match onion_services.get_by_hsid(&hsid) {
         Some(s) => s,
