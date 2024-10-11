@@ -35,7 +35,7 @@ pub(crate) fn onion_csr(
     }
 
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
-    let hs_key = Into::<ed25519::ExpandedKeypair>::into(
+    let hs_key = ed25519::ExpandedKeypair::from(
         keymgr
             .get::<HsIdKeypair>(&hsid_spec)
             .map_err(|_| OnionCsrError::KeyNotFound)?
@@ -190,7 +190,7 @@ pub(crate) fn onion_caa(
     expiry: u64,
 ) -> Result<OnionCaa, OnionCaaError> {
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
-    let hs_key = Into::<ed25519::ExpandedKeypair>::into(
+    let hs_key = ed25519::ExpandedKeypair::from(
         keymgr
             .get::<HsIdKeypair>(&hsid_spec)
             .map_err(|_| OnionCaaError::KeyNotFound)?
