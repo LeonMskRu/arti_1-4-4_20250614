@@ -5151,6 +5151,7 @@ dependencies = [
 name = "tor-cell"
 version = "0.23.0"
 dependencies = [
+ "amplify",
  "bitflags 2.6.0",
  "bytes",
  "caret",
@@ -5172,6 +5173,7 @@ dependencies = [
  "tor-llcrypto",
  "tor-memquota",
  "tor-units",
+ "void",
 ]
 
 [[package]]
@@ -5574,11 +5576,14 @@ dependencies = [
 name = "tor-hscrypto"
 version = "0.23.0"
 dependencies = [
+ "arrayvec",
+ "blake2",
  "cipher",
  "data-encoding",
  "derive-deftly",
  "derive_more",
  "digest",
+ "equix",
  "hex",
  "hex-literal",
  "humantime",
@@ -5595,21 +5600,8 @@ dependencies = [
  "tor-llcrypto",
  "tor-memquota",
  "tor-units",
+ "void",
  "zeroize",
-]
-
-[[package]]
-name = "tor-hspow"
-version = "0.17.0"
-dependencies = [
- "arrayvec",
- "blake2",
- "derive_more",
- "equix",
- "hex-literal",
- "rand",
- "thiserror",
- "tor-hscrypto",
 ]
 
 [[package]]

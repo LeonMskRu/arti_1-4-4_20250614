@@ -15,6 +15,7 @@ mod build;
 mod inner;
 mod middle;
 mod outer;
+pub mod pow;
 
 pub use desc_enc::DecryptionError;
 use tor_basic_utils::rangebounds::RangeBoundsExt;
@@ -38,6 +39,7 @@ use serde::Serialize;
 use serde_with::serde_derive::Deserialize;
 use std::result::Result as StdResult;
 use std::time::SystemTime;
+
 #[cfg(feature = "hsdesc-inner-docs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hsdesc-inner-docs")))]
 pub use {inner::HsDescInner, middle::HsDescMiddle, outer::HsDescOuter};
@@ -109,6 +111,9 @@ pub struct HsDesc {
 
     /// One or more introduction points used to contact the onion service.
     intro_points: Vec<IntroPointDesc>,
+
+    /// A list of offered proof-of-work parameters, at most one per type.
+    pow_params: pow::PowParamSet,
     // /// A list of recognized CREATE handshakes that this onion service supports.
     //
     // TODO:  When someday we add a "create2 format" other than "hs-ntor", we
@@ -368,6 +373,11 @@ impl HsDesc {
         self.auth_required.is_some()
     }
 
+    /// Get a list of offered proof-of-work parameters, at most one per type.
+    pub fn pow_params(&self) -> &[pow::PowParams] {
+        self.pow_params.slice()
+    }
+
     /// The CAA records for this onion service
     pub fn caa_records(&self) -> &[CAARecord] {
         &self.caa_records
@@ -534,6 +544,7 @@ impl EncryptedHsDesc {
                 auth_required: inner.intro_auth_types,
                 is_single_onion_service: inner.single_onion_service,
                 intro_points: inner.intro_points,
+                pow_params: inner.pow_params,
                 caa_records: inner.caa_records,
             })
         });
