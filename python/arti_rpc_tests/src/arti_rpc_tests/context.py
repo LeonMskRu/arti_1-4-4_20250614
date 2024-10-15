@@ -46,6 +46,7 @@ class TestContext:
 
         configuration = {
             "rpc": {
+                "rpc_enable": "true",
                 "rpc_listen": str(socket_path),
             },
             "storage": {
