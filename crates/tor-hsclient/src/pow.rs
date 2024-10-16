@@ -4,6 +4,7 @@
 mod v1;
 
 use crate::err::ProofOfWorkError;
+use std::sync::Arc;
 use tor_cell::relaycell::hs::pow::ProofOfWork;
 use tor_hscrypto::pk::HsBlindId;
 use tor_netdoc::doc::hsdesc::pow::PowParams;
@@ -50,9 +51,12 @@ impl HsPowClient {
     }
 
     /// If we have an applicable proof of work scheme, do the work and return a proof
-    pub(crate) async fn solve(&self) -> Result<Option<ProofOfWork>, ProofOfWorkError> {
+    pub(crate) async fn solve(
+        &self,
+        thread_pool: &Arc<rayon::ThreadPool>,
+    ) -> Result<Option<ProofOfWork>, ProofOfWorkError> {
         if let Some(v1) = &self.v1 {
-            Ok(v1.solve().await?.map(ProofOfWork::V1))
+            Ok(v1.solve(thread_pool).await?.map(ProofOfWork::V1))
         } else {
             Ok(None)
         }

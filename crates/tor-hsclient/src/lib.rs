@@ -100,6 +100,8 @@ pub struct HsClientConnector<R: Runtime, D: state::MockableConnectorData = conne
     services: Arc<Mutex<state::Services<D>>>,
     /// For mocking in tests of `state.rs`
     mock_for_state: D::MockGlobalState,
+    /// For running proof-of-work challenges
+    thread_pool: Arc<rayon::ThreadPool>,
 }
 
 impl<R: Runtime> HsClientConnector<R, connect::Data> {
@@ -120,6 +122,7 @@ impl<R: Runtime> HsClientConnector<R, connect::Data> {
         circpool: Arc<HsCircPool<R>>,
         config: &impl HsClientConnectorConfig,
         housekeeping_prompt: BoxStream<'static, ()>,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) -> Result<Self, StartupError> {
         let config = Config {
             retry: config.as_ref().clone(),
@@ -129,6 +132,7 @@ impl<R: Runtime> HsClientConnector<R, connect::Data> {
             circpool,
             services: Arc::new(Mutex::new(Services::new(config))),
             mock_for_state: (),
+            thread_pool,
         };
         connector.spawn_housekeeping_task(housekeeping_prompt)?;
         Ok(connector)

@@ -882,12 +882,19 @@ pub(crate) mod test {
         let circpool = Arc::new(HsCircPool::new(&circmgr));
         let (give_send, give) = postage::watch::channel_with(Ready(Ok(())));
         let mock_for_state = MockGlobalState { give };
+        let thread_pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(8)
+                .build()
+                .unwrap(),
+        );
         #[allow(clippy::let_and_return)] // we'll probably add more in this function
         let hscc = HsClientConnector {
             runtime,
             circpool,
             services: Default::default(),
             mock_for_state,
+            thread_pool,
         };
         let keys = HsClientSecretKeysBuilder::default().build().unwrap();
         (hscc, keys, give_send)

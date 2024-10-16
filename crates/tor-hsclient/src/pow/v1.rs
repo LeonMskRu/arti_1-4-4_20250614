@@ -2,8 +2,8 @@
 
 use crate::err::ProofOfWorkError;
 use rand::thread_rng;
+use std::sync::Arc;
 use std::time::Instant;
-use threadpool::ThreadPool;
 use tor_async_utils::oneshot;
 use tor_async_utils::oneshot::Canceled;
 use tor_cell::relaycell::hs::pow::v1::ProofOfWorkV1;
@@ -45,8 +45,6 @@ pub(super) struct HsPowClientV1 {
     instance: TimerangeBound<Instance>,
     /// Next effort to use
     effort: Effort,
-    /// Thread pool
-    thread_pool: ThreadPool,
 }
 
 impl HsPowClientV1 {
@@ -65,9 +63,6 @@ impl HsPowClientV1 {
             effort: params
                 .suggested_effort()
                 .clamp(Effort::zero(), CLIENT_MAX_POW_EFFORT),
-
-            // Set up a thread pool, so we don't overload the client
-            thread_pool: ThreadPool::new(8),
         }
     }
 
@@ -91,7 +86,10 @@ impl HsPowClientV1 {
     /// Returns None if the effort was zero.
     /// Returns an Err() if the solver experienced a runtime error,
     /// or if the seed is expired.
-    pub(super) async fn solve(&self) -> Result<Option<ProofOfWorkV1>, ProofOfWorkError> {
+    pub(super) async fn solve(
+        &self,
+        thread_pool: &Arc<rayon::ThreadPool>,
+    ) -> Result<Option<ProofOfWorkV1>, ProofOfWorkError> {
         if self.effort == Effort::zero() {
             return Ok(None);
         }
@@ -104,7 +102,7 @@ impl HsPowClientV1 {
         debug!("beginning solve, {:?}", self.effort);
 
         let (result_sender, result_receiver) = oneshot::channel();
-        self.thread_pool.execute(move || {
+        thread_pool.install(move || {
             let mut solver = input.solve(&mut thread_rng());
             let result = loop {
                 match solver.run_step() {

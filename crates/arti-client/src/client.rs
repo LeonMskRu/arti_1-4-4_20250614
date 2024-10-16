@@ -944,7 +944,15 @@ impl<R: Runtime> TorClient<R> {
             });
             let housekeeping = Box::pin(housekeeping);
 
-            HsClientConnector::new(runtime.clone(), hs_circ_pool.clone(), config, housekeeping)?
+            let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(8).build();
+
+            HsClientConnector::new(
+                runtime.clone(),
+                hs_circ_pool.clone(),
+                config,
+                housekeeping,
+                Arc::new(thread_pool.expect("couldn't launch proof of work thread pool")),
+            )?
         };
 
         runtime
