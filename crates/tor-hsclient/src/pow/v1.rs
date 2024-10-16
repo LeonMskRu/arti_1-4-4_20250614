@@ -3,6 +3,7 @@
 use crate::err::ProofOfWorkError;
 use rand::thread_rng;
 use std::time::Instant;
+use threadpool::ThreadPool;
 use tor_async_utils::oneshot;
 use tor_async_utils::oneshot::Canceled;
 use tor_cell::relaycell::hs::pow::v1::ProofOfWorkV1;
@@ -44,6 +45,8 @@ pub(super) struct HsPowClientV1 {
     instance: TimerangeBound<Instance>,
     /// Next effort to use
     effort: Effort,
+    /// Thread pool
+    thread_pool: ThreadPool,
 }
 
 impl HsPowClientV1 {
@@ -62,6 +65,9 @@ impl HsPowClientV1 {
             effort: params
                 .suggested_effort()
                 .clamp(Effort::zero(), CLIENT_MAX_POW_EFFORT),
+
+            // Set up a thread pool, so we don't overload the client
+            thread_pool: ThreadPool::new(8),
         }
     }
 
@@ -98,7 +104,7 @@ impl HsPowClientV1 {
         debug!("beginning solve, {:?}", self.effort);
 
         let (result_sender, result_receiver) = oneshot::channel();
-        std::thread::spawn(move || {
+        self.thread_pool.execute(move || {
             let mut solver = input.solve(&mut thread_rng());
             let result = loop {
                 match solver.run_step() {
