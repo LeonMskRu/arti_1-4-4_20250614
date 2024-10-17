@@ -944,6 +944,7 @@ impl<R: Runtime> TorClient<R> {
             });
             let housekeeping = Box::pin(housekeeping);
 
+            // TODO: Make number of threads configurable
             let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(8).build();
 
             HsClientConnector::new(
