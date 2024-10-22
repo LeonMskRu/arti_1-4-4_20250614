@@ -21,6 +21,8 @@ type KeyIdent = (ArtiPath, KeyType);
 /// are never written to disk, and are stored in-memory as [`SshKeyData`].
 /// Keys saved in this Keystore do not persist between restarts!
 ///
+/// ### Security properties
+///
 /// While Arti never writes the keys for this key store to disk, the operating
 /// system may do so for reasons outside of this library's control. Some
 /// examples are swapping RAM to disk, generating core dumps, invoking
