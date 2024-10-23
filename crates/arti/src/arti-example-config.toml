@@ -537,13 +537,15 @@
 #    bob = "descriptor:x25519:B5ZQGTPERMMUDA6VC63LHJUF5IHPOKJMUK26LY2XKSF7VG52AESQ"
 
 # Certification Authority Authorization records to publish for the onion service as per RFC 6844
-# The named flag supported is "Critical" but custom flags can be added with e.g. "Critical | 4"
-# `tag` must be US-ASCII
-# `value` can include binary data encoded as per RFC1035 § 5.1
+# `tag` must be one of `Issue`, `IssueWild`, `Iodef`, or `{ Unknown = "<value>" }`
+# `value` must be one of:
+# - `{ Issuer = ["<issuer name>", [{ key = "<key name>", value = "<key value>"}, ...]] }`
+# - `{ Url = "<url>" }`
+# - `{ Unknown = [<byte value>, ...] }`
 #    [[onion_services."allium-cepa".caa_records]]
-#    flags = "Critical"
-#    tag = "issue"
-#    value = "test.acmeforonions.org; validationmethods=onion-csr-01"
+#    issuer_critical = true
+#    tag = "Issue"
+#    value = { Issuer = ["test.acmeforonions.org", [{ key = "validationmethods", value = "onion-csr-01" }]] }
 
 [vanguards]
 # The kind of vanguard to use when building onion service circuits.

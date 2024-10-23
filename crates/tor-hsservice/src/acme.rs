@@ -1,10 +1,9 @@
 //! Functions relating to generating documents for draft-ietf-acme-onion
 
+use crate::internal_prelude::*;
 use asn1_rs::ToDer;
 use tor_bytes::EncodeError;
-use crate::config::CAARecordList;
-use tor_netdoc::doc::hsdesc::{CAARecord, CAARecordBuilder, CAARecordBuilderError, CAARecordSet};
-use crate::internal_prelude::*;
+use tor_netdoc::doc::hsdesc::CAARecordSet;
 
 /// Possible errors when creating a CSR for an Onion Service
 #[derive(Debug, Copy, Clone, Error)]
@@ -56,83 +55,100 @@ pub(crate) fn onion_csr(
     0.write_der(&mut tbs_csr_contents)
         .expect("serialize version INTEGER");
     // subject Name
-    asn1_rs::Sequence::new((&[]).into()).write_der(&mut tbs_csr_contents)
+    asn1_rs::Sequence::new((&[]).into())
+        .write_der(&mut tbs_csr_contents)
         .expect("serialize subject Name");
 
     let mut subject_pk_contents = Vec::new();
     // algorithm AlgorithmIdentifier
-    asn1_rs::Sequence::from_iter_to_der([
-        // algorithm OBJECT IDENTIFIER - id-Ed25519
-        asn1_rs::oid!(1.3.101.112)
-    ].iter())
-        .expect("create algorithm AlgorithmIdentifier")
-        .write_der(&mut subject_pk_contents)
-        .expect("serialize algorithm AlgorithmIdentifier");
+    asn1_rs::Sequence::from_iter_to_der(
+        [
+            // algorithm OBJECT IDENTIFIER - id-Ed25519
+            asn1_rs::oid!(1.3.101 .112),
+        ]
+        .iter(),
+    )
+    .expect("create algorithm AlgorithmIdentifier")
+    .write_der(&mut subject_pk_contents)
+    .expect("serialize algorithm AlgorithmIdentifier");
     // subjectPublicKey BIT STRING
     asn1_rs::BitString::new(0, &hs_key.public().to_bytes())
         .write_der(&mut subject_pk_contents)
         .expect("serialize subjectPublicKey BIT STRING");
     // subjectPKInfo SubjectPublicKeyInfo
-    asn1_rs::Sequence::new(subject_pk_contents.into()).write_der(&mut tbs_csr_contents)
+    asn1_rs::Sequence::new(subject_pk_contents.into())
+        .write_der(&mut tbs_csr_contents)
         .expect("serialize subjectPKInfo SubjectPublicKeyInfo");
 
     let mut ca_nonce_contents = Vec::new();
     // type OBJECT IDENTIFIER - cabf-caSigningNonce
-    asn1_rs::oid!(2.23.140.41).write_der(&mut ca_nonce_contents)
+    asn1_rs::oid!(2.23.140 .41)
+        .write_der(&mut ca_nonce_contents)
         .expect("serialize type OBJECT IDENTIFIER - cabf-caSigningNonce");
     // values SET
-    asn1_rs::Set::from_iter_to_der([
-        asn1_rs::OctetString::new(ca_nonce)
-    ].iter())
+    asn1_rs::Set::from_iter_to_der([asn1_rs::OctetString::new(ca_nonce)].iter())
         .expect("create values SET")
         .write_der(&mut ca_nonce_contents)
         .expect("serialize values SET");
 
     let mut applicant_nonce_contents = Vec::new();
     // type OBJECT IDENTIFIER - cabf-applicantSigningNonce
-    asn1_rs::oid!(2.23.140.42).write_der(&mut applicant_nonce_contents)
+    asn1_rs::oid!(2.23.140 .42)
+        .write_der(&mut applicant_nonce_contents)
         .expect("serialize type OBJECT IDENTIFIER - cabf-applicantSigningNonce");
     // values SET
-    asn1_rs::Set::from_iter_to_der([
-        asn1_rs::OctetString::new(&applicant_nonce)
-    ].iter())
+    asn1_rs::Set::from_iter_to_der([asn1_rs::OctetString::new(&applicant_nonce)].iter())
         .expect("create values SET")
         .write_der(&mut applicant_nonce_contents)
         .expect("serialize values SET");
 
     // attributes [0] Attributes
     asn1_rs::TaggedImplicit::<asn1_rs::Set, asn1_rs::Error, 0>::implicit(
-        asn1_rs::Set::from_iter_to_der([
-            // Attribute SEQUENCE
-            asn1_rs::Sequence::new(ca_nonce_contents.into()),
-            // Attribute SEQUENCE
-            asn1_rs::Sequence::new(applicant_nonce_contents.into()),
-        ].iter()).expect("create attributes [0] Attributes")
-    ).write_der(&mut tbs_csr_contents).expect("serialize attributes [0] Attributes");
+        asn1_rs::Set::from_iter_to_der(
+            [
+                // Attribute SEQUENCE
+                asn1_rs::Sequence::new(ca_nonce_contents.into()),
+                // Attribute SEQUENCE
+                asn1_rs::Sequence::new(applicant_nonce_contents.into()),
+            ]
+            .iter(),
+        )
+        .expect("create attributes [0] Attributes"),
+    )
+    .write_der(&mut tbs_csr_contents)
+    .expect("serialize attributes [0] Attributes");
 
     let tbs_csr = asn1_rs::Sequence::new(tbs_csr_contents.into());
     let mut tbs = Vec::new();
-    tbs_csr.write_der(&mut tbs).expect("serialize CertificationRequestInfo SEQUENCE");
+    tbs_csr
+        .write_der(&mut tbs)
+        .expect("serialize CertificationRequestInfo SEQUENCE");
     let signature = hs_key.sign(&tbs);
 
     let mut csr_contents = Vec::new();
-    tbs_csr.write_der(&mut csr_contents)
+    tbs_csr
+        .write_der(&mut csr_contents)
         .expect("serialize CertificationRequestInfo SEQUENCE");
     // signatureAlgorithm AlgorithmIdentifier
-    asn1_rs::Sequence::from_iter_to_der([
-        // algorithm OBJECT IDENTIFIER - id-Ed25519
-        asn1_rs::oid!(1.3.101.112)
-    ].iter())
-        .expect("create signatureAlgorithm AlgorithmIdentifier")
-        .write_der(&mut csr_contents)
-        .expect("serialize signatureAlgorithm AlgorithmIdentifier");
+    asn1_rs::Sequence::from_iter_to_der(
+        [
+            // algorithm OBJECT IDENTIFIER - id-Ed25519
+            asn1_rs::oid!(1.3.101 .112),
+        ]
+        .iter(),
+    )
+    .expect("create signatureAlgorithm AlgorithmIdentifier")
+    .write_der(&mut csr_contents)
+    .expect("serialize signatureAlgorithm AlgorithmIdentifier");
     // signature BIT STRING
     asn1_rs::BitString::new(0, signature.to_bytes().as_slice())
-        .write_der(&mut csr_contents).expect("serialize signature BIT STRING");
+        .write_der(&mut csr_contents)
+        .expect("serialize signature BIT STRING");
 
     let mut csr = Vec::new();
     // CertificationRequest SEQUENCE
-    asn1_rs::Sequence::new(csr_contents.into()).write_der(&mut csr)
+    asn1_rs::Sequence::new(csr_contents.into())
+        .write_der(&mut csr)
         .expect("serialize CertificationRequest SEQUENCE");
 
     Ok(csr)
@@ -186,7 +202,7 @@ impl OnionCaa {
 pub(crate) fn onion_caa(
     keymgr: &KeyMgr,
     nickname: &HsNickname,
-    caa: &CAARecordList,
+    caa: &[hickory_proto::rr::rdata::CAA],
     expiry: u64,
 ) -> Result<OnionCaa, OnionCaaError> {
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
@@ -201,7 +217,7 @@ pub(crate) fn onion_caa(
     // Vary expiry timestamp by up to 15 minutes to obscure local clock skew
     let expiry_jitter = Duration::from_secs(
         rng.gen_range_checked(0..=900)
-            .expect("generate random expiry jitter")
+            .expect("generate random expiry jitter"),
     );
 
     let now = SystemTime::now();
@@ -211,18 +227,7 @@ pub(crate) fn onion_caa(
         .map_err(|_| OnionCaaError::InvalidSystemTime)?
         .as_secs();
 
-    let caa_records = caa
-        .iter()
-        .map(|r| {
-            CAARecordBuilder::default()
-                .flags(r.flags)
-                .tag(r.tag.clone())
-                .value(r.value.clone())
-                .build()
-        })
-        .collect::<Result<Vec<CAARecord>, CAARecordBuilderError>>()
-        .expect("unable to build CAA record");
-    let caa_rrset = CAARecordSet::new(&caa_records);
+    let caa_rrset = CAARecordSet::new(caa);
     let tbs_caa_rrset = caa_rrset.build_sign(&mut rng)?;
 
     let tbs = format!("onion-caa|{}|{}", expiry_unix, tbs_caa_rrset);

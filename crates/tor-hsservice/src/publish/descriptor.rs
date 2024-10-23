@@ -3,7 +3,6 @@
 use super::*;
 use crate::config::OnionServiceConfigPublisherView;
 use tor_cell::chancell::msg::HandshakeType;
-use tor_netdoc::doc::hsdesc::{CAARecord, CAARecordBuilder};
 
 /// Build the descriptor.
 ///
@@ -114,19 +113,6 @@ pub(super) fn build_sign<Rng: RngCore + CryptoRng>(
         "failed to sign the descriptor signing key"
     ))?;
 
-    let caa = config
-        .caa_records
-        .iter()
-        .map(|caa_entry| {
-            Ok(CAARecordBuilder::default()
-                .flags(caa_entry.flags)
-                .tag(caa_entry.tag.clone())
-                .value(caa_entry.value.clone())
-                .build()
-                .map_err(|e| into_internal!("failed to build CAA")(e))?)
-        })
-        .collect::<Result<Vec<CAARecord>, FatalError>>()?;
-
     let desc = HsDescBuilder::default()
         .blinded_id(&(&blind_id_kp).into())
         .hs_desc_sign(hs_desc_sign.as_ref())
@@ -141,7 +127,7 @@ pub(super) fn build_sign<Rng: RngCore + CryptoRng>(
         .revision_counter(revision_counter)
         .subcredential(subcredential)
         .auth_clients(auth_clients.as_deref())
-        .caa_records(caa.as_ref())
+        .caa_records(&config.caa_records)
         .build_sign(rng)
         .map_err(|e| into_internal!("failed to build descriptor")(e))?;
 

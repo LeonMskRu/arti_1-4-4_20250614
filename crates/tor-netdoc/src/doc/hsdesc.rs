@@ -120,7 +120,7 @@ pub struct HsDesc {
     // should turn this into a caret enum, record this info, and expose it.
     // create2_formats: Vec<u32>,
     /// CAA records - see [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt).
-    caa_records: Vec<CAARecord>,
+    caa_records: Vec<hickory_proto::rr::rdata::CAA>,
 }
 
 /// A type of authentication that is required when introducing to an onion
@@ -180,19 +180,6 @@ bitflags::bitflags! {
         // Flags may have other fields set, we should ignore them
         const _ = !0;
     }
-}
-
-/// A CAA (Certificate Authority Authorization) record to publish for an onion service,
-/// in accordance with [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt)
-#[derive(Debug, Clone, amplify::Getters, Builder)]
-#[builder(pattern = "owned")]
-pub struct CAARecord {
-    /// One octet containing the flags, currently only issuer critical
-    flags: CAAFlags,
-    /// The property identifier, a sequence of US-ASCII characters.
-    tag: String,
-    /// A sequence of octets representing the property value.
-    value: String,
 }
 
 /// An onion service after it has been parsed by the client, but not yet decrypted.
@@ -379,7 +366,7 @@ impl HsDesc {
     }
 
     /// The CAA records for this onion service
-    pub fn caa_records(&self) -> &[CAARecord] {
+    pub fn caa_records(&self) -> &[hickory_proto::rr::rdata::CAA] {
         &self.caa_records
     }
 }

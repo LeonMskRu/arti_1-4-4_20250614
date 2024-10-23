@@ -371,11 +371,6 @@ mod test {
     use tor_error::ErrorReport as _;
 
     use super::*;
-    #[cfg(feature = "onion-service-service")]
-    use {
-        tor_hsservice::config::CAARecordBuilder,
-        tor_netdoc::doc::hsdesc::CAAFlags,
-    };
     #[cfg(feature = "restricted-discovery")]
     use {
         arti_client::HsClientDescEncKey,
@@ -1335,11 +1330,15 @@ example config file {which:?}, uncommented={uncommented:?}
                         .push(dir);
                 }
 
-                let mut caa = CAARecordBuilder::default();
-                caa.flags(CAAFlags::Critical);
-                caa.tag("issue".into());
-                caa.value("test.acmeforonions.org; validationmethods=onion-csr-01".into());
-                b.service().caa_records().access().push(caa);
+                b.service()
+                    .caa_records(vec![hickory_proto::rr::rdata::CAA::new_issue(
+                        true,
+                        Some(hickory_proto::rr::Name::from_str("test.acmeforonions.org").unwrap()),
+                        vec![hickory_proto::rr::rdata::caa::KeyValue::new(
+                            "validationmethods",
+                            "onion-csr-01",
+                        )],
+                    )]);
 
                 b.build().unwrap()
             };

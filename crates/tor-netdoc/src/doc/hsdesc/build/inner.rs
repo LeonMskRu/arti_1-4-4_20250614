@@ -6,7 +6,6 @@
 
 use crate::build::NetdocEncoder;
 use crate::doc::hsdesc::inner::HsInnerKwd;
-use crate::doc::hsdesc::CAARecord;
 use crate::doc::hsdesc::IntroAuthType;
 use crate::doc::hsdesc::IntroPointDesc;
 use crate::NetdocBuilder;
@@ -46,7 +45,7 @@ pub(super) struct HsDescInner<'a> {
     /// The expiration time of an introduction point encryption key certificate.
     pub(super) intro_enc_key_cert_expiry: SystemTime,
     /// CAA records
-    pub(super) caa_records: &'a [CAARecord],
+    pub(super) caa_records: &'a [hickory_proto::rr::rdata::CAA],
 }
 
 impl<'a> NetdocBuilder for HsDescInner<'a> {
@@ -88,11 +87,7 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
         }
 
         for caa_entry in caa_records {
-            encoder
-                .item(CAA)
-                .arg(&caa_entry.flags.bits())
-                .arg(&caa_entry.tag)
-                .arg(&caa_entry.value);
+            encoder.item(CAA).arg(&caa_entry.to_string());
         }
 
         // We sort the introduction points here so as not to expose
@@ -197,15 +192,13 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
 #[non_exhaustive]
 pub struct CAARecordSet<'a> {
     /// CAA records
-    caa_records: &'a [CAARecord],
+    caa_records: &'a [hickory_proto::rr::rdata::CAA],
 }
 
 impl<'a> CAARecordSet<'a> {
     /// Wrap a slice of CAARecords for encoding into Netdoc format
-    pub fn new(caa_records: &'a[CAARecord]) -> Self {
-        Self {
-            caa_records
-        }
+    pub fn new(caa_records: &'a [hickory_proto::rr::rdata::CAA]) -> Self {
+        Self { caa_records }
     }
 }
 
@@ -216,11 +209,7 @@ impl<'a> NetdocBuilder for CAARecordSet<'a> {
         let mut encoder = NetdocEncoder::new();
 
         for caa_entry in self.caa_records {
-            encoder
-                .item(CAA)
-                .arg(&caa_entry.flags.bits())
-                .arg(&caa_entry.tag)
-                .arg(&caa_entry.value);
+            encoder.item(CAA).arg(&caa_entry.to_string());
         }
 
         encoder.finish().map_err(|e| e.into())
@@ -245,7 +234,7 @@ mod test {
 
     use super::*;
     use crate::doc::hsdesc::build::test::{create_intro_point_descriptor, expect_bug};
-    use crate::doc::hsdesc::{CAAFlags, IntroAuthType};
+    use crate::doc::hsdesc::IntroAuthType;
 
     use rand::thread_rng;
     use smallvec::SmallVec;
@@ -260,7 +249,7 @@ mod test {
         auth_required: Option<&SmallVec<[IntroAuthType; 2]>>,
         is_single_onion_service: bool,
         intro_points: &[IntroPointDesc],
-        caa_records: &[CAARecord],
+        caa_records: &[hickory_proto::rr::rdata::CAA],
     ) -> Result<String, EncodeError> {
         let hs_desc_sign = ed25519::Keypair::generate(&mut Config::Deterministic.into_rng());
 
@@ -279,6 +268,8 @@ mod test {
 
     #[test]
     fn inner_hsdesc_no_intro_auth() {
+        use std::str::FromStr;
+
         // A descriptor for a "single onion service"
         let hs_desc = create_inner_desc(
             &[HandshakeType::NTOR], /* create2_formats */
@@ -314,11 +305,14 @@ mod test {
             create_intro_point_descriptor(&mut rng, link_specs3),
         ];
 
-        let caa = &[CAARecord {
-            flags: CAAFlags::Critical,
-            tag: "issue".into(),
-            value: "test.acmeforonions.org".into(),
-        }];
+        let caa = &[hickory_proto::rr::rdata::CAA::new_issue(
+            true,
+            Some(hickory_proto::rr::Name::from_str("test.acmeforonions.org").unwrap()),
+            vec![hickory_proto::rr::rdata::caa::KeyValue::new(
+                "validationmethods",
+                "onion-csr-01",
+            )],
+        )];
 
         let hs_desc = create_inner_desc(
             &[
@@ -336,7 +330,7 @@ mod test {
         assert_eq!(
             hs_desc,
             r#"create2-formats 0 2 3
-caa 128 issue "test.acmeforonions.org"
+caa 128 issue "test.acmeforonions.org; validationmethods=onion-csr-01"
 introduction-point AQAGfwAAASLF
 onion-key ntor CJi8nDPhIFA7X9Q+oP7+jzxNo044cblmagk/d7oKWGc=
 auth-key

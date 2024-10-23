@@ -4,7 +4,7 @@ mod inner;
 mod middle;
 mod outer;
 
-use crate::doc::hsdesc::{CAARecord, IntroAuthType, IntroPointDesc};
+use crate::doc::hsdesc::{IntroAuthType, IntroPointDesc};
 use crate::NetdocBuilder;
 use rand::{CryptoRng, RngCore};
 use tor_bytes::EncodeError;
@@ -85,7 +85,7 @@ struct HsDesc<'a> {
     /// The "subcredential" of the onion service.
     subcredential: Subcredential,
     /// CAA records
-    caa_records: &'a [CAARecord],
+    caa_records: &'a [hickory_proto::rr::rdata::CAA],
 }
 
 /// Restricted discovery parameters.

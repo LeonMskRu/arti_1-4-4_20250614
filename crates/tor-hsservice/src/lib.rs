@@ -46,6 +46,7 @@ mod time_store;
 
 mod internal_prelude;
 
+mod acme;
 mod anon_level;
 pub mod config;
 mod err;
@@ -62,7 +63,6 @@ mod replay;
 mod req;
 pub mod status;
 mod timeout_track;
-mod acme;
 
 // rustdoc doctests can't use crate-public APIs, so are broken if provided for private items.
 // So we export the whole module again under this name.
@@ -87,6 +87,7 @@ use internal_prelude::*;
 // ---------- public exports ----------
 
 pub use crate::netdir::NetdirProviderShutdown;
+pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 pub use anon_level::Anonymity;
 pub use config::OnionServiceConfig;
 pub use err::{ClientError, EstablishSessionError, FatalError, IntroRequestError, StartupError};
@@ -99,7 +100,6 @@ pub use publish::UploadError as DescUploadError;
 pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
 pub use tor_persist::hsnickname::{HsNickname, InvalidNickname};
-pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 
 pub use helpers::handle_rend_requests;
 //---------- top-level service implementation (types and methods) ----------
@@ -525,12 +525,7 @@ impl RunningOnionService {
     pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
         let config = inner.config_tx.borrow();
-        acme::onion_caa(
-            &self.keymgr,
-            &self.nickname,
-            &config.caa_records,
-            expiry,
-        )
+        acme::onion_caa(&self.keymgr, &self.nickname, &config.caa_records, expiry)
     }
 }
 

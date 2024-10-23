@@ -2423,6 +2423,7 @@ dependencies = [
  "ipnet",
  "once_cell",
  "rand",
+ "serde",
  "thiserror",
  "tinyvec",
  "tokio",
@@ -5649,6 +5650,7 @@ dependencies = [
  "futures",
  "growable-bloom-filter",
  "hex",
+ "hickory-proto",
  "humantime",
  "itertools 0.13.0",
  "k12",
@@ -5914,6 +5916,7 @@ dependencies = [
  "educe",
  "hex",
  "hex-literal",
+ "hickory-proto",
  "humantime",
  "itertools 0.13.0",
  "once_cell",
@@ -6472,6 +6475,7 @@ dependencies = [
  "form_urlencoded",
  "idna 0.5.0",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

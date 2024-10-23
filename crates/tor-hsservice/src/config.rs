@@ -8,8 +8,6 @@ use crate::config::restricted_discovery::{
 use amplify::Getters;
 use derive_deftly::derive_deftly_adhoc;
 use tor_cell::relaycell::hs::est_intro;
-use tor_config::define_list_builder_helper;
-use tor_netdoc::doc::hsdesc::CAAFlags;
 
 #[cfg(feature = "restricted-discovery")]
 pub mod restricted_discovery;
@@ -93,10 +91,9 @@ pub struct OnionServiceConfig {
     // pow_queue_rate: TokenBucketConfig,
     // ...
     /// CAA records to publish for the onion service
-    #[builder(default, sub_builder(fn_name = "build"))]
-    #[builder_field_attr(serde(default))]
+    #[builder(default)]
     #[deftly(publisher_view)]
-    pub(crate) caa_records: CAARecordList,
+    pub(crate) caa_records: Vec<hickory_proto::rr::rdata::CAA>,
 }
 
 derive_deftly_adhoc! {
@@ -333,47 +330,4 @@ fn dos_params_from_token_bucket_config(
     };
     let cast = |n| i32::try_from(n).map_err(|_| err());
     est_intro::DosParams::new(Some(cast(c.rate)?), Some(cast(c.burst)?)).map_err(|_| err())
-}
-
-/// The serialized format of a [`CAARecordListBuilder`]:
-pub type CAARecordList = Vec<CAARecord>;
-
-define_list_builder_helper! {
-    pub struct CAARecordListBuilder {
-        caa: [CAARecordBuilder],
-    }
-    built: CAARecordList = caa;
-    default = vec![];
-}
-
-/// A CAA (Certificate Authority Authorization) record to publish for an onion service,
-/// in accordance with [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt).
-#[derive(Debug, Clone, Builder, Eq, PartialEq)]
-#[builder(build_fn(error = "ConfigBuildError", validate = "Self::validate"))]
-#[builder(derive(Serialize, Deserialize, Debug))]
-pub struct CAARecord {
-    /// One octet containing the flags, currently only issuer critical
-    pub(crate) flags: CAAFlags,
-    /// The property identifier, a sequence of US-ASCII characters.
-    pub(crate) tag: String,
-    /// A sequence of octets representing the property value.
-    /// Non US-ASCII bytes are encoded as per [RFC 1035 § 5.1](https://datatracker.ietf.org/doc/html/rfc1035#section-5.1);
-    /// i.e. `\DDD` where `DDD` is the decimal octet.
-    pub(crate) value: String,
-}
-
-impl CAARecordBuilder {
-    /// Check that the CAA record conforms to [RFC6844 § 5.1](https://datatracker.ietf.org/doc/html/rfc6844#section-5.1).
-    fn validate(&self) -> Result<(), ConfigBuildError> {
-        if let Some(tag) = &self.tag {
-            if !tag.is_ascii() {
-                return Err(ConfigBuildError::Invalid {
-                    field: "tag".into(),
-                    problem: "CAA tag must be US-ASCII".into(),
-                });
-            }
-        }
-
-        Ok(())
-    }
 }

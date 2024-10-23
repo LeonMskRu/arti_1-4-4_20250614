@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-use super::{CAAFlags, CAARecord, IntroAuthType, IntroPointDesc};
+use super::{IntroAuthType, IntroPointDesc};
 use crate::batching_split_before::IteratorExt as _;
 use crate::doc::hsdesc::pow::PowParamSet;
 use crate::parse::tokenize::{ItemResult, NetDocReader};
@@ -42,7 +42,7 @@ pub(crate) struct HsDescInner {
     // Always has >= 1 and <= NUM_INTRO_POINT_MAX entries
     pub(super) intro_points: Vec<IntroPointDesc>,
     /// CAA records
-    pub(super) caa_records: Vec<CAARecord>,
+    pub(super) caa_records: Vec<hickory_proto::rr::rdata::CAA>,
     /// A list of offered proof-of-work parameters, at most one per type.
     pub(super) pow_params: PowParamSet,
 }
@@ -74,7 +74,7 @@ static HS_INNER_HEADER_RULES: Lazy<SectionRules<HsInnerKwd>> = Lazy::new(|| {
     rules.add(INTRO_AUTH_REQUIRED.rule().args(1..));
     rules.add(SINGLE_ONION_SERVICE.rule());
     rules.add(POW_PARAMS.rule().args(1..).may_repeat().obj_optional());
-    rules.add(CAA.rule().args(3..=3).may_repeat());
+    rules.add(CAA.rule().args(3..).may_repeat());
     rules.add(UNRECOGNIZED.rule().may_repeat().obj_optional());
 
     rules.build()
@@ -428,23 +428,13 @@ impl HsDescInner {
 
         let mut caa_records = Vec::new();
         while let Some(tok) = header.get(CAA) {
-            let mut args = shell_words::split(tok.args_as_str())
-                .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA line: {}", e)))?;
-            if args.len() != 3 {
-                return Err(EK::TooManyArguments.with_msg("CAA entries must have 3 arguments"));
-            }
-            let flags: u8 = args[0]
-                .parse()
-                .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA flags: {}", e)))?;
-            let tag = &args[1];
-            if !tag.is_ascii() {
-                return Err(EK::BadArgument.with_msg(format!("invalid CAA tag: {}", tag)));
-            }
-            caa_records.push(CAARecord {
-                flags: CAAFlags::from_bits_retain(flags),
-                value: args.pop().expect("Parser should've checked for 3 arguments, this shouldn't have failed."),
-                tag: args.pop().expect("Parser should've checked for 3 arguments, this shouldn't have failed."),
-            });
+            use hickory_proto::serialize::txt::RDataParser;
+            let record = hickory_proto::rr::record_data::RData::try_from_str(
+                hickory_proto::rr::record_type::RecordType::CAA,
+                tok.args_as_str(),
+            )
+            .map_err(|e| EK::BadArgument.with_msg(format!("invalid CAA line: {}", e)))?;
+            caa_records.push(record.into_caa().expect("CAA record data"));
         }
 
         let inner = HsDescInner {
