@@ -212,7 +212,7 @@ impl<'a> NetdocBuilder for CAARecordSet<'a> {
             encoder.item(CAA).arg(&caa_entry.to_string());
         }
 
-        encoder.finish().map_err(|e| e.into())
+        encoder.finish().map_err(|e| e.into()).map(|e| e.trim().to_string())
     }
 }
 

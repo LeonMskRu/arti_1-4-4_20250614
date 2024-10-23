@@ -713,7 +713,7 @@ pub(crate) mod test {
     }
 
     /// Create a test hsid keypair.
-    fn create_hsid() -> (HsIdKeypair, HsIdKey) {
+    pub(crate) fn create_hsid() -> (HsIdKeypair, HsIdKey) {
         let mut rng = testing_rng();
         let keypair = ed25519::Keypair::generate(&mut rng);
 

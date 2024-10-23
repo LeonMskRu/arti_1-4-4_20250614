@@ -4,6 +4,10 @@ use crate::internal_prelude::*;
 use asn1_rs::ToDer;
 use tor_bytes::EncodeError;
 use tor_netdoc::doc::hsdesc::CAARecordSet;
+#[cfg(test)]
+use mock_instant::global::{SystemTime, UNIX_EPOCH};
+#[cfg(not(test))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Possible errors when creating a CSR for an Onion Service
 #[derive(Debug, Copy, Clone, Error)]
@@ -223,7 +227,7 @@ pub(crate) fn onion_caa(
     let now = SystemTime::now();
     let expiry = now + Duration::from_secs(expiry) + expiry_jitter;
     let expiry_unix = expiry
-        .duration_since(std::time::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
         .map_err(|_| OnionCaaError::InvalidSystemTime)?
         .as_secs();
 
@@ -238,4 +242,117 @@ pub(crate) fn onion_caa(
         expiry: expiry_unix,
         signature: signature.to_vec(),
     })
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    // @@ begin test lint list maintained by maint/add_warning @@
+    #![allow(clippy::bool_assert_comparison)]
+    #![allow(clippy::clone_on_copy)]
+    #![allow(clippy::dbg_macro)]
+    #![allow(clippy::mixed_attributes_style)]
+    #![allow(clippy::print_stderr)]
+    #![allow(clippy::print_stdout)]
+    #![allow(clippy::single_char_pattern)]
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unchecked_duration_subtraction)]
+    #![allow(clippy::useless_vec)]
+    #![allow(clippy::needless_pass_by_value)]
+    //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
+    use super::*;
+
+    use test_temp_dir::test_temp_dir;
+    use tor_llcrypto::pk::ed25519::{Verifier, Signature};
+    use crate::HsIdKeypairSpecifier;
+
+    const TEST_SVC_NICKNAME: &str = "test-acme-svc";
+
+    #[test]
+    fn onion_caa() {
+        let time_start = 86401;
+        let time_expiry = 86400;
+        let temp_dir = test_temp_dir!();
+        let nickname = HsNickname::try_from(TEST_SVC_NICKNAME.to_string()).unwrap();
+        let hsid_spec = HsIdKeypairSpecifier::new(nickname.clone());
+        let keymgr = crate::test::create_keymgr(&temp_dir);
+        let (hsid_keypair, hsid_public) = crate::test::create_hsid();
+        mock_instant::global::MockClock::set_system_time(Duration::from_secs(time_start));
+
+        keymgr
+            .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
+            .unwrap();
+
+        let generated_caa = super::onion_caa(&keymgr, &nickname, &[hickory_proto::rr::rdata::CAA::new_issue(
+            true,
+            Some(hickory_proto::rr::Name::from_str("test.acmeforonions.org").unwrap()),
+            vec![hickory_proto::rr::rdata::caa::KeyValue::new(
+                "validationmethods",
+                "onion-csr-01",
+            )],
+        )], time_expiry).unwrap();
+
+        assert_eq!(generated_caa.caa, "caa 128 issue \"test.acmeforonions.org; validationmethods=onion-csr-01\"");
+
+        let time_min = time_start + time_expiry;
+        let time_max = time_start + time_expiry + 900; // jitter
+        assert!(generated_caa.expiry >= time_min && generated_caa.expiry <= time_max);
+
+        assert_eq!(generated_caa.signature.len(), 64);
+
+        let message = format!("onion-caa|{}|{}", generated_caa.expiry, generated_caa.caa);
+        let signature = Signature::from_slice(&generated_caa.signature).unwrap();
+        hsid_public.verify(message.as_bytes(), &signature).unwrap();
+    }
+
+    #[test]
+    fn onion_csr_too_short() {
+        let temp_dir = test_temp_dir!();
+        let nickname = HsNickname::try_from(TEST_SVC_NICKNAME.to_string()).unwrap();
+        let hsid_spec = HsIdKeypairSpecifier::new(nickname.clone());
+        let keymgr = crate::test::create_keymgr(&temp_dir);
+        let (hsid_keypair, _hsid_public) = crate::test::create_hsid();
+
+        keymgr
+            .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
+            .unwrap();
+
+        assert!(matches!(onion_csr(&keymgr, &nickname, &[]), Err(OnionCsrError::CANonceTooShort)));
+    }
+
+    #[test]
+    fn onion_csr_too_long() {
+        let temp_dir = test_temp_dir!();
+        let nickname = HsNickname::try_from(TEST_SVC_NICKNAME.to_string()).unwrap();
+        let hsid_spec = HsIdKeypairSpecifier::new(nickname.clone());
+        let keymgr = crate::test::create_keymgr(&temp_dir);
+        let (hsid_keypair, _hsid_public) = crate::test::create_hsid();
+
+        keymgr
+            .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
+            .unwrap();
+
+        let dummy_nonce = [0u8; 256];
+        assert!(matches!(onion_csr(&keymgr, &nickname, &dummy_nonce), Err(OnionCsrError::CANonceTooLong)));
+    }
+
+    #[test]
+    fn onion_csr_valid() {
+        let temp_dir = test_temp_dir!();
+        let nickname = HsNickname::try_from(TEST_SVC_NICKNAME.to_string()).unwrap();
+        let hsid_spec = HsIdKeypairSpecifier::new(nickname.clone());
+        let keymgr = crate::test::create_keymgr(&temp_dir);
+        let (hsid_keypair, _hsid_public) = crate::test::create_hsid();
+
+        keymgr
+            .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
+            .unwrap();
+
+        let dummy_nonce = [0u8; 16];
+        let generated_csr = onion_csr(&keymgr, &nickname, &dummy_nonce).unwrap();
+        assert_eq!(generated_csr.len(), 180);
+
+        let dummy_nonce = [0u8; 32];
+        let generated_csr = onion_csr(&keymgr, &nickname, &dummy_nonce).unwrap();
+        assert_eq!(generated_csr.len(), 196);
+    }
 }
