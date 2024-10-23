@@ -222,7 +222,7 @@ mod test {
     fn valid_requests() {
         let parse_request = |s| match serde_json::from_str::<FlexibleRequest>(s) {
             Ok(FlexibleRequest::Valid(req)) => req,
-            _ => panic!(),
+            other => panic!("{:?}", other),
         };
 
         let r =
@@ -326,7 +326,7 @@ mod test {
         // NOTE: as above.
         assert_eq!(
             s,
-            r#"{"error":{"message":"error: Request did not have any `id` field.","code":-32600,"kinds":["arti:RpcInvalidRequest"]}}"#
+            r#"{"error":{"message":"Request did not have any `id` field.","code":-32600,"kinds":["rpc:InvalidRequest"]}}"#
         );
     }
 }

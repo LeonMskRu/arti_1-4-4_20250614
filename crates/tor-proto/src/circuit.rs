@@ -779,7 +779,7 @@ impl ClientCirc {
         self: &Arc<ClientCirc>,
         begin_msg: AnyRelayMsg,
         cmd_checker: AnyCmdChecker,
-    ) -> Result<(StreamReader, StreamTarget)> {
+    ) -> Result<(StreamReader, StreamTarget, StreamAccount)> {
         // TODO: Possibly this should take a hop, rather than just
         // assuming it's the last hop.
 
@@ -827,7 +827,7 @@ impl ClientCirc {
             ended: false,
         };
 
-        Ok((reader, target))
+        Ok((reader, target, memquota))
     }
 
     /// Start a DataStream (anonymized connection) to the given
@@ -837,8 +837,7 @@ impl ClientCirc {
         msg: AnyRelayMsg,
         optimistic: bool,
     ) -> Result<DataStream> {
-        let memquota = StreamAccount::new(self.mq_account())?;
-        let (reader, target) = self
+        let (reader, target, memquota) = self
             .begin_stream_impl(msg, DataCmdChecker::new_any())
             .await?;
         let mut stream = DataStream::new(reader, target, memquota);
@@ -931,10 +930,10 @@ impl ClientCirc {
     /// Helper: Send the resolve message, and read resolved message from
     /// resolve stream.
     async fn try_resolve(self: &Arc<ClientCirc>, msg: Resolve) -> Result<Resolved> {
-        let (reader, _) = self
+        let (reader, _target, memquota) = self
             .begin_stream_impl(msg.into(), ResolveCmdChecker::new_any())
             .await?;
-        let mut resolve_stream = ResolveStream::new(reader);
+        let mut resolve_stream = ResolveStream::new(reader, memquota);
         resolve_stream.read_msg().await
     }
 
@@ -1054,9 +1053,8 @@ impl PendingClientCirc {
         createdreceiver: oneshot::Receiver<CreateResponse>,
         input: CircuitRxReceiver,
         unique_id: UniqId,
-    ) -> Result<(PendingClientCirc, reactor::Reactor)> {
-        let memquota = CircuitAccount::new(channel.mq_account())?;
-
+        memquota: CircuitAccount,
+    ) -> (PendingClientCirc, reactor::Reactor) {
         let (reactor, control_tx, reactor_closed_rx, mutable) =
             Reactor::new(channel.clone(), id, unique_id, input, memquota.clone());
 
@@ -1075,7 +1073,7 @@ impl PendingClientCirc {
             recvcreated: createdreceiver,
             circ: Arc::new(circuit),
         };
-        Ok((pending, reactor))
+        (pending, reactor)
     }
 
     /// Extract the process-unique identifier for this pending circuit.
@@ -1497,8 +1495,14 @@ mod test {
         let (_circmsg_send, circmsg_recv) = fake_mpsc(64);
         let unique_id = UniqId::new(23, 17);
 
-        let (pending, reactor) =
-            PendingClientCirc::new(circid, chan, created_recv, circmsg_recv, unique_id).unwrap();
+        let (pending, reactor) = PendingClientCirc::new(
+            circid,
+            chan,
+            created_recv,
+            circmsg_recv,
+            unique_id,
+            CircuitAccount::new_noop(),
+        );
 
         rt.spawn(async {
             let _ignore = reactor.run().await;
@@ -1514,7 +1518,7 @@ mod test {
                 HandshakeType::Fast => {
                     let cf = match create_cell.msg() {
                         AnyChanMsg::CreateFast(cf) => cf,
-                        _ => panic!(),
+                        other => panic!("{:?}", other),
                     };
                     let (_, rep) = CreateFastServer::server(
                         &mut rng,
@@ -1528,7 +1532,7 @@ mod test {
                 HandshakeType::Ntor => {
                     let c2 = match create_cell.msg() {
                         AnyChanMsg::Create2(c2) => c2,
-                        _ => panic!(),
+                        other => panic!("{:?}", other),
                     };
                     let (_, rep) = NtorServer::server(
                         &mut rng,
@@ -1543,7 +1547,7 @@ mod test {
                 HandshakeType::NtorV3 => {
                     let c2 = match create_cell.msg() {
                         AnyChanMsg::Create2(c2) => c2,
-                        _ => panic!(),
+                        other => panic!("{:?}", other),
                     };
                     let (_, rep) = NtorV3Server::server(
                         &mut rng,
@@ -1585,10 +1589,7 @@ mod test {
         let _circ = circ.unwrap();
 
         // pfew!  We've build a circuit!  Let's make sure it has one hop.
-        /* TODO: reinstate this.
-        let inner = Arc::get_mut(&mut circuit).unwrap().c.into_inner();
-        assert_eq!(inner.hops.len(), 1);
-         */
+        assert_eq!(_circ.n_hops(), 1);
     }
 
     #[test]
@@ -1667,8 +1668,14 @@ mod test {
         let (circmsg_send, circmsg_recv) = fake_mpsc(64);
         let unique_id = UniqId::new(23, 17);
 
-        let (pending, reactor) =
-            PendingClientCirc::new(circid, chan, created_recv, circmsg_recv, unique_id).unwrap();
+        let (pending, reactor) = PendingClientCirc::new(
+            circid,
+            chan,
+            created_recv,
+            circmsg_recv,
+            unique_id,
+            CircuitAccount::new_noop(),
+        );
 
         rt.spawn(async {
             let _ignore = reactor.run().await;
@@ -1730,7 +1737,7 @@ mod test {
                     AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                         .unwrap()
                 }
-                _ => panic!(),
+                other => panic!("{:?}", other),
             };
             assert!(matches!(m.msg(), AnyRelayMsg::BeginDir(_)));
         });
@@ -1764,11 +1771,11 @@ mod test {
                     AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                         .unwrap()
                 }
-                _ => panic!(),
+                other => panic!("{:?}", other),
             };
             let e2 = match rmsg.msg() {
                 AnyRelayMsg::Extend2(e2) => e2,
-                _ => panic!(),
+                other => panic!("{:?}", other),
             };
             let mut rng = testing_rng();
             let reply = match handshake_type {
@@ -1902,7 +1909,7 @@ mod test {
                     err: tor_bytes::Error::InvalidMessage(_),
                     object: "extended2 message",
                 } => {}
-                _ => panic!(),
+                other => panic!("{:?}", other),
             }
         });
     }
@@ -1914,7 +1921,7 @@ mod test {
             let error = bad_extend_test_impl(&rt, 2.into(), cc).await;
             match error {
                 Error::CircuitClosed => {}
-                _ => panic!(),
+                other => panic!("{:?}", other),
             }
         });
     }
@@ -1959,7 +1966,7 @@ mod test {
                         AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                             .unwrap()
                     }
-                    _ => panic!(),
+                    other => panic!("{:?}", other),
                 };
                 let (streamid, rmsg) = rmsg.into_streamid_and_msg();
                 assert!(matches!(rmsg, AnyRelayMsg::BeginDir(_)));
@@ -1976,7 +1983,7 @@ mod test {
                         AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                             .unwrap()
                     }
-                    _ => panic!(),
+                    other => panic!("{:?}", other),
                 };
                 let (streamid_2, rmsg) = rmsg.into_streamid_and_msg();
                 assert_eq!(streamid_2, streamid);
@@ -2035,7 +2042,7 @@ mod test {
                         AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                             .unwrap()
                     }
-                    _ => panic!(),
+                    other => panic!("{:?}", other),
                 };
                 let (streamid, rmsg) = rmsg.into_streamid_and_msg();
                 assert_eq!(rmsg.cmd(), RelayCmd::BEGIN);
@@ -2052,7 +2059,7 @@ mod test {
                         AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                             .unwrap()
                     }
-                    _ => panic!(),
+                    other => panic!("{:?}", other),
                 };
                 let (_, rmsg) = rmsg.into_streamid_and_msg();
                 assert_eq!(rmsg.cmd(), RelayCmd::END);
@@ -2119,7 +2126,7 @@ mod test {
                     AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                         .unwrap()
                 }
-                _ => panic!(),
+                other => panic!("{:?}", other),
             };
             let (streamid, rmsg) = rmsg.into_streamid_and_msg();
             assert!(matches!(rmsg, AnyRelayMsg::Begin(_)));
@@ -2139,7 +2146,7 @@ mod test {
                         AnyRelayMsgOuter::decode_singleton(RelayCellFormat::V0, r.into_relay_body())
                             .unwrap()
                     }
-                    _ => panic!(),
+                    other => panic!("{:?}", other),
                 };
                 let (streamid2, rmsg) = rmsg.into_streamid_and_msg();
                 assert_eq!(streamid2, streamid);

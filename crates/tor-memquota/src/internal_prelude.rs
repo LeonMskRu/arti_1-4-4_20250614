@@ -44,7 +44,7 @@ pub(crate) use {
     paste::paste,
     pin_project::pin_project,
     serde::{Deserialize, Serialize},
-    slotmap::SlotMap,
+    slotmap_careful::SlotMap,
     static_assertions::assert_not_impl_any,
     thiserror::Error,
     tracing::{debug, error, info},
@@ -52,10 +52,11 @@ pub(crate) use {
 };
 
 pub(crate) use {
+    tor_async_utils::mpsc_channel_no_memquota,
     tor_async_utils::stream_peek::StreamUnobtrusivePeeker,
     tor_basic_utils::ByteQty as Qty,
     tor_config::{ConfigBuildError, ReconfigureError},
-    tor_error::{error_report, internal, into_internal, Bug, ErrorKind, HasKind},
+    tor_error::{error_report, internal, into_internal, trace_report, Bug, ErrorKind, HasKind},
     tor_log_ratelim::log_ratelim,
     tor_rtcompat::{CoarseInstant, CoarseTimeProvider, DynTimeProvider},
 };
@@ -67,7 +68,7 @@ pub(crate) use crate::{
     error::{Error, ReclaimCrashed, StartupError, TrackerCorrupted},
     if_enabled::{EnabledToken, IfEnabled},
     memory_cost::{HasMemoryCost, HasTypedMemoryCost, TypedParticipation},
-    mtracker::{self, Account, IsParticipant, Participation},
+    mtracker::{self, Account, IsParticipant, MemoryQuotaTracker, Participation},
     private::Sealed,
     refcount,
     utils::DefaultExtTake,

@@ -12,7 +12,7 @@ categories = ["cryptography"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 #
 # We need a PreferredRuntime
-# @@ test-all-crates ignore
+# @@ test-all-crates conditional-option minimal --features=tor-rtcompat/tokio,tor-rtcompat/native-tls
 
 [features]
 default = []
@@ -123,7 +123,7 @@ void = "1"
 libc = { version = "0.2", default-features = false }
 rmp-serde = "1"
 serde_json = "1.0.104"
-slotmap = "1.0.6"
+slotmap-careful = { path = "../slotmap-careful", version = "0.2.0" }
 tempfile = "3"
 test-temp-dir = { version = "0.3.0", path = "../test-temp-dir" }
 tor-config = { version = "0.23.0", path = "../tor-config", features = ["testing"] }

@@ -121,6 +121,7 @@ work.
   DNS queries over the Tor network.
 * `harden` (default) -- Build with support for hardening the Arti process by
   disabling debugger attachment and other local memory-inspection vectors.
+* `memquota` -- Build with support for memory use tracking and limiting.
 * `compression` (default) -- Build support for downloading compressed
   documents. Requires a C compiler.
 * `bridge-client` (default) -- Build with support for bridges.
@@ -132,6 +133,9 @@ work.
   be used for security-sensitive purposes.
 * `pt-client` (default) -- Build with support for pluggable transports.
 * `vanguards` (default) -- Build with support for [Vanguards](https://spec.torproject.org/vanguards-spec/).
+
+* `default-runtime` (default): Use a default async runtime and TLS provider.
+  Convenience alias for `tokio` and `native-tls`.
 
 * `full` -- Build with all features above, along with all stable additive
   features from other arti crates.  (This does not include experimental

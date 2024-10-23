@@ -622,7 +622,9 @@ impl<R: Runtime, M: Mockable<R>> IptManager<R, M> {
 
         // We don't need buffering; since this is written to by dedicated tasks which
         // are reading watches.
-        let (status_send, status_recv) = mpsc::channel(0);
+        //
+        // Internally-generated status updates (hopefully rate limited?), no need for mq.
+        let (status_send, status_recv) = mpsc_channel_no_memquota(0);
 
         let storage = state_handle
             .storage_handle("ipts")
@@ -1798,7 +1800,7 @@ mod test {
     use crate::status::{OnionServiceStatus, StatusSender};
     use crate::test::{create_keymgr, create_storage_handles_from_state_dir};
     use rand::SeedableRng as _;
-    use slotmap::DenseSlotMap;
+    use slotmap_careful::DenseSlotMap;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
     use test_temp_dir::{test_temp_dir, TestTempDir};
@@ -1808,7 +1810,7 @@ mod test {
     use tracing_test::traced_test;
     use walkdir::WalkDir;
 
-    slotmap::new_key_type! {
+    slotmap_careful::new_key_type! {
         struct MockEstabId;
     }
 

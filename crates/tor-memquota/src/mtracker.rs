@@ -289,7 +289,7 @@ pub enum Reclaimed {
 
 //---------- principal data structure ----------
 
-slotmap::new_key_type! {
+slotmap_careful::new_key_type! {
     /// Identifies an Account
     ///
     /// After an account is torn down, the `AId` becomes invalid
@@ -548,8 +548,10 @@ impl MemoryQuotaTracker {
             return Ok(MemoryQuotaTracker::new_noop());
         };
 
-        let (reclaim_tx, reclaim_rx) = mpsc::channel(0 /* plus num_senders, ie 1 */);
+        let (reclaim_tx, reclaim_rx) =
+            mpsc_channel_no_memquota(0 /* plus num_senders, ie 1 */);
         let total_used = TotalQtyNotifier::new_zero(reclaim_tx);
+        let ConfigInner { max, low_water } = config; // for logging
 
         let global = Global {
             total_used,
@@ -565,6 +567,8 @@ impl MemoryQuotaTracker {
 
         let for_task = Arc::downgrade(&tracker);
         runtime.spawn(reclaim::task(for_task, reclaim_rx, enabled))?;
+
+        info!(%max, %low_water, "memory quota tracking initialised");
 
         Ok(tracker)
     }
@@ -1093,9 +1097,30 @@ impl Participation {
 
     /// Record that some memory has been (or will be) allocated (using `Qty`)
     pub(crate) fn claim_qty(&mut self, want: Qty) -> crate::Result<()> {
+        self.claim_qty_inner(want)
+            .inspect_err(|e| trace_report!(e, "claim {}", want))
+    }
+
+    /// Record that some memory has been (or will be) allocated - core implementation
+    ///
+    /// Caller must handles trace logging.
+    fn claim_qty_inner(&mut self, want: Qty) -> crate::Result<()> {
         let Enabled(self_, enabled) = &mut self.0 else {
             return Ok(());
         };
+
+        // In debug builds, check that the Account is still live, to detect lifetime trouble
+        // (we repeat this later, which is OK in a debug build)
+        #[cfg(debug_assertions)]
+        {
+            find_in_tracker! {
+                enabled;
+                self_.tracker => + tracker, state;
+                self_.aid => _arecord;
+                *self_.pid => _precord;
+                ?Error
+            };
+        }
 
         if let Some(got) = self_.cache.split_off(want) {
             return got.claim_return_to_participant();

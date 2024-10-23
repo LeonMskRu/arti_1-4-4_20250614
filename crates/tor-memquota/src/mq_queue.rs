@@ -350,7 +350,7 @@ impl ChannelSpec for MpscSpec {
     type SendError = mpsc::SendError;
 
     fn raw_channel<T: Debug + Send + 'static>(self) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
-        mpsc::channel(self.buffer)
+        mpsc_channel_no_memquota(self.buffer)
     }
 
     fn close_receiver<T: Debug + Send + 'static>(rx: &mut Self::Receiver<T>) {
@@ -566,6 +566,7 @@ impl<T: HasMemoryCost + Debug + Send + 'static, C: ChannelSpec> IsParticipant
             let mut state_guard = self.lock();
             let state = mem::replace(&mut *state_guard, Err(reason));
             drop::<MutexGuard<_>>(state_guard);
+            #[allow(clippy::single_match)] // pattern is intentional.
             match state {
                 Ok(mut state) => {
                     for call in state.collapse_callbacks.drain(..) {

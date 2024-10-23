@@ -18,7 +18,7 @@ use futures::{
 };
 use rpc::dispatch::BoxedUpdateSink;
 use serde_json::error::Category as JsonErrorCategory;
-use tor_async_utils::SinkExt as _;
+use tor_async_utils::{mpsc_channel_no_memquota, SinkExt as _};
 
 use crate::{
     cancel::{Cancel, CancelHandle},
@@ -29,8 +29,8 @@ use crate::{
     RpcMgr,
 };
 
-use tor_rpcbase as rpc;
 use tor_rpcbase::templates::*;
+use tor_rpcbase::{self as rpc, RpcError};
 
 /// An open connection from an RPC client.
 ///
@@ -278,7 +278,10 @@ impl Connection {
         // Note that the blocking behavior here is deliberate: We want _all_ of
         // these reads to start blocking when response_sink.send is blocked.
 
-        let (tx_response, mut rx_response) = mpsc::channel::<BoxedResponse>(UPDATE_CHAN_SIZE);
+        // TODO RPC should this queue participate in memquota?
+        let (tx_response, mut rx_response) =
+            mpsc_channel_no_memquota::<BoxedResponse>(UPDATE_CHAN_SIZE);
+
         let mut finished_requests = FuturesUnordered::new();
         finished_requests.push(futures::future::pending().boxed());
 
@@ -464,18 +467,23 @@ impl Connection {
     }
 }
 
-/// An error returned when an RPC request lists some feature as required, but we don't have that
-/// feature.
+/// An error returned when an RPC request lists some feature as required,
+/// but we don't have every such feature.
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("Required features not available")]
 struct MissingFeaturesError(
-    // TODO RPC: We need a way to put this into the error's "data" field.  But first we need to specify that.
+    /// A list of the features that were requested but not available.
     Vec<String>,
 );
 
-impl tor_error::HasKind for MissingFeaturesError {
-    fn kind(&self) -> tor_error::ErrorKind {
-        tor_error::ErrorKind::RpcFeatureNotPresent
+impl From<MissingFeaturesError> for RpcError {
+    fn from(err: MissingFeaturesError) -> Self {
+        let mut e = RpcError::new(
+            err.to_string(),
+            tor_rpcbase::RpcErrorKind::FeatureNotPresent,
+        );
+        e.set_datum("rpc:unsupported_features".to_string(), err.0);
+        e
     }
 }
 
