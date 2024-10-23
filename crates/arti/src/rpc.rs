@@ -10,6 +10,7 @@ use arti_client::TorClient;
 use tor_rtcompat::Runtime;
 
 pub(crate) mod conntarget;
+#[cfg(feature = "onion-service-acme")]
 mod onion_service;
 mod proxyinfo;
 mod session;

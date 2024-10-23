@@ -58,6 +58,8 @@ experimental-api = ["restricted-discovery", "__is_experimental"]
 
 restricted-discovery = ["__is_experimental"]
 
+acme = []
+
 __is_experimental = []
 
 [dependencies]

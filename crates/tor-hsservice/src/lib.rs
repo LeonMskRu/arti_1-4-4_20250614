@@ -46,6 +46,7 @@ mod time_store;
 
 mod internal_prelude;
 
+#[cfg(feature = "acme")]
 mod acme;
 mod anon_level;
 pub mod config;
@@ -87,6 +88,7 @@ use internal_prelude::*;
 // ---------- public exports ----------
 
 pub use crate::netdir::NetdirProviderShutdown;
+#[cfg(feature = "acme")]
 pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 pub use anon_level::Anonymity;
 pub use config::OnionServiceConfig;
@@ -354,26 +356,6 @@ impl OnionService {
         onion_name(&self.keymgr, &self.config.nickname)
     }
 
-    /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
-    /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
-    /// Baseline Requirements.
-    ///
-    /// The CA nonce must be equal to or less than 32 bytes.
-    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, acme::OnionCsrError> {
-        acme::onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
-    }
-
-    /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
-    /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
-        acme::onion_caa(
-            &self.keymgr,
-            &self.config.nickname,
-            &self.config.caa_records,
-            expiry,
-        )
-    }
-
     /// Generate an identity key (KP_hs_id) for this service.
     ///
     /// If the keystore specified by `selector` contains an entry for the identity key
@@ -399,6 +381,29 @@ impl OnionService {
         let offline_hsid = false;
 
         maybe_generate_hsid(&self.keymgr, &self.config.nickname, offline_hsid, selector)
+    }
+}
+
+#[cfg(feature = "acme")]
+impl OnionService {
+    /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
+    /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
+    /// Baseline Requirements.
+    ///
+    /// The CA nonce must be equal to or less than 32 bytes.
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, acme::OnionCsrError> {
+        acme::onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
+    }
+
+    /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
+    /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
+    pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
+        acme::onion_caa(
+            &self.keymgr,
+            &self.config.nickname,
+            &self.config.caa_records,
+            expiry,
+        )
     }
 }
 
@@ -510,7 +515,10 @@ impl RunningOnionService {
     pub fn onion_name(&self) -> Option<HsId> {
         onion_name(&self.keymgr, &self.nickname)
     }
+}
 
+#[cfg(feature = "acme")]
+impl RunningOnionService {
     /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
     /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
     /// Baseline Requirements.
