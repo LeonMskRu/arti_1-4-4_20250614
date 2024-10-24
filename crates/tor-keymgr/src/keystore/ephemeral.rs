@@ -21,6 +21,22 @@ type KeyIdent = (ArtiPath, KeyType);
 /// are never written to disk, and are stored in-memory as [`SshKeyData`].
 /// Keys saved in this Keystore do not persist between restarts!
 ///
+/// ### Use within Arti
+///
+/// This keystore was originally provided for:
+///
+///  * Tests
+///  * Top-level application integrations and configurations
+///    where the whole application should not to store any persistent secrets.
+///
+/// Use of the ephemeral keystore in other situations is controversial,
+/// especially in core Arti protocol and subsystem implementations -
+/// including via `KeyMgr` with explicit selection of a known-to-be-ephemeral keystore.
+/// But, discouragement is also disputed, and the disagreement has not yet been resolved.
+// TODO #1705 replace this section with some actual decision
+/// See [#1705](https://gitlab.torproject.org/tpo/core/arti/-/issues/1705)
+/// for discussion and opinions.
+///
 /// ### Security properties
 ///
 /// While Arti never writes the keys for this key store to disk, the operating
