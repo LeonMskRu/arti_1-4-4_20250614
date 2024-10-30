@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
+# Get chutney bin from env or PATH
+CHUTNEY_BIN="${CHUTNEY_BIN:-$(type -P chutney)}"
+
+export CHUTNEY_DATA_DIR="${CHUTNEY_DATA_DIR:-$(pwd)}"
+
 if [ -z "${RUST_LOG:-}" ]; then
     echo "Setting RUST_LOG=info for your convenience."
     export RUST_LOG=info
@@ -9,17 +14,8 @@ fi
 target="basic"
 cd "$(git rev-parse --show-toplevel)"
 
-if [ -z "${CHUTNEY_PATH:-}" ]; then
-    # Use the default chutney path we set up before.
-    CHUTNEY_PATH="$(pwd)/chutney"
-    export CHUTNEY_PATH
-else
-    # CHUTNEY_PATH is set; tell the user about that.
-    echo "CHUTNEY_PATH is ${CHUTNEY_PATH}; using your local copy of chutney."
-fi
-
 ./tests/chutney/setup
 
-cargo run -p arti-bench --locked --release -- -c "${CHUTNEY_PATH}/net/nodes/arti.toml" "$@"
+cargo run -p arti-bench --locked --release -- -c "${CHUTNEY_DATA_DIR}/nodes/arti.toml" "$@"
 
-"${CHUTNEY_PATH}"/chutney stop "$target"
+"${CHUTNEY_BIN}" stop "$target"
