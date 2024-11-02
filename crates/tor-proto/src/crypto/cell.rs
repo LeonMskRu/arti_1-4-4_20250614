@@ -135,6 +135,11 @@ impl HopNum {
     pub fn display(&self) -> HopNumDisplay {
         HopNumDisplay(*self)
     }
+
+    /// Return a HopNum with a decremented value
+    pub fn decrement(&self) -> HopNum {
+        HopNum::from(self.0 - 1)
+    }
 }
 
 /// A helper for displaying [`HopNum`]s.
@@ -229,8 +234,8 @@ impl OutboundClientCrypt {
     }
 
     /// Return the number of layers configured on this OutboundClientCrypt.
-    pub(crate) fn n_layers(&self) -> usize {
-        self.layers.len()
+    pub(crate) fn n_layers(&self) -> HopNum {
+        HopNum::from(u8::try_from(self.layers.len()).expect("Somehow > 255 hops"))
     }
 }
 
@@ -259,11 +264,9 @@ impl InboundClientCrypt {
     }
 
     /// Return the number of layers configured on this InboundClientCrypt.
-    ///
-    /// TODO: use HopNum
     #[allow(dead_code)]
-    pub(crate) fn n_layers(&self) -> usize {
-        self.layers.len()
+    pub(crate) fn n_layers(&self) -> HopNum {
+        HopNum::from(u8::try_from(self.layers.len()).expect("Somehow > 255 hops"))
     }
 }
 
@@ -582,6 +585,8 @@ mod test {
 
     #[test]
     fn roundtrip() {
+        use crate::crypto::cell;
+
         // Take canned keys and make sure we can do crypto correctly.
         use crate::crypto::handshake::ShakeKeyGenerator as KGen;
         fn s(seed: &[u8]) -> SecretBuf {
@@ -601,8 +606,8 @@ mod test {
         let pair = Tor1RelayCrypto::construct(KGen::new(seed3.clone())).unwrap();
         add_layers(&mut cc_out, &mut cc_in, pair);
 
-        assert_eq!(cc_in.n_layers(), 3);
-        assert_eq!(cc_out.n_layers(), 3);
+        assert_eq!(cc_in.n_layers(), cell::HopNum(3));
+        assert_eq!(cc_out.n_layers(), cell::HopNum(3));
 
         let mut r1 = Tor1RelayCrypto::<RelayCellFormatV0>::construct(KGen::new(seed1)).unwrap();
         let mut r2 = Tor1RelayCrypto::<RelayCellFormatV0>::construct(KGen::new(seed2)).unwrap();

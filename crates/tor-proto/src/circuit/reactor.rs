@@ -499,12 +499,12 @@ where
             let (state, msg) = H::client1(&mut rng, key, client_aux_data)?;
 
             let n_hops = reactor.crypto_out.n_layers();
-            let hop = ((n_hops - 1) as u8).into();
+            let hop = n_hops.decrement();
 
             trace!(
                 "{}: Extending circuit to hop {} with {:?}",
                 unique_id,
-                n_hops + 1,
+                u8::from(n_hops) + 1,
                 linkspecs
             );
 
