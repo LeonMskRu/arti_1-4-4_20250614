@@ -141,7 +141,7 @@ impl HasKind for OnionServiceCsrError {
 #[deftly(rpc(method_name = "arti:x_acme_get_onion_service_caa"))]
 struct GetOnionServiceCaa {
     /// How long should the CAA signature be valid for, in seconds
-    expiry: u64,
+    expiry_seconds: u64,
 }
 
 impl rpc::RpcMethod for GetOnionServiceCaa {
@@ -155,7 +155,7 @@ pub(super) struct OnionServiceCaa {
     /// The encoded CAA record set
     caa: String,
     /// Unix timestamp of when this record set will expire
-    expiry: u64,
+    expiry_unix_timestamp: u64,
     /// A base64 encoded signature over the CAA record set
     signature: String,
 }
@@ -194,13 +194,16 @@ async fn rpc_session_get_onion_service(
     method: Box<GetOnionService>,
     ctx: Arc<dyn rpc::Context>,
 ) -> Result<SingleIdResponse, GetOnionServiceError> {
+    // Get index of second `.` in passed domain
     let rhs = method
         .domain
         .rmatch_indices('.')
         .nth(1)
         .map(|(i, _)| i + 1)
         .unwrap_or(0);
+    // Cut off anything before the second `.`; i.e. turning a.b.c.onion to c.onion
     let rhs = &method.domain[rhs..];
+    // Parse the root onion domain string into an onion service identity
     let hsid: HsId = rhs.parse()?;
 
     let onion_services = session
@@ -268,7 +271,7 @@ async fn rpc_onion_service_caa(
 ) -> Result<OnionServiceCaa, OnionServiceCaaError> {
     let caa = onion_service
         .svc
-        .get_onion_caa(method.expiry)
+        .get_onion_caa(method.expiry_seconds)
         .map_err(|e| match e {
             OnionCaaError::KeyNotFound => OnionServiceCaaError::KeyNotFound,
             OnionCaaError::InvalidSystemTime => OnionServiceCaaError::InvalidSystemTime,
@@ -278,7 +281,7 @@ async fn rpc_onion_service_caa(
 
     Ok(OnionServiceCaa {
         caa: caa.caa().to_owned(),
-        expiry: caa.expiry(),
+        expiry_unix_timestamp: caa.expiry(),
         signature: base64ct::Base64::encode_string(caa.signature()),
     })
 }

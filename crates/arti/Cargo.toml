@@ -52,7 +52,6 @@ full = [
     "tor-hsrproxy?/full",
     "tor-hsservice?/full",
     "tor-hscrypto?/full",
-    "arti-relay?/full",
     "tor-async-utils/full",
 ]
 
