@@ -108,6 +108,7 @@ pub use publish::UploadError as DescUploadError;
 pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
 pub use tor_persist::hsnickname::{HsNickname, InvalidNickname};
+pub use tor_rtcompat::DynTimeProvider;
 
 pub use helpers::handle_rend_requests;
 //---------- top-level service implementation (types and methods) ----------
@@ -135,6 +136,8 @@ pub struct RunningOnionService {
     nickname: HsNickname,
     /// The key manager, used for accessing the underlying key stores.
     keymgr: Arc<KeyMgr>,
+    /// Used for ACME signing
+    time_provider: DynTimeProvider,
 }
 
 /// Implementation details for an onion service.
@@ -322,7 +325,7 @@ impl OnionService {
         )?;
 
         let publisher: Publisher<R, publish::Real<R>> = Publisher::new(
-            runtime,
+            runtime.clone(),
             nickname.clone(),
             netdir_provider,
             circ_pool,
@@ -333,6 +336,7 @@ impl OnionService {
         );
 
         let svc = Arc::new(RunningOnionService {
+            time_provider: DynTimeProvider::new(runtime),
             nickname,
             keymgr,
             inner: Mutex::new(SvcInner {
@@ -400,18 +404,19 @@ impl OnionService {
     /// Baseline Requirements.
     ///
     /// The CA nonce must be equal to or less than 32 bytes.
-    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, acme::OnionCsrError> {
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
         acme::onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
     }
 
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
+    pub fn get_onion_caa<R: SleepProvider>(&self, expiry: u64, now: SystemTime) -> Result<OnionCaa, OnionCaaError> {
         acme::onion_caa(
             &self.keymgr,
             &self.config.nickname,
             &self.config.caa_records,
             expiry,
+            now
         )
     }
 }
@@ -533,16 +538,16 @@ impl RunningOnionService {
     /// Baseline Requirements.
     ///
     /// The CA nonce must be equal to or less than 32 bytes.
-    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, acme::OnionCsrError> {
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
         acme::onion_csr(&self.keymgr, &self.nickname, ca_nonce)
     }
 
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn get_onion_caa(&self, expiry: u64) -> Result<acme::OnionCaa, acme::OnionCaaError> {
+    pub fn get_onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
         let config = inner.config_tx.borrow();
-        acme::onion_caa(&self.keymgr, &self.nickname, &config.caa_records, expiry)
+        acme::onion_caa(&self.keymgr, &self.nickname, &config.caa_records, expiry, self.time_provider.wallclock())
     }
 }
 

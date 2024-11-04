@@ -135,4 +135,3 @@ tor-persist = { version = "0.23.0", path = "../tor-persist", features = ["testin
 tor-rtmock = { path = "../tor-rtmock", version = "0.23.0" }
 tracing-test = "0.2.4"
 walkdir = "2"
-mock_instant = "0.5.1"

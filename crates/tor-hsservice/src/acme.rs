@@ -2,15 +2,14 @@
 
 use crate::internal_prelude::*;
 use asn1_rs::ToDer;
-#[cfg(test)]
-use mock_instant::global::{SystemTime, UNIX_EPOCH};
-#[cfg(not(test))]
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use tor_bytes::EncodeError;
 use tor_netdoc::doc::hsdesc::CAARecordSet;
 
-const MIN_CA_NONCE_LEN: usize = 8; // Per CA/BF Baseline Requirements
-const MAX_CA_NONCE_LEN: usize = 128; // Somewhat arbitrarily chosen, to avoid wasting time signing a huge amount of data
+/// Per CA/BF Baseline Requirements
+const MIN_CA_NONCE_LEN: usize = 8;
+/// Somewhat arbitrarily chosen, to avoid wasting time signing a huge amount of data
+const MAX_CA_NONCE_LEN: usize = 128;
 
 /// Possible errors when creating a CSR for an Onion Service
 #[derive(Debug, Copy, Clone, Error)]
@@ -205,6 +204,7 @@ pub(crate) fn onion_caa(
     nickname: &HsNickname,
     caa: &[hickory_proto::rr::rdata::CAA],
     expiry: u64,
+    now: std::time::SystemTime,
 ) -> Result<OnionCaa, OnionCaaError> {
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
     let hs_key = ed25519::ExpandedKeypair::from(
@@ -221,7 +221,6 @@ pub(crate) fn onion_caa(
             .expect("generate random expiry jitter"),
     );
 
-    let now = SystemTime::now();
     let expiry = now + Duration::from_secs(expiry) + expiry_jitter;
     let expiry_unix = expiry
         .duration_since(UNIX_EPOCH)
@@ -266,14 +265,13 @@ pub(crate) mod test {
 
     #[test]
     fn onion_caa() {
-        let time_start = 86401;
+        let time_start = SystemTime::now();
         let time_expiry = 86400;
         let temp_dir = test_temp_dir!();
         let nickname = HsNickname::try_from(TEST_SVC_NICKNAME.to_string()).unwrap();
         let hsid_spec = HsIdKeypairSpecifier::new(nickname.clone());
         let keymgr = crate::test::create_keymgr(&temp_dir);
         let (hsid_keypair, hsid_public) = crate::test::create_hsid();
-        mock_instant::global::MockClock::set_system_time(Duration::from_secs(time_start));
 
         keymgr
             .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
@@ -291,6 +289,7 @@ pub(crate) mod test {
                 )],
             )],
             time_expiry,
+            time_start,
         )
         .unwrap();
 
@@ -299,9 +298,10 @@ pub(crate) mod test {
             "caa 128 issue \"test.acmeforonions.org; validationmethods=onion-csr-01\""
         );
 
-        let time_min = time_start + time_expiry;
-        let time_max = time_start + time_expiry + 900; // jitter
-        assert!(generated_caa.expiry >= time_min && generated_caa.expiry <= time_max);
+        let time_min = time_start + Duration::from_secs(time_expiry);
+        let time_max = time_start + Duration::from_secs(time_expiry + 900); // jitter
+        let generated_expiry = UNIX_EPOCH + Duration::from_secs(generated_caa.expiry);
+        assert!(generated_expiry >= time_min && generated_expiry <= time_max);
 
         assert_eq!(generated_caa.signature.len(), 64);
 
