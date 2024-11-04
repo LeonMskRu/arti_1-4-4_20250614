@@ -7,17 +7,29 @@ Script to generate a document about Arti RPC objects and methods.
 - Extracts markdown documentation by running nightly rustdoc to get JSON output.
 
 - Outpus markdown or html.
-"""
 
-# Tricky bits, unsolved
-#   - Converting links in the md to be correct.
-#   - Extracting only relevant portions of the rustdoc.
+Requires rustdoc nightly, for json support.
+May require specific versions of rustdoc nightly,
+since the json format is unstable.
+
+Known to work with nightly from 2024-10-22.
+"""
 
 import io
 import json
 import os
+import re
 import subprocess
 import sys
+
+# What version of rustdoc json do we know?
+SUPPORTED_FORMAT_VERSION = 35
+# What nightly do we know to provide that version?
+KNOWN_GOOD_NIGHTLY = "nightly-2024-10-22"
+
+# Tricky bits, unsolved
+#   - Converting links in the md to be correct.
+#   - Extracting only relevant portions of the rustdoc.
 
 # Location of the arti checkout.
 ARTI_ROOT = os.path.split(os.path.dirname(__file__))[0]
@@ -49,7 +61,8 @@ HTML_FOOTER = """\
 
 # This isn't installed by default, so try to give a helpful message.
 try:
-    import marko, marko.md_renderer
+    import marko
+    import marko.md_renderer
 except ImportError:
     print(
         "You need to install marko so that we can parse and manipulate markdown.",
@@ -122,8 +135,10 @@ def doc_subject(doc):
     except ValueError:
         return " ".join(lines)
 
+
 # An object to parse and render markdown
 MD = marko.Markdown(renderer=marko.md_renderer.MarkdownRenderer)
+
 
 def heading_matches(h, s):
     """
@@ -207,16 +222,18 @@ def adjust_doc(doc, link_table, outer_h_level=3):
     # We add a bunch of Rustdoc link definitions to the end of the document,
     # since otherwise marko won't know how to handle them.
     parts = [doc, "\n\n"]
-    for k,v in link_table.items():
+    for k, v in link_table.items():
         parts.append(f"[{k}]: {v}\n")
     doc = "".join(parts)
 
     document = parser.parse(doc)
 
-    #### Pull out the section that's called MAGIC_HEADING, if any.
+    ####
+    # Pull out the section that's called MAGIC_HEADING, if any.
     extract_md_section(document)
 
-    #### Adjust heading levels so that they nest within outer_h_level.
+    ####
+    # Adjust heading levels so that they nest within outer_h_level.
     try:
         min_hlevel = min(
             elt.level for elt in document.children if elt.get_type() == "Heading"
@@ -229,7 +246,8 @@ def adjust_doc(doc, link_table, outer_h_level=3):
         if elt.get_type == "Heading":
             elt.level += adjustment
 
-    #### Make rustdoc links into something better.
+    ####
+    # Make rustdoc links into something better.
     #
     # TODO: decide what to actually do here.
     recursively_fix_links(document, lambda lnk: None)
@@ -515,12 +533,37 @@ class RpcUniverse:
         self.emit_objects(f)
 
 
+have_warned_about_json_version = False
+
+
+def warn_about_json_version(actual_version):
+    """
+    If we haven't previously done so, warn the user that their nightly
+    is generating an unrecognized version of rustdoc json.
+    """
+    global have_warned_about_json_version
+    if not have_warned_about_json_version:
+        have_warned_about_json_version = True
+        msg = f"""
+              WARNING: Rustdoc json is in format version {actual_version},
+              but this tool expects {SUPPORTED_FORMAT_VERSION}.
+              If this fails, you might need to fix the tool,
+              or switch to {KNOWN_GOOD_NIGHTLY}.
+        """
+        msg = re.sub(r"\s+", " ", msg).strip()
+        print(msg)
+
+
 class Rustdoc:
     """
     The rustdoc for a single crate.
     """
 
     def __init__(self, json_doc):
+        actual_version = json_doc.get("format_version")
+        if actual_version != SUPPORTED_FORMAT_VERSION:
+            warn_about_json_version(actual_version)
+
         self.doc = json_doc
 
         self.idx_by_ident = dict()
@@ -543,7 +586,7 @@ class Rustdoc:
         obj = self.doc["index"][self.idx_by_ident[ident]]
         links = obj["links"]
         table = {}
-        for content,idx in links.items():
+        for content, idx in links.items():
             table[content] = self.get_rustdoc_url_by_idx(idx)
         return table
 
@@ -559,7 +602,7 @@ class Rustdoc:
         """
         Return a URL according to a rustdoc "index".
         """
-        obj = self.doc["paths"][idx]
+        obj = self.doc["paths"][str(idx)]
         kind = obj["kind"]
         path = obj["path"][:]
         path[-1] = f"{kind}.{path[-1]}.html"
@@ -635,6 +678,7 @@ def run(output, fmt="md"):
         output.write(HTML_HEADER)
         output.write(md_html.render(parsed))
         output.write(HTML_FOOTER)
+
 
 def main(args):
     """Invoke rpc-docs-tool using the command-line arguments in args.

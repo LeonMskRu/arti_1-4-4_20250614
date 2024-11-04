@@ -7,7 +7,7 @@ from __future__ import annotations
 import importlib
 import traceback
 from types import ModuleType
-from typing import Generator
+from typing import Iterator
 
 from arti_rpc_tests import FatalException
 from arti_rpc_tests.context import TestContext
@@ -19,6 +19,7 @@ _TEST_MODS = [
     "basic",
     "connect",
     "meta_features",
+    "release_obj",
 ]
 
 
@@ -72,7 +73,7 @@ class TestFilter:
         # No features supported yet
         pass
 
-    def list_tests(self, module: ModuleType) -> Generator[TestCase]:
+    def list_tests(self, module: ModuleType) -> Iterator[TestCase]:
         """
         Yield every test in `module` that this filter permits.
         """
@@ -120,10 +121,10 @@ class TestCase:
 
         Raise a FatalException if all test execution should stop entirely.
         """
-        if not context.arti_process.is_running():
+        if not context.arti_process_is_running():
             raise FatalException("Arti process not running at start of test!")
 
         self.function(context)
 
-        if not context.arti_process.is_running():
+        if not context.arti_process_is_running():
             raise FatalException("Arti process not running at end of test!")

@@ -23,8 +23,10 @@ from __future__ import annotations
 # - Exported types start with "Arti", to make imports safer.
 
 import json
+import logging
 import os
 import socket
+import sys
 from ctypes import POINTER, byref, c_int, _Pointer as Ptr
 from enum import Enum
 import arti_rpc.ffi
@@ -35,9 +37,14 @@ from arti_rpc.ffi import (
     ArtiRpcConn as FfiConn,
     _ArtiRpcStatus as FfiStatus,
 )
-from typing import Optional,Tuple,Union # needed for Python 3.9, which lacks some syntax.
+from typing import (
+    Optional,
+    Tuple,
+    Union,
+)  # needed for Python 3.9, which lacks some syntax.
 
 if os.name == "nt":
+
     def _socket_is_valid(sock):
         """Return true if `sock` is a valid SOCKET."""
         return sock != arti_rpc.ffi.INVALID_SOCKET
@@ -47,6 +54,10 @@ else:
     def _socket_is_valid(sock):
         """Return true if `sock` is a valid fd."""
         return sock >= 0
+
+
+_logger = logging.getLogger(__name__)
+
 
 class _RpcBase:
     def __init__(self, rpc_lib):
@@ -78,6 +89,7 @@ class _RpcBase:
             # This should be impossible; it indicates misbehavior on arti's part.
             raise ArtiRpcError(rv, error_ptr, self._rpc)
 
+
 def _into_json_str(o: Union[str, dict]) -> str:
     """
     If 'o' is a dict, convert it into a json string.
@@ -89,12 +101,14 @@ def _into_json_str(o: Union[str, dict]) -> str:
     else:
         return o
 
+
 class ArtiRpcConn(_RpcBase):
     """
     An open connection to Arti.
     """
+
     _conn: Optional[Ptr[FfiConn]]
-    _session_id: str
+    _session: ArtiRpcObject
 
     def __init__(self, connect_string: str, rpc_lib=None):
         """
@@ -105,12 +119,13 @@ class ArtiRpcConn(_RpcBase):
         constructed with `arti_rpc.ffi.get_library`.
         If it's None, we use the default.
         """
+        self._conn = None
+
         if rpc_lib is None:
             rpc_lib = arti_rpc.ffi.get_library()
 
         _RpcBase.__init__(self, rpc_lib)
 
-        self._conn = None
         conn = POINTER(arti_rpc.ffi.ArtiRpcConn)()
         error = POINTER(arti_rpc.ffi.ArtiRpcError)()
         rv = self._rpc.arti_rpc_connect(
@@ -120,14 +135,15 @@ class ArtiRpcConn(_RpcBase):
         assert conn
         self._conn = conn
         s = self._rpc.arti_rpc_conn_get_session_id(self._conn).decode("utf-8")
-        self._session_id = s
+        self._session = self.make_object(s)
 
     def __del__(self):
-        if hasattr(self, '_conn'):
+        if self._conn is not None:
             # Note that if _conn is set, then _rpc is necessarily set.
             self._rpc.arti_rpc_conn_free(self._conn)
+            self._conn = None
 
-    def make_object(self, object_id:str) -> ArtiRpcObject:
+    def make_object(self, object_id: str) -> ArtiRpcObject:
         """
         Return an ArtiRpcObject for a given object ID on this connection.
 
@@ -144,7 +160,7 @@ class ArtiRpcConn(_RpcBase):
         by invoking methods on the session,
         you can get the IDs for other objects.)
         """
-        return self.make_object(self._session_id)
+        return self._session
 
     def execute(self, request: Union[str, dict]) -> dict:
         """
@@ -168,9 +184,9 @@ class ArtiRpcConn(_RpcBase):
         self._handle_error(rv, error)
         r = ArtiRpcResponse(self._consume_rpc_str(response))
         assert r.kind() == ArtiRpcResponseKind.RESULT
-        return r['result']
+        return r["result"]
 
-    def execute_with_handle(self, request: Union[str,dict]) -> ArtiRequestHandle:
+    def execute_with_handle(self, request: Union[str, dict]) -> ArtiRequestHandle:
         """
         Launch an RPC request on this connection, and return a ArtiRequestHandle
         to the open request.
@@ -192,9 +208,9 @@ class ArtiRpcConn(_RpcBase):
         hostname: str,
         port: int,
         *,
-        on_object:Union[ArtiRpcObject,str,None]=None,
-        isolation:str="",
-        want_stream_id:bool=False,
+        on_object: Union[ArtiRpcObject, str, None] = None,
+        isolation: str = "",
+        want_stream_id: bool = False,
     ) -> Tuple[socket.socket, Optional[ArtiRpcObject]]:
         """
         Open an anonymized data stream to `hostname`:`port` over Arti.
@@ -245,6 +261,7 @@ class ArtiRpcConn(_RpcBase):
         else:
             return (sock, None)
 
+
 class ArtiRpcErrorStatus(Enum):
     """
     Value return to indicate the type of an error returned by the
@@ -256,6 +273,7 @@ class ArtiRpcErrorStatus(Enum):
 
     See arti-rpc-client-core documentation for more information.
     """
+
     SUCCESS = 0
     INVALID_INPUT = 1
     NOT_SUPPORTED = 2
@@ -270,6 +288,7 @@ class ArtiRpcErrorStatus(Enum):
     STREAM_FAILED = 11
     NOT_AUTHENTICATED = 12
 
+
 def _error_status_from_int(status: int) -> Union[ArtiRpcErrorStatus, int]:
     """
     If `status` is a recognized member of `ArtiRpcErrorStatus`,
@@ -281,10 +300,12 @@ def _error_status_from_int(status: int) -> Union[ArtiRpcErrorStatus, int]:
     except ValueError:
         return status
 
+
 class ArtiRpcError(Exception):
     """
     An error returned by the RPC library.
     """
+
     _rv: FfiStatus
     _err: Ptr[FfiError]
 
@@ -294,7 +315,9 @@ class ArtiRpcError(Exception):
         self._rpc = rpc
 
     def __del__(self):
-        self._rpc.arti_rpc_err_free(self._err)
+        if self._err is not None:
+            self._rpc.arti_rpc_err_free(self._err)
+            self._err = None
 
     def __str__(self):
         status = self._rpc.arti_rpc_status_to_str(
@@ -312,9 +335,7 @@ class ArtiRpcError(Exception):
 
         This code is generated by the underlying RPC library.
         """
-        return _error_status_from_int(
-            self._rpc.arti_rpc_err_status(self._err)
-        )
+        return _error_status_from_int(self._rpc.arti_rpc_err_status(self._err))
 
     def os_error_code(self) -> Optional[int]:
         """
@@ -347,9 +368,12 @@ class ArtiRpcError(Exception):
         if response is None:
             return None
         else:
-            return json.loads(response)['error']
+            return json.loads(response)["error"]
 
-def _opt_object_id_to_bytes(object_id: Union[ArtiRpcObject, str, None]) -> Optional[bytes]:
+
+def _opt_object_id_to_bytes(
+    object_id: Union[ArtiRpcObject, str, None]
+) -> Optional[bytes]:
     """
     Convert `object_id` (if it is present) to a `bytes`.
     """
@@ -360,19 +384,23 @@ def _opt_object_id_to_bytes(object_id: Union[ArtiRpcObject, str, None]) -> Optio
     else:
         return object_id.encode("UTF-8")
 
+
 class ArtiRpcObject(_RpcBase):
     """
     Wrapper around an object ID and an ArtiRpcConn;
     used to launch RPC requests ergonomically.
     """
+
     _id: str
     _conn: ArtiRpcConn
+    _owned: bool
     _meta: Optional[dict]
 
     def __init__(self, object_id: str, connection: ArtiRpcConn):
         _RpcBase.__init__(self, connection._rpc)
         self._id = object_id
         self._conn = connection
+        self._owned = True
         self._meta = None
 
     def id(self) -> str:
@@ -410,13 +438,39 @@ class ArtiRpcObject(_RpcBase):
         The wrapper will support `invoke` and `invoke_with_handle`,
         and will pass them any provided `params` given as an argument
         to this function as meta-request parameters.
+
+        The resulting object does not have ownership on the
+        underlying RPC object.
         """
         new_obj = ArtiRpcObject(self._id, self._conn)
+        new_obj._owned = False
         if params:
             new_obj._meta = params
         else:
             new_obj._meta = None
         return new_obj
+
+    def release_ownership(self):
+        """
+        Release ownership of the underlying RPC object.
+
+        By default, when the last reference to an ArtiRpcObject is dropped,
+        we tell the RPC server to release the corresponding RPC ObjectID.
+        After that happens, nothing else can use that ObjectID
+        (and the object may get freed on the server side,
+        if nothing else refers to it.)
+
+        Calling this method releases ownership, such that we will not
+        tell the RPC server to release the ObjectID when this object is dropped.
+        """
+        self._owned = False
+
+    def __del__(self):
+        if self._owned and self._conn._conn is not None:
+            try:
+                self.invoke("rpc:release")
+            except ArtiRpcError:
+                _logger.warn("RPC error while deleting object", exc_info=sys.exc_info())
 
 
 class ArtiRpcResponseKind(Enum):
@@ -425,9 +479,11 @@ class ArtiRpcResponseKind(Enum):
 
     Returned by ArtiRpcResponse.kind().
     """
+
     RESULT = 1
     UPDATE = 2
     ERROR = 3
+
 
 class ArtiRpcResponse:
     """
@@ -437,6 +493,7 @@ class ArtiRpcResponse:
     an incremental update;
     or an error.
     """
+
     _kind: ArtiRpcResponseKind
     _response: str
     _obj: dict
@@ -445,9 +502,9 @@ class ArtiRpcResponse:
         self._response = response
         self._obj = json.loads(response)
 
-        have_result = 'result' in self._obj
-        have_error = 'error' in self._obj
-        have_update = 'update' in self._obj
+        have_result = "result" in self._obj
+        have_error = "error" in self._obj
+        have_update = "update" in self._obj
 
         # Here we (ab)use the property that the booleans True and False
         # can also be used as the ints 1 and 0.
@@ -478,27 +535,28 @@ class ArtiRpcResponse:
         If this is an error response, return its `error` member.
         Otherwise return `None`.
         """
-        return self._obj.get('error')
+        return self._obj.get("error")
 
     def result(self) -> Optional[dict]:
         """
         If this is a successful result, return its 'result' member.
         Otherwise return `None`.
         """
-        return self._obj.get('result')
+        return self._obj.get("result")
 
     def update(self) -> Optional[dict]:
         """
         If this is an incremental update, return its 'update' member.
         Otherwise return `None`.
         """
-        return self._obj.get('update')
+        return self._obj.get("update")
 
 
 class ArtiRequestHandle(_RpcBase):
     """
     Handle to a pending RPC request.
     """
+
     _handle: Ptr[FfiHandle]
 
     def __init__(self, handle: Ptr[FfiHandle], rpc):
@@ -506,7 +564,9 @@ class ArtiRequestHandle(_RpcBase):
         self._handle = handle
 
     def __del__(self):
-        self._rpc.arti_rpc_handle_free(self._handle)
+        if self._handle is not None:
+            self._rpc.arti_rpc_handle_free(self._handle)
+            self._handle = None
 
     def wait(self) -> ArtiRpcResponse:
         """
@@ -526,5 +586,3 @@ class ArtiRequestHandle(_RpcBase):
         expected_kind = ArtiRpcResponseKind(responsetype.value)
         assert response_obj.kind() == expected_kind
         return response_obj
-
-
