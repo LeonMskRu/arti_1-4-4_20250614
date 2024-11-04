@@ -8,6 +8,8 @@ use tor_netdoc::doc::hsdesc::CAARecordSet;
 use mock_instant::global::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use std::time::{SystemTime, UNIX_EPOCH};
+const MIN_CA_NONCE_LEN: usize = 8; // Per CA/BF Baseline Requirements
+const MAX_CA_NONCE_LEN: usize = 128; // Somewhat arbitrarily chosen, to avoid wasting time signing a huge amount of data
 
 /// Possible errors when creating a CSR for an Onion Service
 #[derive(Debug, Copy, Clone, Error)]
@@ -30,10 +32,10 @@ pub(crate) fn onion_csr(
     nickname: &HsNickname,
     ca_nonce: &[u8],
 ) -> Result<Vec<u8>, OnionCsrError> {
-    if ca_nonce.len() < 8 {
+    if ca_nonce.len() < MIN_CA_NONCE_LEN {
         return Err(OnionCsrError::CANonceTooShort);
     }
-    if ca_nonce.len() > 128 {
+    if ca_nonce.len() > MAX_CA_NONCE_LEN {
         return Err(OnionCsrError::CANonceTooLong);
     }
 
