@@ -85,6 +85,7 @@ struct HsDesc<'a> {
     /// The "subcredential" of the onion service.
     subcredential: Subcredential,
     /// CAA records
+    #[builder(default)]
     caa_records: &'a [hickory_proto::rr::rdata::CAA],
 }
 

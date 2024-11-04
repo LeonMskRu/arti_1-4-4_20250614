@@ -53,6 +53,7 @@ mod time_store;
 mod internal_prelude;
 
 #[cfg(feature = "acme")]
+#[cfg_attr(docsrs, doc(cfg(feature = "acme")))]
 mod acme;
 mod anon_level;
 pub mod config;
@@ -410,13 +411,17 @@ impl OnionService {
 
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn get_onion_caa<R: SleepProvider>(&self, expiry: u64, now: SystemTime) -> Result<OnionCaa, OnionCaaError> {
+    pub fn get_onion_caa<R: SleepProvider>(
+        &self,
+        expiry: u64,
+        now: SystemTime,
+    ) -> Result<OnionCaa, OnionCaaError> {
         acme::onion_caa(
             &self.keymgr,
             &self.config.nickname,
             &self.config.caa_records,
             expiry,
-            now
+            now,
         )
     }
 }
@@ -547,7 +552,13 @@ impl RunningOnionService {
     pub fn get_onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
         let mut inner = self.inner.lock().expect("lock poisoned");
         let config = inner.config_tx.borrow();
-        acme::onion_caa(&self.keymgr, &self.nickname, &config.caa_records, expiry, self.time_provider.wallclock())
+        acme::onion_caa(
+            &self.keymgr,
+            &self.nickname,
+            &config.caa_records,
+            expiry,
+            self.time_provider.wallclock(),
+        )
     }
 }
 
