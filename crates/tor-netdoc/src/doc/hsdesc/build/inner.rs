@@ -189,7 +189,6 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
 
 /// Helper for building a textual representation of a set of CAA records
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct CAARecordSet<'a> {
     /// CAA records
     caa_records: &'a [hickory_proto::rr::rdata::CAA],
@@ -212,7 +211,10 @@ impl<'a> NetdocBuilder for CAARecordSet<'a> {
             encoder.item(CAA).arg(&caa_entry.to_string());
         }
 
-        encoder.finish().map_err(|e| e.into()).map(|e| e.trim().to_string())
+        encoder
+            .finish()
+            .map_err(|e| e.into())
+            .map(|e| e.trim().to_string())
     }
 }
 

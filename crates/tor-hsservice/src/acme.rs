@@ -2,12 +2,13 @@
 
 use crate::internal_prelude::*;
 use asn1_rs::ToDer;
-use tor_bytes::EncodeError;
-use tor_netdoc::doc::hsdesc::CAARecordSet;
 #[cfg(test)]
 use mock_instant::global::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tor_bytes::EncodeError;
+use tor_netdoc::doc::hsdesc::CAARecordSet;
+
 const MIN_CA_NONCE_LEN: usize = 8; // Per CA/BF Baseline Requirements
 const MAX_CA_NONCE_LEN: usize = 128; // Somewhat arbitrarily chosen, to avoid wasting time signing a huge amount of data
 
@@ -27,6 +28,7 @@ pub enum OnionCsrError {
 }
 
 /// Create and sign a Certificate Signing Request as per CA/BF Baseline Requirements Appendix B
+#[rustfmt::skip]
 pub(crate) fn onion_csr(
     keymgr: &KeyMgr,
     nickname: &HsNickname,
@@ -53,7 +55,7 @@ pub(crate) fn onion_csr(
     rng.fill(&mut applicant_nonce);
     drop(rng);
 
-    // See RFC 2986 for format details
+    // See RFC 2986 and RFC 8410 for format details
     // EXPECT SAFETY: ASN.1 serialization shouldn't fail in this function because IO errors can`t
     // happen when writing to Vec and no DER objects are manually constructed.
 
@@ -109,19 +111,16 @@ pub(crate) fn onion_csr(
 
     // attributes [0] Attributes
     asn1_rs::TaggedImplicit::<asn1_rs::Set, asn1_rs::Error, 0>::implicit(
-        asn1_rs::Set::from_iter_to_der(
-            [
-                // Attribute SEQUENCE
-                asn1_rs::Sequence::new(ca_nonce_contents.into()),
-                // Attribute SEQUENCE
-                asn1_rs::Sequence::new(applicant_nonce_contents.into()),
-            ]
-            .iter(),
-        )
-        .expect("create attributes [0] Attributes"),
+        asn1_rs::Set::from_iter_to_der([
+            // Attribute SEQUENCE
+            asn1_rs::Sequence::new(ca_nonce_contents.into()),
+            // Attribute SEQUENCE
+            asn1_rs::Sequence::new(applicant_nonce_contents.into()),
+        ].iter())
+            .expect("create attributes [0] Attributes"),
     )
-    .write_der(&mut tbs_csr_contents)
-    .expect("serialize attributes [0] Attributes");
+        .write_der(&mut tbs_csr_contents)
+        .expect("serialize attributes [0] Attributes");
 
     let tbs_csr = asn1_rs::Sequence::new(tbs_csr_contents.into());
     let mut tbs = Vec::new();
@@ -259,9 +258,9 @@ pub(crate) mod test {
     //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
     use super::*;
 
-    use test_temp_dir::test_temp_dir;
-    use tor_llcrypto::pk::ed25519::{Verifier, Signature};
     use crate::HsIdKeypairSpecifier;
+    use test_temp_dir::test_temp_dir;
+    use tor_llcrypto::pk::ed25519::{Signature, Verifier};
 
     const TEST_SVC_NICKNAME: &str = "test-acme-svc";
 
@@ -280,16 +279,25 @@ pub(crate) mod test {
             .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
             .unwrap();
 
-        let generated_caa = super::onion_caa(&keymgr, &nickname, &[hickory_proto::rr::rdata::CAA::new_issue(
-            true,
-            Some(hickory_proto::rr::Name::from_str("test.acmeforonions.org").unwrap()),
-            vec![hickory_proto::rr::rdata::caa::KeyValue::new(
-                "validationmethods",
-                "onion-csr-01",
+        let generated_caa = super::onion_caa(
+            &keymgr,
+            &nickname,
+            &[hickory_proto::rr::rdata::CAA::new_issue(
+                true,
+                Some(hickory_proto::rr::Name::from_str("test.acmeforonions.org").unwrap()),
+                vec![hickory_proto::rr::rdata::caa::KeyValue::new(
+                    "validationmethods",
+                    "onion-csr-01",
+                )],
             )],
-        )], time_expiry).unwrap();
+            time_expiry,
+        )
+        .unwrap();
 
-        assert_eq!(generated_caa.caa, "caa 128 issue \"test.acmeforonions.org; validationmethods=onion-csr-01\"");
+        assert_eq!(
+            generated_caa.caa,
+            "caa 128 issue \"test.acmeforonions.org; validationmethods=onion-csr-01\""
+        );
 
         let time_min = time_start + time_expiry;
         let time_max = time_start + time_expiry + 900; // jitter
@@ -314,7 +322,10 @@ pub(crate) mod test {
             .insert(hsid_keypair, &hsid_spec, KeystoreSelector::Primary, true)
             .unwrap();
 
-        assert!(matches!(onion_csr(&keymgr, &nickname, &[]), Err(OnionCsrError::CANonceTooShort)));
+        assert!(matches!(
+            onion_csr(&keymgr, &nickname, &[]),
+            Err(OnionCsrError::CANonceTooShort)
+        ));
     }
 
     #[test]
@@ -330,7 +341,10 @@ pub(crate) mod test {
             .unwrap();
 
         let dummy_nonce = [0u8; 256];
-        assert!(matches!(onion_csr(&keymgr, &nickname, &dummy_nonce), Err(OnionCsrError::CANonceTooLong)));
+        assert!(matches!(
+            onion_csr(&keymgr, &nickname, &dummy_nonce),
+            Err(OnionCsrError::CANonceTooLong)
+        ));
     }
 
     #[test]
