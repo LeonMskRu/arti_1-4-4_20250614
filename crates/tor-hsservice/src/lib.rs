@@ -53,7 +53,6 @@ mod time_store;
 mod internal_prelude;
 
 #[cfg(feature = "acme")]
-#[cfg_attr(docsrs, doc(cfg(feature = "acme")))]
 mod acme;
 mod anon_level;
 pub mod config;
@@ -96,6 +95,7 @@ use internal_prelude::*;
 
 pub use crate::netdir::NetdirProviderShutdown;
 #[cfg(feature = "acme")]
+#[cfg_attr(docsrs, doc(cfg(feature = "acme")))]
 pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 pub use anon_level::Anonymity;
 pub use config::OnionServiceConfig;

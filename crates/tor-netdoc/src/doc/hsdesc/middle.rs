@@ -42,6 +42,7 @@ pub(super) struct HsDescMiddle {
     /// Each of these is parsed from a `auth-client` line.
     auth_clients: Vec<AuthClient>,
     /// Are there CAA records in the inner document?
+    #[allow(unused)]
     caa_critical: bool,
     /// The (encrypted) inner document of the onion service descriptor.
     encrypted: Vec<u8>,
