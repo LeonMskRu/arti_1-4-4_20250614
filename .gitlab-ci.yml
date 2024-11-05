@@ -152,6 +152,7 @@ blocking-todos:
 rust-checks:
   # This is too slow (and the cacheing of the "cargo build" too flaky) to be a "check"
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -214,6 +215,7 @@ cargo-audit:
 
 rust-recent:
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - *rust-recent-script
@@ -257,6 +259,7 @@ rust-latest:
 
 rust-recent-arti-extra-features:
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - *rust-recent-arti-extra-features-script
@@ -281,6 +284,7 @@ rust-latest-arti-extra-features:
 
 rust-recent-async-std-rustls:
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -487,6 +491,7 @@ build-repro-macos:
 # We use shadow in multiple tests. Build it here once.
 build-shadow:
   stage: build
+  needs: []
   variables:
     JOB_SHADOW_REPO: "https://github.com/shadow/shadow.git"
     JOB_SHADOW_BRANCH: "main"
