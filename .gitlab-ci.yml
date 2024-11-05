@@ -431,7 +431,7 @@ minimal-versions:
   stage: test
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   image: amd64/rust:1.77
-  needs: ["rust-checks"]
+  needs: []
   script:
     - rustup install nightly
     - ./maint/downgrade_dependencies
@@ -682,7 +682,7 @@ rust-recent-test-all-features:
 every-crate:
   stage: test
   image: $RECENT_RUST_IMAGE
-  needs: ["rust-checks", "rust-recent-async-std-rustls"]
+  needs: []
   script:
     - maint/common/apt-install python3-toml
     - ./maint/every-crate
@@ -690,7 +690,7 @@ every-crate:
 matrix-check:
   stage: test
   image: $RECENT_RUST_IMAGE
-  needs: ["rust-checks", "rust-recent-async-std-rustls"]
+  needs: []
   script:
     - maint/common/apt-install python3-toml
     - ./maint/matrix-check
