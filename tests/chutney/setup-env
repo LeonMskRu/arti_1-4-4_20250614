@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+
+# [pep 0536](https://peps.python.org/pep-0563/) - Lazy annotation eval via
+# stringification.
+from __future__ import annotations
+
+import argparse
+import os
+
+from abc import abstractmethod, ABC
+from dataclasses import dataclass
+from pathlib import Path
+from shutil import which
+from subprocess import check_call, check_output, CalledProcessError
+from typing import Optional
+
+CHUTNEY_COMMIT = "b05403758dc81593256a93a10d896e68e0398fe7"
+
+TOP_LEVEL = Path(
+    os.fsdecode(check_output("git rev-parse --show-toplevel", shell=True)).strip()
+)
+
+
+class ResolverError(Exception):
+    pass
+
+
+@dataclass
+class Dependency:
+    name: str
+    methods: list[ResolutionMethod]
+    bin_name: Optional[str] = None
+
+
+@dataclass
+class Resolution:
+    path: Optional[Path] = None
+
+
+class ResolutionMethod(ABC):
+    @staticmethod
+    @abstractmethod
+    def name() -> str: ...
+
+    @abstractmethod
+    def resolve(self, dependency: Dependency) -> Optional[Resolution]: ...
+
+
+class ResolutionMethodPath(ResolutionMethod):
+    def __init__(self):
+        ResolutionMethod.__init__(self)
+
+    @staticmethod
+    def name() -> str:
+        return "path-search"
+
+    def resolve(self, dependency: Dependency) -> Optional[Resolution]:
+        if dependency.bin_name is None:
+            raise ResolverError("Can't resolve a dependency with no bin name")
+        res = which(dependency.bin_name)
+        if res is None:
+            return None
+        else:
+            return Resolution(path=Path(res))
+
+
+class ResolutionMethodApt(ResolutionMethod):
+    allow_install: bool = True
+
+    def __init__(self, pkg_name: str):
+        ResolutionMethod.__init__(self)
+        self.pkg_name = pkg_name
+
+    @staticmethod
+    def name() -> str:
+        return "apt"
+
+    def _already_installed(self) -> bool:
+        try:
+            res = check_output(["dpkg", "-l", "--", self.pkg_name], text=True)
+        except CalledProcessError:
+            raise ResolverError(
+                f"package '{self.pkg_name}' appears not to exist at all. Maybe try apt-update?"
+            )
+        last_line = res.splitlines()[-1]
+        status = last_line[1]
+        return status == "i"
+
+    def resolve(self, dependency: Dependency) -> Optional[Resolution]:
+        if not self._already_installed():
+            if self.allow_install:
+                check_call(["apt-get", "install", "--", self.pkg_name])
+            else:
+                return None
+        path = None
+        if dependency.bin_name is not None:
+            path_str = which(dependency.bin_name)
+            if path_str is None:
+                raise ResolverError(
+                    f"Package {self.pkg_name} is installed, "
+                    + "but expected binary {dependency.bin_name} not found"
+                )
+            path = Path(path_str)
+        return Resolution(path=path)
+
+
+class ResolutionMethodPip(ResolutionMethod):
+    allow_install: bool = True
+
+    def __init__(self, pkg_name: str):
+        ResolutionMethod.__init__(self)
+        self.pkg_name = pkg_name
+
+    @staticmethod
+    def name() -> str:
+        return "pip"
+
+    def _already_installed(self) -> bool:
+        try:
+            check_call(["python3", "-m", "pip", "show", "--", self.pkg_name])
+        except CalledProcessError:
+            return False
+        return True
+
+    def resolve(self, dependency: Dependency) -> Optional[Resolution]:
+        if not self._already_installed():
+            if self.allow_install:
+                check_call(["python3", "-m", "pip", "install", "--", self.pkg_name])
+            else:
+                return None
+        path = None
+        if dependency.bin_name is not None:
+            path_str = which(dependency.bin_name)
+            if path_str is None:
+                raise ResolverError(
+                    f"Package {self.pkg_name} is installed, "
+                    + f"but expected binary {dependency.bin_name} not found"
+                )
+            path = Path(path_str)
+        return Resolution(path=path)
+
+
+class ResolutionMethodCmdLine(ResolutionMethod):
+    parsed_args: Optional[argparse.Namespace] = None
+
+    def __init__(self, cmd_line_arg: str, parser: argparse.ArgumentParser):
+        ResolutionMethod.__init__(self)
+
+        res = parser.add_argument(cmd_line_arg, type=Path, default=None)
+
+        self._cmd_line_arg = cmd_line_arg
+        self._dest = res.dest
+
+    @staticmethod
+    def name() -> str:
+        return "command-line"
+
+    def resolve(self, dependency: Dependency) -> Optional[Resolution]:
+        assert (
+            self.parsed_args is not None
+        ), "Can't resolve without setting ResolutionMethodCmdLine.parsed_args"
+        res: Optional[Path] = vars(self.parsed_args)[self._dest]
+        if res is None:
+            return None
+        if not res.exists():
+            raise ResolverError(
+                f"command line arg path {self._cmd_line_arg}={res} doesn't exist"
+            )
+        return Resolution(path=res)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Setup environment for chutney integration test"
+    )
+    parser.add_argument(
+        "--allow-search",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to search e.g. PATH for unprovided dependencies",
+    )
+    parser.add_argument(
+        "--install-missing", action=argparse.BooleanOptionalAction, default=False
+    )
+
+    dependencies = [
+        Dependency(
+            name="tor",
+            bin_name="tor",
+            methods=[
+                ResolutionMethodCmdLine("--tor-bin", parser),
+                ResolutionMethodPath(),
+                ResolutionMethodApt("tor"),
+            ],
+        ),
+        Dependency(
+            name="chutney",
+            bin_name="chutney",
+            methods=[
+                ResolutionMethodCmdLine("--chutney-bin", parser),
+                ResolutionMethodPath(),
+                ResolutionMethodPip(
+                    f"git+https://gitlab.torproject.org/tpo/core/chutney.git@{CHUTNEY_COMMIT}"
+                ),
+            ],
+        ),
+        Dependency(
+            name="curl",
+            bin_name="curl",
+            methods=[
+                ResolutionMethodCmdLine("--curl-bin", parser),
+                ResolutionMethodPath(),
+                ResolutionMethodApt("curl"),
+            ],
+        ),
+        # arti runtime dep
+        Dependency(name="libsqlite3-0", methods=[ResolutionMethodApt("libsqlite3-0")]),
+        # arti runtime dep
+        Dependency(name="libssl3", methods=[ResolutionMethodApt("libssl3")]),
+    ]
+
+    args = parser.parse_args()
+    ResolutionMethodCmdLine.parsed_args = args
+    ResolutionMethodApt.allow_install = args.install_missing
+    ResolutionMethodPip.allow_install = args.install_missing
+
+    for dep in dependencies:
+        res = None
+        for method in dep.methods:
+            res = method.resolve(dep)
+            if res is not None:
+                print(f"# {dep.name} via {method.name()}")
+                if dep.bin_name is not None:
+                    print(f"{dep.name}='{res.path}'")
+                break
+
+
+if __name__ == "__main__":
+    main()
