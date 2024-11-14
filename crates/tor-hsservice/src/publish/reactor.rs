@@ -257,15 +257,7 @@ impl<R: Runtime, M: Mockable> Immutable<R, M> {
         // to each time we generate a new descriptor), for performance reasons.
         let ope_key = self.create_ope_key(params.time_period())?;
 
-        // TODO: perhaps this should be moved to a new HsDirParams::offset_within_sr() function
-        let srv_start = params.start_of_shard_rand_period();
-        let offset = params.offset_within_srv_period(now).ok_or_else(|| {
-            internal!(
-                "current wallclock time not within SRV range?! (now={:?}, SRV_start={:?})",
-                now,
-                srv_start
-            )
-        })?;
+        let offset = params.offset_within_sr(now);
         let rev = ope_key.encrypt(offset);
 
         Ok(RevisionCounter::from(rev))
