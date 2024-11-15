@@ -89,21 +89,24 @@ async fn run_proxy<R: Runtime>(
     #[cfg(feature = "rpc")]
     let rpc_path = {
         if let Some(path) = &arti_config.rpc().rpc_listen {
-            let path = path.path()?;
-            let parent = path
-                .parent()
-                .ok_or(anyhow::anyhow!("No parent directory for rpc_listen path?"))?;
-            client_config
-                .fs_mistrust()
-                .verifier()
-                .make_secure_dir(parent)?;
-            // It's just a unix thing; if we leave this sitting around, binding to it won't
-            // work right.  There is probably a better solution.
-            if path.try_exists()? {
-                std::fs::remove_file(&path)?;
+            if arti_config.rpc().rpc_enable {
+                let path = path.path()?;
+                let parent = path
+                    .parent()
+                    .ok_or(anyhow::anyhow!("No parent directory for rpc_listen path?"))?;
+                client_config
+                    .fs_mistrust()
+                    .verifier()
+                    .make_secure_dir(parent)?;
+                // It's just a unix thing; if we leave this sitting around, binding to it won't
+                // work right.  There is probably a better solution.
+                if path.try_exists()? {
+                    std::fs::remove_file(&path)?;
+                }
+                Some(path)
+            } else {
+                None
             }
-
-            Some(path)
         } else {
             None
         }

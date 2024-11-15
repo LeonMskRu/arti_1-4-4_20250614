@@ -200,6 +200,10 @@ fn default_max_files() -> u64 {
 #[builder_struct_attr(non_exhaustive)]
 #[non_exhaustive]
 pub struct RpcConfig {
+    /// Should we enable incoming RPC connections.
+    #[builder(default = "true")]
+    pub(crate) rpc_enable: bool,
+
     /// Location to listen for incoming RPC connections.
     #[builder(default = "default_rpc_path()")]
     pub(crate) rpc_listen: Option<CfgPath>,
@@ -622,6 +626,7 @@ mod test {
             &[
                 // RPC-only settings
                 "rpc",
+                "rpc.rpc_enable",
                 "rpc.rpc_listen",
             ],
         );
