@@ -1,0 +1,19 @@
+[package]
+name = "arti-bin-shared"
+version = "0.24.0"
+authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+description = "Common code for all arti binaries."
+keywords = ["tor", "arti", "privacy", "anonymity"]
+categories = ["command-line-utilities"]
+repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+
+[features]
+
+[dependencies]
+
+[package.metadata.docs.rs]
+all-features = true

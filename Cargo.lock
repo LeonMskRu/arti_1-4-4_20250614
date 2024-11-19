@@ -277,6 +277,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "arti-bin-shared"
+version = "0.24.0"
+
+[[package]]
 name = "arti-client"
 version = "0.24.0"
 dependencies = [
