@@ -199,6 +199,7 @@ name = "arti"
 version = "1.3.0"
 dependencies = [
  "anyhow",
+ "arti-bin-shared",
  "arti-client",
  "arti-rpcserver",
  "async-ctrlc",
@@ -349,6 +350,7 @@ name = "arti-relay"
 version = "0.24.0"
 dependencies = [
  "anyhow",
+ "arti-bin-shared",
  "clap",
  "derive_builder_fork_arti",
  "derive_more",

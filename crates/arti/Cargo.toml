@@ -111,6 +111,7 @@ __is_experimental = []
 
 [dependencies]
 anyhow = "1.0.23"
+arti-bin-shared = { path = "../arti-bin-shared", version = "0.24.0" }
 arti-client = { package = "arti-client", path = "../arti-client", version = "0.24.0", default-features = false, features = [
     "anyhow",
 ] }
