@@ -5733,6 +5733,7 @@ dependencies = [
  "thiserror",
  "tor-error",
  "tor-rtcompat",
+ "tor-rtmock",
  "tracing",
  "weak-table",
 ]
