@@ -166,7 +166,7 @@ pub(crate) async fn connect<R: Runtime>(
         secret_keys,
         (),
     )?
-    .connect(data)
+    .connect(data, connector.thread_pool.clone())
     .await
 }
 
@@ -398,7 +398,11 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
     ///
     /// This function handles all necessary retrying of fallible operations,
     /// (and, therefore, must also limit the total work done for a particular call).
-    async fn connect(&self, data: &mut Data) -> Result<Arc<ClientCirc!(R, M)>, ConnError> {
+    async fn connect(
+        &self,
+        data: &mut Data,
+        thread_pool: Arc<rayon::ThreadPool>,
+    ) -> Result<Arc<ClientCirc!(R, M)>, ConnError> {
         // This function must do the following, retrying as appropriate.
         //  - Look up the onion descriptor in the state.
         //  - Download the onion descriptor if one isn't there.
@@ -418,7 +422,9 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
 
         mocks.test_got_desc(desc);
 
-        let circ = self.intro_rend_connect(desc, &mut data.ipts).await?;
+        let circ = self
+            .intro_rend_connect(desc, &mut data.ipts, thread_pool)
+            .await?;
         mocks.test_got_circ(&circ);
 
         Ok(circ)
@@ -619,6 +625,7 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
         &self,
         desc: &HsDesc,
         data: &mut DataIpts,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) -> Result<Arc<ClientCirc!(R, M)>, CE> {
         // Maximum number of rendezvous/introduction attempts we'll make
         let max_total_attempts = self
@@ -823,7 +830,7 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
                 };
                 let intro_index = ipt.intro_index;
 
-                let proof_of_work = match pow_client.solve().await {
+                let proof_of_work = match pow_client.solve(&thread_pool).await {
                     Ok(solution) => solution,
                     Err(e) => {
                         debug!(
@@ -1679,9 +1686,19 @@ mod test {
         )
         .unwrap();
 
-        let _got = AssertUnwindSafe(ctx.connect(&mut data))
-            .catch_unwind() // TODO HS TESTS: remove this and the AssertUnwindSafe
-            .await;
+        let _got = AssertUnwindSafe(
+            ctx.connect(
+                &mut data,
+                Arc::new(
+                    rayon::ThreadPoolBuilder::new()
+                        .num_threads(8)
+                        .build()
+                        .unwrap(),
+                ),
+            ),
+        )
+        .catch_unwind() // TODO HS TESTS: remove this and the AssertUnwindSafe
+        .await;
 
         let (hs_blind_id_key, subcredential) = HsIdKey::try_from(hsid)
             .unwrap()
