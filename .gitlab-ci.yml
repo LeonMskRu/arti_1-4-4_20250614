@@ -19,6 +19,10 @@ variables:
   # Alternatively if we decide to keep this, consider to actually start managing
   # versions in chutney and using a version tag here.
   CHUTNEY_COMMIT: b05403758dc81593256a93a10d896e68e0398fe7
+  SHADOW_REPO: "https://github.com/shadow/shadow.git"
+  SHADOW_BRANCH: "main"
+  # 2024-12-05
+  SHADOW_COMMIT: 7541367944284c4bf7ee3f9d1c843941d46660ce
 
 default:
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
@@ -91,6 +95,7 @@ python3-checks:
         black
         flake8
         mypy
+        git+${SHADOW_REPO}@${SHADOW_COMMIT}#subdirectory=shadowtools
     - ./maint/python-lints
 
 maint-checks:
@@ -479,11 +484,6 @@ build-repro-macos:
 # We use shadow in multiple tests. Build it here once.
 build-shadow:
   stage: build
-  variables:
-    JOB_SHADOW_REPO: "https://github.com/shadow/shadow.git"
-    JOB_SHADOW_BRANCH: "main"
-    # 2024-12-05
-    JOB_SHADOW_COMMIT: "7541367944284c4bf7ee3f9d1c843941d46660ce"
   artifacts:
     paths:
       - opt/shadow
@@ -492,7 +492,7 @@ build-shadow:
     # around for longer.
     expire_in: 1 day
   cache:
-    - key: $CI_JOB_NAME-shadow-$JOB_SHADOW_COMMIT
+    - key: $CI_JOB_NAME-shadow-$SHADOW_COMMIT
       paths:
       - opt/shadow
       - wheels
@@ -507,9 +507,9 @@ build-shadow:
       else
         echo "Building shadow"
         maint/common/apt-install git
-        git clone --shallow-since=2021-08-01 -b $JOB_SHADOW_BRANCH $JOB_SHADOW_REPO ~/src/shadow
+        git clone --shallow-since=2021-08-01 -b $SHADOW_BRANCH $SHADOW_REPO ~/src/shadow
         cd ~/src/shadow
-        git checkout $JOB_SHADOW_COMMIT
+        git checkout $SHADOW_COMMIT
         export CC=gcc CXX=g++ CONTAINER=debian:12-slim BUILDTYPE=release RUSTPROFILE=minimal
         ci/container_scripts/install_deps.sh
         ci/container_scripts/install_extra_deps.sh
@@ -583,6 +583,9 @@ integration-chutney-shadow:
     - maint/common/apt-install libglib2.0-0
     - stow -d opt -t $HOME/.local shadow
 
+    # Install shadowtools, built in build-shadow
+    - python3 -m pip install --no-index --find-links=./wheels shadowtools
+
     - tests/chutney/integration-e2e-shadow
   artifacts:
     paths:
@@ -600,7 +603,7 @@ integration-shadow:
     JOB_TGEN_COMMIT: "v1.1.2"
   stage: test
   cache:
-    - key: $CI_JOB_NAME-shadow-$JOB_SHADOW_COMMIT
+    - key: $CI_JOB_NAME-shadow-$SHADOW_COMMIT
       paths:
       - opt/shadow
     - key: $CI_JOB_NAME-tgen-$JOB_TGEN_COMMIT

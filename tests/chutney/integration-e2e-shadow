@@ -10,13 +10,14 @@ vs running it directly for several reasons.
   than when running natively.
 """
 
+import shadowtools.config as scfg
 import os
 import pathlib
 import shutil
 import subprocess
 import yaml
 
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 
 SHADOW_DATA_DIR = "shadow.chutney.data"
 SHADOW_CONFIG_FILE = "shadow.chutney.yaml"
@@ -25,7 +26,7 @@ SHADOW_LOG_FILE = "shadow.log"
 TEST_DOMAIN = "example.com"
 
 
-def gen_shadow_config(chutney_bin: Optional[str]) -> dict[str, Any]:
+def gen_shadow_config(chutney_bin: Optional[str]) -> scfg.Config:
     """
     Generate a shadow config file, as a string, for the given parameters.
     """
@@ -38,43 +39,43 @@ def gen_shadow_config(chutney_bin: Optional[str]) -> dict[str, Any]:
         "CHUTNEY_DISABLE_IPV6": "yes",
         # re-export PATH. The test scripts assume that
         # usual shell utilities are on it.
-        "PATH": os.getenv("PATH"),
+        "PATH": os.getenv("PATH", ""),
     }
     if chutney_bin is not None:
         env["CHUTNEY_BIN"] = chutney_bin
 
-    return {
-        "general": {
-            "stop_time": "10m",
-        },
-        "network": {
-            "graph": {"type": "1_gbit_switch"},
-        },
-        "hosts": {
-            "host": {
-                "network_node_id": 0,
-                "processes": [
-                    {
-                        "path": "./tests/chutney/integration-e2e",
-                        "environment": env,
+    return scfg.Config(
+        general=scfg.General(
+            stop_time="10m",
+        ),
+        network=scfg.Network(
+            graph=scfg.Graph(type="1_gbit_switch"),
+        ),
+        hosts={
+            "host": scfg.Host(
+                network_node_id=0,
+                processes=[
+                    scfg.Process(
+                        path="./tests/chutney/integration-e2e",
+                        environment=env,
                         # Give the web server below a little time to start.
-                        "start_time": "5s",
-                    }
+                        start_time="5s",
+                    )
                 ],
-            },
-            TEST_DOMAIN: {
-                "network_node_id": 0,
-                "processes": [
-                    {
-                        "path": "python3",
-                        "args": "-m http.server 80",
-                        "start_time": "0",
-                        "expected_final_state": "running",
-                    }
+            ),
+            TEST_DOMAIN: scfg.Host(
+                network_node_id=0,
+                processes=[
+                    scfg.Process(
+                        path="python3",
+                        args="-m http.server 80",
+                        start_time=0,
+                        expected_final_state="running",
+                    )
                 ],
-            },
+            ),
         },
-    }
+    )
 
 
 def main():
