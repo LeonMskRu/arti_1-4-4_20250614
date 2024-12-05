@@ -77,14 +77,21 @@ python3-checks:
   stage: check
   script:
     - maint/common/apt-install python3-pip python3-venv git
+    - python3 -m venv lint
+    - source lint/bin/activate
     # AFAICT these python packages do not have debian packages.
-    #
     # (`black` does have a debian package, but we need the latest version.)
-    - |
-      python3 -m venv lint
-      source lint/bin/activate
-      pip3 install marko tomli_w types-toml types-PyYAML types-beautifulsoup4 types-requests black flake8 mypy
-      ./maint/python-lints
+    - pip3 install
+        marko
+        tomli_w
+        types-toml
+        types-PyYAML
+        types-beautifulsoup4
+        types-requests
+        black
+        flake8
+        mypy
+    - ./maint/python-lints
 
 maint-checks:
   stage: check
