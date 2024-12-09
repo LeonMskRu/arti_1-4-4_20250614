@@ -1,6 +1,6 @@
 [package]
 name = "tor-basic-utils"
-version = "0.24.0"
+version = "0.25.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
 edition = "2021"
 rust-version = "1.77"
@@ -22,7 +22,7 @@ rand_chacha = "0.3"
 serde = { version = "1.0.103", optional = true, features = ["derive"] }
 slab = "0.4.4"
 smallvec = "1.10"
-thiserror = "1"
+thiserror = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", default-features = false }

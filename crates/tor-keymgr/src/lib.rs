@@ -39,13 +39,8 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
-
-// TODO #1645 (either remove this, or decide to have it everywhere)
-#![cfg_attr(
-    not(all(feature = "full", feature = "experimental")),
-    allow(unused, unreachable_pub)
-)]
 
 // TODO: write more comprehensive documentation when the API is a bit more
 // stable
@@ -71,8 +66,8 @@ pub use err::{
 };
 pub use key_specifier::{
     ArtiPathRange, ArtiPathUnavailableError, CTorPath, CTorServicePath,
-    InvalidKeyPathComponentValue, KeyPath, KeyPathError, KeyPathInfo, KeyPathInfoBuilder,
-    KeyPathInfoExtractor, KeyPathPattern, KeySpecifier, KeySpecifierComponent,
+    InvalidKeyPathComponentValue, KeyCertificateSpecifier, KeyPath, KeyPathError, KeyPathInfo,
+    KeyPathInfoBuilder, KeyPathInfoExtractor, KeyPathPattern, KeySpecifier, KeySpecifierComponent,
     KeySpecifierComponentViaDisplayFromStr, KeySpecifierPattern,
 };
 
@@ -100,7 +95,7 @@ pub use keystore::ctor::{CTorClientKeystore, CTorServiceKeystore};
 pub use key_specifier::derive as key_specifier_derive;
 
 pub use tor_key_forge::{
-    EncodableKey, ErasedKey, KeyType, Keygen, KeygenRng, SshKeyAlgorithm, SshKeyData,
+    EncodableItem, ErasedKey, KeyType, Keygen, KeygenRng, SshKeyAlgorithm, SshKeyData,
     ToEncodableKey,
 };
 

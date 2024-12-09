@@ -12,8 +12,9 @@ use fs_mistrust::{CheckedDir, Mistrust, MistrustBuilder};
 use amplify::Getters;
 use serde_with::DisplayFromStr;
 
+use tor_config::define_list_builder_helper;
 use tor_config::mistrust::BuilderExt as _;
-use tor_config::{define_list_builder_helper, CfgPath, CfgPathError};
+use tor_config_path::{CfgPath, CfgPathError, CfgPathResolver};
 use tor_error::warn_report;
 use tor_hscrypto::pk::HsClientDescEncKeyParseError;
 use tor_persist::slug::BadSlug;
@@ -118,14 +119,14 @@ impl DirectoryKeyProvider {
     /// Read the client service discovery keys from the specified directory.
     pub(super) fn read_keys(
         &self,
+        path_resolver: &CfgPathResolver,
     ) -> Result<Vec<(HsClientNickname, HsClientDescEncKey)>, DirectoryKeyProviderError> {
-        let dir_path =
-            self.path
-                .path()
-                .map_err(|err| DirectoryKeyProviderError::PathExpansionFailed {
-                    path: self.path.clone(),
-                    err,
-                })?;
+        let dir_path = self.path.path(path_resolver).map_err(|err| {
+            DirectoryKeyProviderError::PathExpansionFailed {
+                path: self.path.clone(),
+                err,
+            }
+        })?;
 
         let checked_dir = self
             .permissions

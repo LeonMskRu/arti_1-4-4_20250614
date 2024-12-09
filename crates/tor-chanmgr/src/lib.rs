@@ -39,6 +39,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 pub mod builder;
@@ -50,6 +51,7 @@ mod mgr;
 #[cfg(test)]
 mod testing;
 pub mod transport;
+pub(crate) mod util;
 
 use futures::select_biased;
 use futures::task::SpawnExt;
@@ -332,10 +334,17 @@ impl<R: Runtime> ChanMgr<R> {
         how: tor_config::Reconfigure,
         netparams: Arc<dyn AsRef<NetParameters>>,
     ) -> StdResult<(), ReconfigureError> {
+        if how == tor_config::Reconfigure::CheckAllOrNothing {
+            // Since `self.mgr.reconfigure` returns an error type of `Bug` and not
+            // `ReconfigureError` (see check below), the reconfigure should only fail due to bugs.
+            // This means we can return `Ok` here since there should never be an error with the
+            // provided `config` values.
+            return Ok(());
+        }
+
         let r = self.mgr.reconfigure(config, netparams);
 
-        // We don't care about how, because reconfiguration can only fail due to bugs
-        let _ = how;
+        // Check that `self.mgr.reconfigure` returns an error type of `Bug` (see comment above).
         let _: Option<&tor_error::Bug> = r.as_ref().err();
 
         Ok(r?)

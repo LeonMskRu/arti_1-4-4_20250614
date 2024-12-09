@@ -1,6 +1,6 @@
 [package]
 name = "hashx"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["The Tor Project, Inc.", "Micah Elizabeth Scott <beth@torproject.org>"]
 edition = "2021"
 rust-version = "1.77"
@@ -32,7 +32,7 @@ dynasmrt = { version = "2.0.0", optional = true }
 fixed-capacity-vec = "1.0"
 hex = { version = "0.4.3", optional = true }
 rand_core = "0.6.4"
-thiserror = "1.0.40"
+thiserror = "2"
 
 [dev-dependencies]
 hex-literal = "0.4.1"

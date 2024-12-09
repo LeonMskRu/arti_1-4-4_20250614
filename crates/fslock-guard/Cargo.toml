@@ -1,6 +1,6 @@
 [package]
 name = "fslock-guard"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ full = []
 
 [dependencies]
 fslock = { version = "0.2.0", package = "fslock-arti-fork" }
-thiserror = "1"
+thiserror = "2"
 
 [dev-dependencies]
 test-temp-dir = { version = "0.3.0", path = "../test-temp-dir" }

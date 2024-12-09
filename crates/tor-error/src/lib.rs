@@ -39,6 +39,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 use derive_more::Display;
@@ -622,6 +623,7 @@ pub enum ErrorKind {
     /// You should not generally see this kind of error returned directly to you
     /// for high-level functions.  It should only be returned from lower-level
     /// crates that do not automatically retry these failures.
+    // Errors with this kind should generally not return a `HasRetryTime::retry_time()` of `Never`.
     #[display("un-retried transient failure")]
     TransientFailure,
 

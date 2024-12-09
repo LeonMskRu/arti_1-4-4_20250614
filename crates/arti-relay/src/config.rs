@@ -12,7 +12,8 @@ use derive_more::AsRef;
 use fs_mistrust::{Mistrust, MistrustBuilder};
 use serde::{Deserialize, Serialize};
 use tor_chanmgr::{ChannelConfig, ChannelConfigBuilder};
-use tor_config::{impl_standard_builder, mistrust::BuilderExt, CfgPath, ConfigBuildError};
+use tor_config::{impl_standard_builder, mistrust::BuilderExt, ConfigBuildError};
+use tor_config_path::CfgPath;
 use tor_keymgr::config::{ArtiKeystoreConfig, ArtiKeystoreConfigBuilder};
 
 /// A configuration used by a TorRelay.
@@ -147,9 +148,11 @@ impl StorageConfig {
 
     /// Return the fully expanded path of the keystore directory.
     pub(crate) fn keystore_dir(&self) -> Result<PathBuf, ConfigBuildError> {
+        // TODO RELAY: resolve using arti-relay-specific variables
+        let r = tor_config_path::CfgPathResolver::default();
         Ok(self
             .state_dir
-            .path()
+            .path(&r)
             .map_err(|e| ConfigBuildError::Invalid {
                 field: "state_dir".to_owned(),
                 problem: e.to_string(),

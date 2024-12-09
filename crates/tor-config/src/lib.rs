@@ -39,6 +39,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 pub mod cmdline;
@@ -75,7 +76,6 @@ pub use load::{resolve, resolve_ignore_warnings, resolve_return_results};
 pub use misc::*;
 pub use mut_cfg::MutCfg;
 pub use sources::{ConfigurationSource, ConfigurationSources};
-pub use tor_config_path::{CfgPath, CfgPathError};
 
 use itertools::Itertools;
 

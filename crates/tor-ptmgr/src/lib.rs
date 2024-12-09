@@ -39,6 +39,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 pub mod config;
@@ -57,6 +58,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tor_config_path::CfgPathResolver;
 use tor_linkspec::PtTransportName;
 use tor_rtcompat::Runtime;
 use tor_socksproto::SocksVersion;
@@ -136,6 +138,7 @@ impl<R: Runtime> PtMgr<R> {
     pub fn new(
         transports: Vec<TransportConfig>,
         #[allow(unused)] state_dir: PathBuf,
+        path_resolver: Arc<CfgPathResolver>,
         rt: R,
     ) -> Result<Self, PtError> {
         let state = PtSharedState {
@@ -149,7 +152,8 @@ impl<R: Runtime> PtMgr<R> {
         let tx = {
             let (tx, rx) = mpsc::unbounded();
 
-            let mut reactor = PtReactor::new(rt.clone(), state.clone(), rx, state_dir);
+            let mut reactor =
+                PtReactor::new(rt.clone(), state.clone(), rx, state_dir, path_resolver);
             rt.spawn(async move {
                 loop {
                     match reactor.run_one_step().await {

@@ -9,6 +9,8 @@ variables:
   CARGO_HUSKY_DONT_INSTALL_HOOKS: "true"
   # fs-mistrust doesn't like umask 0
   FF_DISABLE_UMASK_FOR_DOCKER_EXECUTOR: "true"
+  # Enable timestamps in job log lines.
+  FF_TIMESTAMPS: "true"
   # Pinned CI image for must Rust tests
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   RECENT_RUST_IMAGE: "amd64/rust:1.79.0-bookworm"
@@ -16,13 +18,14 @@ variables:
   # TODO: Consider unpinning once chutney's CI is running arti's CI.
   # Alternatively if we decide to keep this, consider to actually start managing
   # versions in chutney and using a version tag here.
-  CHUTNEY_SHALLOW_SINCE: "2024-10-28"
-  CHUTNEY_COMMIT: be881a1e7c4bc8038fa13fde4a7b24e5c56349c4
+  CHUTNEY_COMMIT: b05403758dc81593256a93a10d896e68e0398fe7
 
 default:
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   image: amd64/debian:bookworm-slim
   before_script:
+    # get section_start and section_end bash functions
+    - source maint/ci_log_span_fns.sh
     # gitlab fetch strategy doesn't reset permissions
     - (while [ "$PWD" != / ]; do chmod go-w . && cd ..; done)
     # verify that we're running in a container built for amd64.
@@ -73,7 +76,7 @@ shellcheck:
 python3-checks:
   stage: check
   script:
-    - maint/common/apt-install python3-pip python3-venv mypy flake8 git
+    - maint/common/apt-install python3-pip python3-venv git
     # AFAICT these python packages do not have debian packages.
     #
     # (`black` does have a debian package, but we need the latest version.)
@@ -181,15 +184,28 @@ cargo-audit:
 .rust-recent-template:
   script: &rust-recent-script
     - rustup show
+
+    - section_start "cargo check"
     - cargo check --locked --verbose --target x86_64-unknown-linux-gnu
+
+    - section_start "cargo test"
     - cargo test --verbose --target x86_64-unknown-linux-gnu
+
+    - section_start "cargo clippy"
     - rustup component add clippy
     - rustup show
     - ./maint/add_warning --ci-stable
     - cargo clippy --all-features --all-targets -- -D warnings
+
+    - section_start "build arti-bench"
     - cargo build --verbose --release -p arti-bench --target x86_64-unknown-linux-gnu
+
+    - section_start "build arti"
     - cargo build --locked --verbose --target x86_64-unknown-linux-gnu -p arti
+
+    - section_start "build docs"
     - RUSTDOCFLAGS="-Dwarnings" cargo doc --all-features --document-private-items --no-deps
+    - section_end
 
 rust-recent:
   stage: build
@@ -501,22 +517,16 @@ integration-chutney:
    - when: never
   script:
     - ./maint/preserve -u
-    - maint/common/apt-install tor git python3 curl dnsutils python3-pip
+    - maint/common/apt-install tor git python3 curl dnsutils python3-pip python3-venv
 
     # arti runtime dependencies
     - maint/common/apt-install libsqlite3-0 libssl3
 
     # install chutney.
-    # TODO: consider moving this into a source-able script shared with
-    # integration-chutney-shadow.
-    - git clone
-        --shallow-since="$CHUTNEY_SHALLOW_SINCE"
-        https://gitlab.torproject.org/tpo/core/chutney
-    - git -C ./chutney checkout "$CHUTNEY_COMMIT"
-    # install chutney's deps by installing chutney.
-    # TODO: use a virtualenv instead.
-    - python3 -m pip install --break-system-packages ./chutney
-    - export CHUTNEY_PATH="$(pwd)/chutney"
+    - python3 -m venv --system-site-packages $HOME/job-venv
+    - source $HOME/job-venv/bin/activate
+    - python3 -m pip install
+        git+https://gitlab.torproject.org/tpo/core/chutney.git@"$CHUTNEY_COMMIT"
 
     - tests/chutney/integration-e2e
   artifacts:
@@ -541,20 +551,16 @@ integration-chutney-shadow:
         stow
         python3-yaml
         python3-pip
+        python3-venv
 
     # arti runtime dependencies
     - maint/common/apt-install libsqlite3-0 libssl3
 
-    # install chutney to prevent the test scripts from trying to install
-    # it from inside the shadow simulation, which won't work.
-    - git clone
-        --shallow-since="$CHUTNEY_SHALLOW_SINCE"
-        https://gitlab.torproject.org/tpo/core/chutney
-    - git -C ./chutney checkout "$CHUTNEY_COMMIT"
-    # install chutney's deps by installing chutney.
-    # TODO: use a virtualenv instead.
-    - python3 -m pip install --break-system-packages ./chutney
-    - export CHUTNEY_PATH="$(pwd)/chutney"
+    # install chutney.
+    - python3 -m venv --system-site-packages $HOME/job-venv
+    - source $HOME/job-venv/bin/activate
+    - python3 -m pip install
+        git+https://gitlab.torproject.org/tpo/core/chutney.git@"$CHUTNEY_COMMIT"
 
     # Set up shadow, built in build-shadow
     - maint/common/apt-install libglib2.0-0
@@ -585,18 +591,18 @@ integration-shadow:
       - opt/tgen
   script:
     - ./maint/preserve -u
-    - ./maint/ci_log_span start "shadow_install_deps[collapsed=true]" "Installing shadow and tgen"
 
-    - maint/common/apt-install git tor obfs4proxy stow
+    - section_start "Install utility packages"
+    - maint/common/apt-install git tor obfs4proxy stow tshark
 
-    # arti runtime dependencies
+    - section_start "Install arti runtime dependencies"
     - maint/common/apt-install libsqlite3-0 libssl3
 
-    # Set up shadow, built in build-shadow
+    - section_start "Set up shadow, built in build-shadow"
     - maint/common/apt-install libglib2.0-0
     - stow -d opt -t $HOME/.local shadow
 
-    # Build tgen
+    - section_start "Setup tgen"
     - |
       if [ -f opt/tgen/bin/tgen ]
       then
@@ -620,12 +626,10 @@ integration-shadow:
     # Ensure newly installed executables can be found
     - hash -r
 
-    - DEBIAN_FRONTEND=noninteractive maint/common/apt-install tshark
-    - ./maint/ci_log_span end "shadow_install_deps"
-
-    # Run tests
+    - section_start "Run shadow test"
     - pushd tests/shadow
     - ./run
+    - section_end
   artifacts:
     paths:
       - tests/shadow

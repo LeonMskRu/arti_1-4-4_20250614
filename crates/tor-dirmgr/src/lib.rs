@@ -39,6 +39,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 // This clippy lint produces a false positive on `use strum`, below.
@@ -761,8 +762,12 @@ impl<R: Runtime> DirMgr<R> {
         // We don't support changing these: doing so basically would require us
         // to abort all our in-progress downloads, since they might be based on
         // no-longer-viable information.
+        // NOTE: keep this in sync with the behaviour of `DirMgrConfig::update_from_config`
         if new_config.cache_dir != config.cache_dir {
             how.cannot_change("storage.cache_dir")?;
+        }
+        if new_config.cache_trust != config.cache_trust {
+            how.cannot_change("storage.permissions")?;
         }
         if new_config.authorities() != config.authorities() {
             how.cannot_change("network.authorities")?;

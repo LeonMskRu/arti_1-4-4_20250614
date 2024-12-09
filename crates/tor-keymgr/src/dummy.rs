@@ -1,5 +1,3 @@
-#![allow(clippy::unnecessary_wraps, clippy::extra_unused_type_parameters)]
-
 //! A dummy key manager implementation.
 //!
 //! This key manager implementation is only used when the `keymgr` feature is disabled.
@@ -8,13 +6,11 @@
 //! removed, because the dummy implementations must have the same API as their fully-featured
 //! counterparts.
 
-use crate::{BoxedKeystore, KeystoreError, KeystoreSelector, Result};
-use tor_error::HasKind;
+use crate::{BoxedKeystore, Result};
 
 use fs_mistrust::Mistrust;
 use std::any::Any;
 use std::path::Path;
-use std::sync::Arc;
 
 /// A dummy key manager implementation.
 ///
@@ -28,8 +24,10 @@ use std::sync::Arc;
 #[non_exhaustive]
 pub struct KeyMgr {
     /// The default key store.
+    #[allow(unused)] // Unused, but needed because we want its setter present in the builder
     primary_store: BoxedKeystore,
     /// The secondary key stores.
+    #[allow(unused)] // Unused, but needed because we want its setter present in the builder
     #[builder(default, setter(custom))]
     secondary_stores: Vec<BoxedKeystore>,
 }
@@ -71,40 +69,21 @@ impl KeyMgrBuilder {
 
 /// A dummy key store trait.
 pub trait Keystore: Send + Sync + 'static {
-    // TODO(gabi): Add the missing functions and impls
+    // NOTE: resist the temptation to add additional functions here!
+    //
+    // If your code does not compile with the `tor-keymgr/keymgr` feature disabled
+    // because this trait is missing some functions you are using/implementing,
+    // the correct answer is very likely to feature-gate the offending code,
+    // or arrange for the calling crate to unconditionally enable `tor-keymgr/keymgr`,
+    // rather than to extend this trait to match the interface of the `Keystore` trait
+    // exposed when the `tor-keymgr/keymgr` feature is enabled.
+    //
+    // See the note in the dummy `KeyMgr` impl block below for more details.
 }
 
 /// A dummy `ArtiNativeKeystore`.
 #[non_exhaustive]
 pub struct ArtiNativeKeystore;
-
-/// A dummy `KeyType`.
-#[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct KeyType;
-
-impl KeyType {
-    /// The file extension for a key of this type.
-    //
-    // TODO: maybe this function should return an error instead
-    pub fn arti_extension(&self) -> &'static str {
-        "dummy_extension"
-    }
-}
-
-/// A dummy `Error` indicating that key manager support is disabled in cargo features.
-#[non_exhaustive]
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("Key manager support disabled in cargo features")]
-struct Error;
-
-impl KeystoreError for Error {}
-
-impl HasKind for Error {
-    fn kind(&self) -> tor_error::ErrorKind {
-        tor_error::ErrorKind::Other
-    }
-}
 
 impl ArtiNativeKeystore {
     /// Create a new [`ArtiNativeKeystore`].
@@ -138,19 +117,25 @@ impl KeyMgr {
         Ok(None)
     }
 
-    /// A dummy `insert` implementation that always fails.
-    ///
-    /// This function always returns an error.
-    pub fn insert<K>(&self, _: K, _: &dyn Any, _: KeystoreSelector) -> Result<Option<K>> {
-        Err(crate::Error::Keystore(Arc::new(Error)))
-    }
-
-    /// A dummy `remove` implementation that always fails.
-    ///
-    /// This function always returns an error.
-    pub fn remove<K>(&self, _: &dyn Any) -> Result<Option<K>> {
-        Err(crate::Error::Keystore(Arc::new(Error)))
-    }
+    // NOTE: resist the temptation to add additional functions here!
+    //
+    // If your code does not compile with the `tor-keymgr/keymgr` feature disabled
+    // because this impl is missing some functions you are using,
+    // the correct answer is very likely to feature-gate the offending code,
+    // or arrange for the calling crate to unconditionally enable `tor-keymgr/keymgr`,
+    // rather than to extend this impl to match the interface of the real `KeyMgr`
+    // (exposed when the `tor-keymgr/keymgr` feature is enabled).
+    //
+    // The dummy `KeyMgr` (and the dummy keystores) and the fully fledged
+    // `KeyMgr`/`Keystore` implementations gated behind the `keymgr` feature
+    // are **not** supposed to have the same interface.
+    // This is because implementations needing a real `KeyMgr`
+    // to function shouldn't even compile if the real `KeyMgr` is disabled.
+    // We could have provided an API here that's identical to the real one,
+    // with the dummy implementation always returning an error,
+    // but that would be strictly worse, because the user of this code
+    // would only find out at *runtime* about what is essentially a *build* issue
+    // (the build issue being that the application was built with an incoherent feature set).
 }
 
 inventory::collect!(&'static dyn crate::KeyPathInfoExtractor);

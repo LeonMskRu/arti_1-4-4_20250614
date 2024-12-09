@@ -1,6 +1,6 @@
 [package]
 name = "tor-cert"
-version = "0.24.0"
+version = "0.25.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
 edition = "2021"
 rust-version = "1.77"
@@ -16,6 +16,13 @@ default = []
 experimental = ["encode"]
 encode = ["derive_builder", "__is_experimental"]
 full = ["caret/full", "tor-bytes/full", "tor-checkable/full", "tor-llcrypto/full"]
+
+# Enable experimental APIs that are not yet officially supported.
+#
+# These APIs are not covered by semantic versioning.  Using this
+# feature voids your "semver warrantee".
+experimental-api = ["__is_experimental"]
+
 __is_experimental = []
 
 [dependencies]
@@ -23,10 +30,10 @@ caret = { path = "../caret", version = "0.5.0" }
 derive_builder = { version = "0.11.2", package = "derive_builder_fork_arti", optional = true }
 derive_more = { version = "1.0.0", features = ["full"] }
 digest = "0.10.0"
-thiserror = "1"
-tor-bytes = { path = "../tor-bytes", version = "0.24.0" }
-tor-checkable = { path = "../tor-checkable", version = "0.24.0" }
-tor-llcrypto = { path = "../tor-llcrypto", version = "0.24.0" }
+thiserror = "2"
+tor-bytes = { path = "../tor-bytes", version = "0.25.0" }
+tor-checkable = { path = "../tor-checkable", version = "0.25.0" }
+tor-llcrypto = { path = "../tor-llcrypto", version = "0.25.0" }
 
 [dev-dependencies]
 base64ct = "1.5.1"

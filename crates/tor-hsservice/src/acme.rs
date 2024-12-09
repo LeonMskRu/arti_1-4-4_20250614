@@ -204,7 +204,7 @@ pub(crate) fn onion_caa(
     nickname: &HsNickname,
     caa: &[hickory_proto::rr::rdata::CAA],
     expiry: u64,
-    now: std::time::SystemTime,
+    now: SystemTime,
 ) -> Result<OnionCaa, OnionCaaError> {
     let hsid_spec = HsIdPublicKeySpecifier::new(nickname.clone());
     let hs_key = ed25519::ExpandedKeypair::from(

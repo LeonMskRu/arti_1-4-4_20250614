@@ -39,6 +39,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
 #![allow(clippy::result_large_err)] // temporary workaround for arti#587
 #![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
+#![allow(clippy::needless_lifetimes)] // See arti#1765
 //! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 // TODO #1645 (either remove this, or decide to have it everywhere)
@@ -63,7 +64,6 @@ mod ipt_lid;
 mod ipt_mgr;
 mod ipt_set;
 mod keys;
-mod netdir;
 mod publish;
 mod rend_handshake;
 mod replay;
@@ -93,7 +93,6 @@ use internal_prelude::*;
 
 // ---------- public exports ----------
 
-pub use crate::netdir::NetdirProviderShutdown;
 #[cfg(feature = "acme")]
 #[cfg_attr(docsrs, doc(cfg(feature = "acme")))]
 pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
@@ -255,6 +254,7 @@ impl OnionService {
         runtime: R,
         netdir_provider: Arc<dyn NetDirProvider>,
         circ_pool: Arc<HsCircPool<R>>,
+        path_resolver: Arc<tor_config_path::CfgPathResolver>,
     ) -> Result<(Arc<RunningOnionService>, impl Stream<Item = RendRequest>), StartupError>
     where
         R: Runtime,
@@ -334,6 +334,7 @@ impl OnionService {
             config_rx,
             status_tx.clone().into(),
             Arc::clone(&keymgr),
+            path_resolver,
         );
 
         let svc = Arc::new(RunningOnionService {
@@ -411,7 +412,7 @@ impl OnionService {
 
     /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
     /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
-    pub fn get_onion_caa<R: SleepProvider>(
+    pub fn get_onion_caa(
         &self,
         expiry: u64,
         now: SystemTime,
