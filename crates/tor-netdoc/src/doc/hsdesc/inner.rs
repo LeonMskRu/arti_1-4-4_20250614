@@ -42,11 +42,30 @@ pub(crate) struct HsDescInner {
     // Always has >= 1 and <= NUM_INTRO_POINT_MAX entries
     pub(super) intro_points: Vec<IntroPointDesc>,
     /// CAA records
+    #[cfg(feature = "acme")]
     pub(super) caa_records: Vec<hickory_proto::rr::rdata::CAA>,
     /// A list of offered proof-of-work parameters, at most one per type.
     pub(super) pow_params: PowParamSet,
 }
 
+#[cfg(not(feature = "acme"))]
+decl_keyword! {
+    pub(crate) HsInnerKwd {
+        "create2-formats" => CREATE2_FORMATS,
+        "intro-auth-required" => INTRO_AUTH_REQUIRED,
+        "single-onion-service" => SINGLE_ONION_SERVICE,
+        "introduction-point" => INTRODUCTION_POINT,
+        "onion-key" => ONION_KEY,
+        "auth-key" => AUTH_KEY,
+        "enc-key" => ENC_KEY,
+        "enc-key-cert" => ENC_KEY_CERT,
+        "legacy-key" => LEGACY_KEY,
+        "legacy-key-cert" => LEGACY_KEY_CERT,
+        "pow-params" => POW_PARAMS,
+    }
+}
+
+#[cfg(feature = "acme")]
 decl_keyword! {
     pub(crate) HsInnerKwd {
         "create2-formats" => CREATE2_FORMATS,
@@ -74,6 +93,7 @@ static HS_INNER_HEADER_RULES: Lazy<SectionRules<HsInnerKwd>> = Lazy::new(|| {
     rules.add(INTRO_AUTH_REQUIRED.rule().args(1..));
     rules.add(SINGLE_ONION_SERVICE.rule());
     rules.add(POW_PARAMS.rule().args(1..).may_repeat().obj_optional());
+    #[cfg(feature = "acme")]
     rules.add(CAA.rule().args(3..).may_repeat());
     rules.add(UNRECOGNIZED.rule().may_repeat().obj_optional());
 
@@ -426,7 +446,9 @@ impl HsDescInner {
             return Err(EK::MissingEntry.with_msg("no introduction points"));
         }
 
+        #[cfg(feature = "acme")]
         let mut caa_records = Vec::new();
+        #[cfg(feature = "acme")]
         while let Some(tok) = header.get(CAA) {
             use hickory_proto::serialize::txt::RDataParser;
             let record = hickory_proto::rr::record_data::RData::try_from_str(
@@ -442,6 +464,7 @@ impl HsDescInner {
             single_onion_service: is_single_onion_service,
             pow_params,
             intro_points,
+            #[cfg(feature = "acme")]
             caa_records,
         };
         let sig_gated = SignatureGated::new(inner, signatures);

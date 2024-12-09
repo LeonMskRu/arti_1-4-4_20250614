@@ -46,7 +46,11 @@ pub use {inner::HsDescInner, middle::HsDescMiddle, outer::HsDescOuter};
 
 #[cfg(feature = "hs-service")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hs-service")))]
-pub use build::{create_desc_sign_key_cert, CAARecordSet, HsDescBuilder};
+pub use build::{create_desc_sign_key_cert, HsDescBuilder};
+
+#[cfg(feature = "acme")]
+#[cfg_attr(docsrs, doc(cfg(feature = "acme")))]
+pub use build::CAARecordSet;
 
 /// Metadata about an onion service descriptor, as stored at an HsDir.
 ///
@@ -119,6 +123,8 @@ pub struct HsDesc {
     // TODO:  When someday we add a "create2 format" other than "hs-ntor", we
     // should turn this into a caret enum, record this info, and expose it.
     // create2_formats: Vec<u32>,
+
+    #[cfg(feature = "acme")]
     /// CAA records - see [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt).
     caa_records: Vec<hickory_proto::rr::rdata::CAA>,
 }
@@ -170,6 +176,7 @@ pub struct IntroPointDesc {
     svc_ntor_key: HsSvcNtorKey,
 }
 
+#[cfg(feature = "acme")]
 bitflags::bitflags! {
     /// Flags field for a CAA record
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -367,6 +374,8 @@ impl HsDesc {
     }
 
     /// The CAA records for this onion service
+    /// TODO(#1414): This should likely be exposed as a wrapped type
+    #[cfg(feature = "acme")]
     pub fn caa_records(&self) -> &[hickory_proto::rr::rdata::CAA] {
         &self.caa_records
     }
@@ -533,6 +542,7 @@ impl EncryptedHsDesc {
                 is_single_onion_service: inner.single_onion_service,
                 intro_points: inner.intro_points,
                 pow_params: inner.pow_params,
+                #[cfg(feature = "acme")]
                 caa_records: inner.caa_records,
             })
         });

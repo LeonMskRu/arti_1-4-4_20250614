@@ -57,12 +57,13 @@ experimental = [
     "experimental-api",
     "hs-pow-full",
     "restricted-discovery",
+    "acme"
 ]
 experimental-api = ["restricted-discovery", "__is_experimental"]
 
 restricted-discovery = ["__is_experimental"]
 
-acme = []
+acme = ["tor-netdoc/acme", "__is_experimental"]
 
 __is_experimental = []
 

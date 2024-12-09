@@ -38,6 +38,7 @@ experimental = [
     "hs-pow-full",
     "hsdesc-inner-docs",
     "dangerous-expose-struct-fields",
+    "acme",
 ]
 
 # Enable code to build the objects that represent different network documents.
@@ -82,12 +83,16 @@ experimental-api = ["testing", "__is_experimental"]
 # guarantee": you should be mildly surprised when your code _doesn't_ break from
 # version to version.
 dangerous-expose-struct-fields = ["visible", "visibility", "__is_experimental"]
+
+# Expose functions relating to dratf-ietf-acme-onion
+acme = ["hickory-proto", "bitflags/serde", "__is_experimental"]
+
 __is_experimental = []
 
 [dependencies]
 amplify = { version = "4", default-features = false, features = ["derive"] }
 base64ct = { version = "1.5.1", features = ["alloc"] }
-bitflags = { version = "2", features = ["serde"] }
+bitflags = "2"
 cipher = { version = "0.4.1", features = ["zeroize"] }
 derive_builder = { version = "0.11.2", package = "derive_builder_fork_arti" }
 derive_more = { version = "1.0.0", features = ["full"] }
@@ -95,7 +100,7 @@ digest = "0.10.0"
 educe = "0.4.6"
 hex = "0.4"
 hex-literal = { version = "0.4", optional = true }
-hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
+hickory-proto = { version = "0.24.1", features = ["text-parsing"], optional = true }
 humantime = "2"
 itertools = "0.13.0"
 once_cell = "1"
@@ -103,7 +108,6 @@ phf = { version = "0.11.1", features = ["macros"] }
 rand = { version = "0.8", optional = true }
 serde = "1.0.103"
 serde_with = "3.0.0"
-shell-words = "1"
 signature = "2"
 smallvec = "1.10"
 subtle = "2"

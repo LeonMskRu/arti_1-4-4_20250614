@@ -31,6 +31,7 @@ pub(super) struct HsDescMiddle<'a> {
     /// The "subcredential" of the onion service.
     pub(super) subcredential: Subcredential,
     /// CAA records exist in the inner document
+    #[cfg(feature = "acme")]
     pub(super) caa_critical: bool,
     /// The (encrypted) inner document of the onion service descriptor.
     ///
@@ -50,6 +51,7 @@ impl<'a> NetdocBuilder for HsDescMiddle<'a> {
         let HsDescMiddle {
             client_auth,
             subcredential,
+            #[cfg(feature = "acme")]
             caa_critical,
             encrypted,
         } = self;
@@ -123,6 +125,7 @@ impl<'a> NetdocBuilder for HsDescMiddle<'a> {
                 .arg(&Base64::encode_string(&auth_client.encrypted_cookie));
         }
 
+        #[cfg(feature = "acme")]
         if caa_critical {
             encoder.item(CAA_CRITICAL);
         }

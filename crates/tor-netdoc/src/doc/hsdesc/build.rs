@@ -23,6 +23,7 @@ use smallvec::SmallVec;
 use std::borrow::{Borrow, Cow};
 use std::time::SystemTime;
 
+#[cfg(feature = "acme")]
 pub use self::inner::CAARecordSet;
 use self::inner::HsDescInner;
 use self::middle::HsDescMiddle;
@@ -91,6 +92,7 @@ struct HsDesc<'a> {
     subcredential: Subcredential,
     /// CAA records
     #[builder(default)]
+    #[cfg(feature = "acme")]
     caa_records: &'a [hickory_proto::rr::rdata::CAA],
 }
 
@@ -165,6 +167,7 @@ impl<'a> NetdocBuilder for HsDescBuilder<'a> {
             intro_points: hs_desc.intro_points,
             intro_auth_key_cert_expiry: hs_desc.intro_auth_key_cert_expiry,
             intro_enc_key_cert_expiry: hs_desc.intro_enc_key_cert_expiry,
+            #[cfg(feature = "acme")]
             caa_records: hs_desc.caa_records,
             #[cfg(feature = "hs-pow-full")]
             pow_params: hs_desc.pow_params,
@@ -189,6 +192,7 @@ impl<'a> NetdocBuilder for HsDescBuilder<'a> {
         let middle_plaintext = HsDescMiddle {
             client_auth: client_auth.as_ref(),
             subcredential: hs_desc.subcredential,
+            #[cfg(feature = "acme")]
             caa_critical: !hs_desc.caa_records.is_empty(),
             encrypted: inner_encrypted,
         }

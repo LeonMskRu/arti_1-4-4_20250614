@@ -50,6 +50,8 @@ pub(super) struct HsDescInner<'a> {
     /// The expiration time of an introduction point encryption key certificate.
     pub(super) intro_enc_key_cert_expiry: SystemTime,
     /// CAA records
+    /// TODO(#1414): This should likely be exposed as a wrapped type
+    #[cfg(feature = "acme")]
     pub(super) caa_records: &'a [hickory_proto::rr::rdata::CAA],
     /// Proof-of-work parameters
     #[cfg(feature = "hs-pow-full")]
@@ -97,6 +99,7 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             intro_points,
             intro_auth_key_cert_expiry,
             intro_enc_key_cert_expiry,
+            #[cfg(feature = "acme")]
             caa_records,
             #[cfg(feature = "hs-pow-full")]
             pow_params,
@@ -125,6 +128,7 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             encoder.item(SINGLE_ONION_SERVICE);
         }
 
+        #[cfg(feature = "acme")]
         for caa_entry in caa_records {
             encoder.item(CAA).arg(&caa_entry.to_string());
         }
@@ -242,18 +246,22 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
 
 /// Helper for building a textual representation of a set of CAA records
 #[derive(Debug)]
+#[cfg(feature = "acme")]
 pub struct CAARecordSet<'a> {
     /// CAA records
     caa_records: &'a [hickory_proto::rr::rdata::CAA],
 }
 
+#[cfg(feature = "acme")]
 impl<'a> CAARecordSet<'a> {
     /// Wrap a slice of CAARecords for encoding into Netdoc format
+    /// TODO(#1414): This should likely be exposed as a wrapped type
     pub fn new(caa_records: &'a [hickory_proto::rr::rdata::CAA]) -> Self {
         Self { caa_records }
     }
 }
 
+#[cfg(feature = "acme")]
 impl<'a> NetdocBuilder for CAARecordSet<'a> {
     fn build_sign<R: RngCore + CryptoRng>(self, _: &mut R) -> Result<String, EncodeError> {
         use HsInnerKwd::*;
@@ -321,6 +329,7 @@ mod test {
             intro_points,
             intro_auth_key_cert_expiry: UNIX_EPOCH,
             intro_enc_key_cert_expiry: UNIX_EPOCH,
+            #[cfg(feature = "acme")]
             caa_records,
             #[cfg(feature = "hs-pow-full")]
             pow_params,
