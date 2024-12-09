@@ -239,6 +239,7 @@ async fn rpc_onion_service_name(
 rpc::static_rpc_invoke_fn! {rpc_onion_service_name;}
 
 /// Implementation for OnionServiceCsr on an ArtiRpcSession.
+/// TODO(#1414): This needs superuser authentication before it can be considered non experimental
 async fn rpc_onion_service_csr(
     onion_service: Arc<Proxy>,
     method: Box<GenerateOnionServiceCsr>,
