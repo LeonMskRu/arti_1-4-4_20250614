@@ -123,7 +123,6 @@ pub struct HsDesc {
     // TODO:  When someday we add a "create2 format" other than "hs-ntor", we
     // should turn this into a caret enum, record this info, and expose it.
     // create2_formats: Vec<u32>,
-
     #[cfg(feature = "acme")]
     /// CAA records - see [prop 343](https://spec.torproject.org/proposals/343-rend-caa.txt).
     caa_records: Vec<hickory_proto::rr::rdata::CAA>,

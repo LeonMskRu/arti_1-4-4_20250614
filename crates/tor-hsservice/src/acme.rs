@@ -27,7 +27,6 @@ pub enum OnionCsrError {
 }
 
 /// Create and sign a Certificate Signing Request as per CA/BF Baseline Requirements Appendix B
-#[rustfmt::skip]
 pub(crate) fn onion_csr(
     keymgr: &KeyMgr,
     nickname: &HsNickname,
@@ -70,13 +69,17 @@ pub(crate) fn onion_csr(
 
     let mut subject_pk_contents = Vec::new();
     // algorithm AlgorithmIdentifier
-    asn1_rs::Sequence::from_iter_to_der([
-        // algorithm OBJECT IDENTIFIER: {iso(1) identified-organization(3) thawte(101) id-Ed25519(112)}
-        asn1_rs::oid!(1.3.101.112),
-    ].iter())
-        .expect("create algorithm AlgorithmIdentifier")
-        .write_der(&mut subject_pk_contents)
-        .expect("serialize algorithm AlgorithmIdentifier");
+    asn1_rs::Sequence::from_iter_to_der(
+        [
+            // algorithm OBJECT IDENTIFIER: {iso(1) identified-organization(3) thawte(101) id-Ed25519(112)}
+            #[rustfmt::skip]
+            asn1_rs::oid!(1.3.101.112),
+        ]
+        .iter(),
+    )
+    .expect("create algorithm AlgorithmIdentifier")
+    .write_der(&mut subject_pk_contents)
+    .expect("serialize algorithm AlgorithmIdentifier");
     // subjectPublicKey BIT STRING
     asn1_rs::BitString::new(0, &hs_key.public().to_bytes())
         .write_der(&mut subject_pk_contents)
@@ -88,6 +91,7 @@ pub(crate) fn onion_csr(
 
     let mut ca_nonce_contents = Vec::new();
     // type OBJECT IDENTIFIER: {joint-iso-itu-t(2) international-organizations(23) ca-browser-forum(140) cabf-caSigningNonce(41)}
+    #[rustfmt::skip]
     asn1_rs::oid!(2.23.140.41)
         .write_der(&mut ca_nonce_contents)
         .expect("serialize type OBJECT IDENTIFIER - cabf-caSigningNonce");
@@ -99,6 +103,7 @@ pub(crate) fn onion_csr(
 
     let mut applicant_nonce_contents = Vec::new();
     // type OBJECT IDENTIFIER: {joint-iso-itu-t(2) international-organizations(23) ca-browser-forum(140) cabf-applicantSigningNonce(42)}
+    #[rustfmt::skip]
     asn1_rs::oid!(2.23.140.42)
         .write_der(&mut applicant_nonce_contents)
         .expect("serialize type OBJECT IDENTIFIER - cabf-applicantSigningNonce");
@@ -110,16 +115,19 @@ pub(crate) fn onion_csr(
 
     // attributes [0] Attributes
     asn1_rs::TaggedImplicit::<asn1_rs::Set, asn1_rs::Error, 0>::implicit(
-        asn1_rs::Set::from_iter_to_der([
-            // Attribute SEQUENCE
-            asn1_rs::Sequence::new(ca_nonce_contents.into()),
-            // Attribute SEQUENCE
-            asn1_rs::Sequence::new(applicant_nonce_contents.into()),
-        ].iter())
-            .expect("create attributes [0] Attributes"),
+        asn1_rs::Set::from_iter_to_der(
+            [
+                // Attribute SEQUENCE
+                asn1_rs::Sequence::new(ca_nonce_contents.into()),
+                // Attribute SEQUENCE
+                asn1_rs::Sequence::new(applicant_nonce_contents.into()),
+            ]
+            .iter(),
+        )
+        .expect("create attributes [0] Attributes"),
     )
-        .write_der(&mut tbs_csr_contents)
-        .expect("serialize attributes [0] Attributes");
+    .write_der(&mut tbs_csr_contents)
+    .expect("serialize attributes [0] Attributes");
 
     let tbs_csr = asn1_rs::Sequence::new(tbs_csr_contents.into());
     let mut tbs = Vec::new();
@@ -133,13 +141,17 @@ pub(crate) fn onion_csr(
         .write_der(&mut csr_contents)
         .expect("serialize CertificationRequestInfo SEQUENCE");
     // signatureAlgorithm AlgorithmIdentifier
-    asn1_rs::Sequence::from_iter_to_der([
-        // algorithm OBJECT IDENTIFIER: {iso(1) identified-organization(3) thawte(101) id-Ed25519(112)}
-        asn1_rs::oid!(1.3.101.112),
-    ].iter())
-        .expect("create signatureAlgorithm AlgorithmIdentifier")
-        .write_der(&mut csr_contents)
-        .expect("serialize signatureAlgorithm AlgorithmIdentifier");
+    asn1_rs::Sequence::from_iter_to_der(
+        [
+            // algorithm OBJECT IDENTIFIER: {iso(1) identified-organization(3) thawte(101) id-Ed25519(112)}
+            #[rustfmt::skip]
+            asn1_rs::oid!(1.3.101.112),
+        ]
+        .iter(),
+    )
+    .expect("create signatureAlgorithm AlgorithmIdentifier")
+    .write_der(&mut csr_contents)
+    .expect("serialize signatureAlgorithm AlgorithmIdentifier");
     // signature BIT STRING
     asn1_rs::BitString::new(0, signature.to_bytes().as_slice())
         .write_der(&mut csr_contents)
