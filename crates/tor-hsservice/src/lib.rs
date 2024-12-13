@@ -53,6 +53,8 @@ mod time_store;
 
 mod internal_prelude;
 
+#[cfg(feature = "acme")]
+mod acme;
 mod anon_level;
 pub mod config;
 mod err;
@@ -91,6 +93,9 @@ use internal_prelude::*;
 
 // ---------- public exports ----------
 
+#[cfg(feature = "acme")]
+#[cfg_attr(docsrs, doc(cfg(feature = "acme")))]
+pub use acme::{OnionCaa, OnionCaaError, OnionCsrError};
 pub use anon_level::Anonymity;
 pub use config::OnionServiceConfig;
 pub use err::{ClientError, EstablishSessionError, FatalError, IntroRequestError, StartupError};
@@ -103,9 +108,9 @@ pub use publish::UploadError as DescUploadError;
 pub use req::{RendRequest, StreamRequest};
 pub use tor_hscrypto::pk::HsId;
 pub use tor_persist::hsnickname::{HsNickname, InvalidNickname};
+pub use tor_rtcompat::DynTimeProvider;
 
 pub use helpers::handle_rend_requests;
-
 //---------- top-level service implementation (types and methods) ----------
 
 /// Convenience alias for link specifiers of an intro point
@@ -131,6 +136,8 @@ pub struct RunningOnionService {
     nickname: HsNickname,
     /// The key manager, used for accessing the underlying key stores.
     keymgr: Arc<KeyMgr>,
+    /// Used for ACME signing
+    time_provider: DynTimeProvider,
 }
 
 /// Implementation details for an onion service.
@@ -319,7 +326,7 @@ impl OnionService {
         )?;
 
         let publisher: Publisher<R, publish::Real<R>> = Publisher::new(
-            runtime,
+            runtime.clone(),
             nickname.clone(),
             netdir_provider,
             circ_pool,
@@ -331,6 +338,7 @@ impl OnionService {
         );
 
         let svc = Arc::new(RunningOnionService {
+            time_provider: DynTimeProvider::new(runtime),
             nickname,
             keymgr,
             inner: Mutex::new(SvcInner {
@@ -388,6 +396,30 @@ impl OnionService {
         let offline_hsid = false;
 
         maybe_generate_hsid(&self.keymgr, &self.config.nickname, offline_hsid, selector)
+    }
+}
+
+#[cfg(feature = "acme")]
+impl OnionService {
+    /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
+    /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
+    /// Baseline Requirements.
+    ///
+    /// The CA nonce must be equal to or less than 32 bytes.
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
+        acme::onion_csr(&self.keymgr, &self.config.nickname, ca_nonce)
+    }
+
+    /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
+    /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
+    pub fn get_onion_caa(&self, expiry: u64, now: SystemTime) -> Result<OnionCaa, OnionCaaError> {
+        acme::onion_caa(
+            &self.keymgr,
+            &self.config.nickname,
+            &self.config.caa_records,
+            expiry,
+            now,
+        )
     }
 }
 
@@ -498,6 +530,32 @@ impl RunningOnionService {
     /// keystores.
     pub fn onion_name(&self) -> Option<HsId> {
         onion_name(&self.keymgr, &self.nickname)
+    }
+}
+
+#[cfg(feature = "acme")]
+impl RunningOnionService {
+    /// Creates and signs a PKCS#10 CSR for requesting an X.509 certificate for the onion address
+    /// of this service. The CSR is constructed according to Appendix B.2.b of the CA/Browser Forum
+    /// Baseline Requirements.
+    ///
+    /// The CA nonce must be equal to or less than 32 bytes.
+    pub fn generate_onion_csr(&self, ca_nonce: &[u8]) -> Result<Vec<u8>, OnionCsrError> {
+        acme::onion_csr(&self.keymgr, &self.nickname, ca_nonce)
+    }
+
+    /// Creates and signs an in-band CAA RRSet for requesting an X.509 certificate for the onion
+    /// address of this service. The signature is constructed according to draft-ietf-acme-onion.
+    pub fn get_onion_caa(&self, expiry: u64) -> Result<OnionCaa, OnionCaaError> {
+        let mut inner = self.inner.lock().expect("lock poisoned");
+        let config = inner.config_tx.borrow();
+        acme::onion_caa(
+            &self.keymgr,
+            &self.nickname,
+            &config.caa_records,
+            expiry,
+            self.time_provider.wallclock(),
+        )
     }
 }
 
@@ -677,7 +735,7 @@ pub(crate) mod test {
     }
 
     /// Create a test hsid keypair.
-    fn create_hsid() -> (HsIdKeypair, HsIdKey) {
+    pub(crate) fn create_hsid() -> (HsIdKeypair, HsIdKey) {
         let mut rng = testing_rng();
         let keypair = ed25519::Keypair::generate(&mut rng);
 

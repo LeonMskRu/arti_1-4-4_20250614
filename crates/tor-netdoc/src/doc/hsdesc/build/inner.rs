@@ -49,6 +49,10 @@ pub(super) struct HsDescInner<'a> {
     pub(super) intro_auth_key_cert_expiry: SystemTime,
     /// The expiration time of an introduction point encryption key certificate.
     pub(super) intro_enc_key_cert_expiry: SystemTime,
+    /// CAA records
+    /// TODO(#1414): This should likely be exposed as a wrapped type
+    #[cfg(feature = "acme")]
+    pub(super) caa_records: &'a [hickory_proto::rr::rdata::CAA],
     /// Proof-of-work parameters
     #[cfg(feature = "hs-pow-full")]
     pub(super) pow_params: Option<&'a PowParams>,
@@ -95,6 +99,8 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
             intro_points,
             intro_auth_key_cert_expiry,
             intro_enc_key_cert_expiry,
+            #[cfg(feature = "acme")]
+            caa_records,
             #[cfg(feature = "hs-pow-full")]
             pow_params,
         } = self;
@@ -120,6 +126,11 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
 
         if is_single_onion_service {
             encoder.item(SINGLE_ONION_SERVICE);
+        }
+
+        #[cfg(feature = "acme")]
+        for caa_entry in caa_records {
+            encoder.item(CAA).arg(&caa_entry.to_string());
         }
 
         #[cfg(feature = "hs-pow-full")]
@@ -233,6 +244,41 @@ impl<'a> NetdocBuilder for HsDescInner<'a> {
     }
 }
 
+/// Helper for building a textual representation of a set of CAA records
+#[derive(Debug)]
+#[cfg(feature = "acme")]
+pub struct CAARecordSet<'a> {
+    /// CAA records
+    caa_records: &'a [hickory_proto::rr::rdata::CAA],
+}
+
+#[cfg(feature = "acme")]
+impl<'a> CAARecordSet<'a> {
+    /// Wrap a slice of CAARecords for encoding into Netdoc format
+    /// TODO(#1414): This should likely be exposed as a wrapped type
+    pub fn new(caa_records: &'a [hickory_proto::rr::rdata::CAA]) -> Self {
+        Self { caa_records }
+    }
+}
+
+#[cfg(feature = "acme")]
+impl<'a> NetdocBuilder for CAARecordSet<'a> {
+    fn build_sign<R: RngCore + CryptoRng>(self, _: &mut R) -> Result<String, EncodeError> {
+        use HsInnerKwd::*;
+
+        let mut encoder = NetdocEncoder::new();
+
+        for caa_entry in self.caa_records {
+            encoder.item(CAA).arg(&caa_entry.to_string());
+        }
+
+        encoder
+            .finish()
+            .map_err(|e| e.into())
+            .map(|e| e.trim().to_string())
+    }
+}
+
 #[cfg(test)]
 mod test {
     // @@ begin test lint list maintained by maint/add_warning @@
@@ -270,6 +316,7 @@ mod test {
         auth_required: Option<&SmallVec<[IntroAuthType; 2]>>,
         is_single_onion_service: bool,
         intro_points: &[IntroPointDesc],
+        caa_records: &[hickory_proto::rr::rdata::CAA],
         pow_params: Option<&PowParams>,
     ) -> Result<String, EncodeError> {
         let hs_desc_sign = ed25519::Keypair::generate(&mut Config::Deterministic.into_rng());
@@ -282,6 +329,8 @@ mod test {
             intro_points,
             intro_auth_key_cert_expiry: UNIX_EPOCH,
             intro_enc_key_cert_expiry: UNIX_EPOCH,
+            #[cfg(feature = "acme")]
+            caa_records,
             #[cfg(feature = "hs-pow-full")]
             pow_params,
         }
@@ -290,12 +339,15 @@ mod test {
 
     #[test]
     fn inner_hsdesc_no_intro_auth() {
+        use std::str::FromStr;
+
         // A descriptor for a "single onion service"
         let hs_desc = create_inner_desc(
             &[HandshakeType::NTOR], /* create2_formats */
             None,                   /* auth_required */
             true,                   /* is_single_onion_service */
             &[],                    /* intro_points */
+            &[],
             None,
         )
         .unwrap();
@@ -308,6 +360,7 @@ mod test {
             None,                   /* auth_required */
             false,                  /* is_single_onion_service */
             &[],                    /* intro_points */
+            &[],
             None,
         )
         .unwrap();
@@ -325,6 +378,15 @@ mod test {
             create_intro_point_descriptor(&mut rng, link_specs3),
         ];
 
+        let caa = &[hickory_proto::rr::rdata::CAA::new_issue(
+            true,
+            Some(hickory_proto::rr::Name::from_str("test.acmeforonions.org").unwrap()),
+            vec![hickory_proto::rr::rdata::caa::KeyValue::new(
+                "validationmethods",
+                "onion-csr-01",
+            )],
+        )];
+
         let hs_desc = create_inner_desc(
             &[
                 HandshakeType::TAP,
@@ -334,6 +396,7 @@ mod test {
             None,   /* auth_required */
             false,  /* is_single_onion_service */
             intros, /* intro_points */
+            caa,
             None,
         )
         .unwrap();
@@ -341,6 +404,7 @@ mod test {
         assert_eq!(
             hs_desc,
             r#"create2-formats 0 2 3
+caa 128 issue "test.acmeforonions.org; validationmethods=onion-csr-01"
 introduction-point AQAGfwAAASLF
 onion-key ntor CJi8nDPhIFA7X9Q+oP7+jzxNo044cblmagk/d7oKWGc=
 auth-key
@@ -409,6 +473,7 @@ o7Ct/ZB0j8YRB5lKSd07YAjA6Zo8kMnuZYX2Mb67TxWDQ/zlYJGOwLlj7A8=
             None,                   /* auth_required */
             false,                  /* is_single_onion_service */
             intros,                 /* intro_points */
+            &[],
             None,
         )
         .unwrap_err();
@@ -430,6 +495,7 @@ o7Ct/ZB0j8YRB5lKSd07YAjA6Zo8kMnuZYX2Mb67TxWDQ/zlYJGOwLlj7A8=
             Some(&auth),            /* auth_required */
             false,                  /* is_single_onion_service */
             intros,                 /* intro_points */
+            &[],
             None,
         )
         .unwrap();

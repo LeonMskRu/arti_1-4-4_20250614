@@ -169,7 +169,7 @@ impl ItemArgument for str {
     fn write_onto(&self, out: &mut ItemEncoder<'_>) -> Result<(), Bug> {
         // Implements this
         // https://gitlab.torproject.org/tpo/core/torspec/-/merge_requests/106
-        if self.is_empty() || self.chars().any(|c| !c.is_ascii_graphic()) {
+        if self.is_empty() || self.chars().any(|c| !(c.is_ascii_graphic() || c == ' ')) {
             return Err(internal!("invalid keyword argument syntax {:?}", self));
         }
         out.args_raw_nonempty(&self);

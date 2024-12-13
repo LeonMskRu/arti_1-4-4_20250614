@@ -202,6 +202,7 @@ dependencies = [
  "arti-client",
  "arti-rpcserver",
  "async-ctrlc",
+ "base64ct",
  "cfg-if",
  "clap",
  "derive-deftly",
@@ -238,9 +239,11 @@ dependencies = [
  "tor-config",
  "tor-config-path",
  "tor-error",
+ "tor-hscrypto",
  "tor-hsrproxy",
  "tor-hsservice",
  "tor-memquota",
+ "tor-netdoc",
  "tor-rpcbase",
  "tor-rtcompat",
  "tor-rtmock",
@@ -939,6 +942,9 @@ name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bitvec"
@@ -2510,6 +2516,7 @@ dependencies = [
  "ipnet",
  "once_cell",
  "rand",
+ "serde",
  "thiserror 1.0.69",
  "tinyvec",
  "tokio",
@@ -5925,6 +5932,7 @@ name = "tor-hsservice"
 version = "0.25.0"
 dependencies = [
  "amplify",
+ "asn1-rs",
  "async-trait",
  "base64ct",
  "cfg-if",
@@ -5937,6 +5945,7 @@ dependencies = [
  "futures",
  "growable-bloom-filter",
  "hex",
+ "hickory-proto",
  "humantime",
  "itertools 0.13.0",
  "k12",
@@ -6205,6 +6214,7 @@ dependencies = [
  "educe",
  "hex",
  "hex-literal",
+ "hickory-proto",
  "humantime",
  "itertools 0.13.0",
  "once_cell",
@@ -6798,6 +6808,7 @@ dependencies = [
  "form_urlencoded",
  "idna 1.0.3",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

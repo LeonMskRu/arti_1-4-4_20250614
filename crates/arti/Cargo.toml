@@ -52,6 +52,7 @@ full = [
     "tor-rpcbase?/full",
     "tor-hsrproxy?/full",
     "tor-hsservice?/full",
+    "tor-hscrypto?/full",
     "tor-async-utils/full",
     "tor-config-path/full",
 ]
@@ -67,7 +68,8 @@ memquota = ["arti-client/memquota"]
 tokio = ["tokio-crate", "arti-client/tokio", "tor-rtcompat/tokio", "tokio-util"]
 native-tls = ["arti-client/native-tls", "tor-rtcompat/native-tls"]
 onion-service-client = ["arti-client/onion-service-client"]
-onion-service-service = ["arti-client/onion-service-service", "tor-hsrproxy", "tor-hsservice"]
+onion-service-service = ["arti-client/onion-service-service", "tor-hsrproxy", "tor-hsservice", "tor-hscrypto", "tor-netdoc"]
+onion-service-acme = ["tor-hsservice/acme", "__is_experimental"]
 vanguards = ["arti-client/vanguards"]
 hs-pow-full = ["arti-client/hs-pow-full", "__is_experimental"]
 pt-client = ["bridge-client", "arti-client/pt-client"]
@@ -103,6 +105,7 @@ experimental = [
     "hsc",
     "tor-hsservice/experimental",
     "ctor-keystore",
+    "onion-service-acme",
 ]
 rpc = ["arti-rpcserver", "tor-rpcbase", "derive-deftly", "__is_experimental"]
 
@@ -154,6 +157,8 @@ tor-config-path = { path = "../tor-config-path", version = "0.25.0" }
 tor-error = { path = "../tor-error", version = "0.25.0", default-features = false, features = ["tracing"] }
 tor-hsrproxy = { path = "../tor-hsrproxy", version = "0.25.0", optional = true }
 tor-hsservice = { path = "../tor-hsservice", version = "0.25.0", optional = true }
+tor-hscrypto = { path = "../tor-hscrypto", version = "0.25.0", optional = true }
+tor-netdoc = { path = "../tor-netdoc", version = "0.25.0", optional = true }
 tor-rpcbase = { path = "../tor-rpcbase", version = "0.25.0", optional = true }
 tor-rtcompat = { path = "../tor-rtcompat", version = "0.25.0", default-features = false }
 tor-socksproto = { path = "../tor-socksproto", version = "0.25.0" }
@@ -162,6 +167,7 @@ tracing-appender = "0.2.0"
 tracing-journald = { version = "0.3.0", optional = true }
 tracing-subscriber = { version = "0.3.0", features = ["env-filter"] }
 visibility = { version = "0.1.0", optional = true }
+base64ct = { version = "1.5.1", features = ["alloc"] }
 
 [dev-dependencies]
 arti-client = { package = "arti-client", path = "../arti-client", version = "0.25.0", default-features = false, features = [

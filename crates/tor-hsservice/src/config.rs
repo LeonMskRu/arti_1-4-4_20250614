@@ -2,13 +2,12 @@
 
 use crate::internal_prelude::*;
 
-use amplify::Getters;
-use derive_deftly::derive_deftly_adhoc;
-use tor_cell::relaycell::hs::est_intro;
-
 use crate::config::restricted_discovery::{
     RestrictedDiscoveryConfig, RestrictedDiscoveryConfigBuilder,
 };
+use amplify::Getters;
+use derive_deftly::derive_deftly_adhoc;
+use tor_cell::relaycell::hs::est_intro;
 
 #[cfg(feature = "restricted-discovery")]
 pub mod restricted_discovery;
@@ -95,6 +94,10 @@ pub struct OnionServiceConfig {
     // /// our proof-of-work defense is enabled.
     // pow_queue_rate: TokenBucketConfig,
     // ...
+    /// CAA records to publish for the onion service
+    #[builder(default)]
+    #[deftly(publisher_view)]
+    pub(crate) caa_records: Vec<hickory_proto::rr::rdata::CAA>,
 }
 
 derive_deftly_adhoc! {
@@ -229,6 +232,8 @@ impl OnionServiceConfig {
 
             // TODO POW: Verify that simply_update has correct behaviour here.
             enable_pow: simply_update,
+
+            caa_records: simply_update,
         }
 
         Ok(other)

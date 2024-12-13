@@ -1,10 +1,12 @@
 //! Configure and implement onion service reverse-proxy feature.
 
+#[cfg(feature = "rpc")]
+use {derive_deftly::Deftly, tor_rpcbase::templates::*};
+
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::{Arc, Mutex},
 };
-
 use arti_client::config::onion_service::{OnionServiceConfig, OnionServiceConfigBuilder};
 use futures::{task::SpawnExt, StreamExt as _};
 use tor_config::{
@@ -13,7 +15,7 @@ use tor_config::{
 };
 use tor_error::warn_report;
 use tor_hsrproxy::{config::ProxyConfigBuilder, OnionServiceReverseProxy, ProxyConfig};
-use tor_hsservice::{HsNickname, RunningOnionService};
+use tor_hsservice::{HsId, HsNickname, RunningOnionService};
 use tor_rtcompat::Runtime;
 use tracing::debug;
 
@@ -164,15 +166,30 @@ impl From<OnionServiceProxyConfigMapBuilder> for ProxyBuilderMap {
 /// This is what a user configures when they add an onion service to their
 /// configuration.
 #[must_use = "a hidden service Proxy object will terminate the service when dropped"]
-struct Proxy {
+#[derive(Clone)]
+#[cfg_attr(
+    feature = "rpc",
+    derive(Deftly),
+    derive_deftly(Object),
+    deftly(rpc(expose_outside_of_session))
+)]
+pub(crate) struct Proxy {
     /// The onion service.
     ///
     /// This is launched and running.
-    svc: Arc<RunningOnionService>,
+    pub(crate) svc: Arc<RunningOnionService>,
     /// The reverse proxy that accepts connections from the onion service.
     ///
     /// This is also launched and running.
     proxy: Arc<OnionServiceReverseProxy>,
+}
+
+impl std::fmt::Debug for Proxy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Proxy")
+            .field("proxy", &self.proxy)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Proxy {
@@ -225,7 +242,7 @@ impl Proxy {
     /// Reconfigure this proxy, using the new configuration `config` and the
     /// rules in `how`.
     fn reconfigure(
-        &mut self,
+        &self,
         config: OnionServiceProxyConfig,
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
@@ -238,7 +255,7 @@ impl Proxy {
 
     /// Helper for reconfigure: Run `reconfigure` on each part of this `Proxy`.
     fn reconfigure_inner(
-        &mut self,
+        &self,
         config: OnionServiceProxyConfig,
         how: Reconfigure,
     ) -> Result<(), ReconfigureError> {
@@ -257,7 +274,7 @@ pub(crate) struct ProxySet<R: Runtime> {
     /// The arti_client that we use to launch proxies.
     client: arti_client::TorClient<R>,
     /// The proxies themselves, indexed by nickname.
-    proxies: Mutex<BTreeMap<HsNickname, Proxy>>,
+    proxies: Arc<Mutex<BTreeMap<HsNickname, Arc<Proxy>>>>,
 }
 
 impl<R: Runtime> ProxySet<R> {
@@ -266,14 +283,15 @@ impl<R: Runtime> ProxySet<R> {
         client: &arti_client::TorClient<R>,
         config_list: OnionServiceProxyConfigMap,
     ) -> anyhow::Result<Self> {
-        let proxies: BTreeMap<_, _> = config_list
+
+        let proxies = Arc::new(Mutex::new(config_list
             .into_iter()
-            .map(|(nickname, cfg)| Ok((nickname, Proxy::launch_new(client, cfg)?)))
-            .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+            .map(|(nickname, cfg)| Ok((nickname, Arc::new(Proxy::launch_new(client, cfg)?))))
+            .collect::<anyhow::Result<BTreeMap<_, _>>>()?));
 
         Ok(Self {
             client: client.clone(),
-            proxies: Mutex::new(proxies),
+            proxies,
         })
     }
 
@@ -300,11 +318,11 @@ impl<R: Runtime> ProxySet<R> {
             defunct_nicknames.remove(&nickname);
 
             match proxy_map.entry(nickname) {
-                Entry::Occupied(mut existing_proxy) => {
+                Entry::Occupied(existing_proxy) => {
                     // We already have a proxy by this name, so we try to
                     // reconfigure it.
                     existing_proxy
-                        .get_mut()
+                        .get()
                         .reconfigure(cfg, Reconfigure::WarnOnFailures)?;
                 }
                 Entry::Vacant(ent) => {
@@ -312,7 +330,7 @@ impl<R: Runtime> ProxySet<R> {
                     // one.
                     match Proxy::launch_new(&self.client, cfg) {
                         Ok(new_proxy) => {
-                            ent.insert(new_proxy);
+                            ent.insert(Arc::new(new_proxy));
                         }
                         Err(err) => {
                             warn_report!(err, "Unable to launch onion service {}", ent.key());
@@ -345,5 +363,29 @@ impl<R: Runtime> crate::reload_cfg::ReconfigurableModule for ProxySet<R> {
     fn reconfigure(&self, new: &crate::ArtiCombinedConfig) -> anyhow::Result<()> {
         ProxySet::reconfigure(self, new.0.onion_services.clone())?;
         Ok(())
+    }
+}
+
+/// A reference to the running onion services for use in the RPC server
+#[derive(Clone, Debug)]
+pub(crate) struct RPCProxySet {
+    /// The running onion services
+    proxies: Arc<Mutex<BTreeMap<HsNickname, Arc<Proxy>>>>,
+}
+
+impl<R: Runtime> From<&ProxySet<R>> for RPCProxySet {
+    fn from(value: &ProxySet<R>) -> Self {
+        Self {
+            proxies: value.proxies.clone()
+        }
+    }
+}
+
+impl RPCProxySet {
+    /// Find an onion service by its public key
+    pub(crate) fn get_by_hsid(&self, hsid: &HsId) -> Option<Arc<Proxy>> {
+        self.proxies.lock().expect("lock poisoned").values().find(|p| {
+            p.svc.onion_name().map(|id| &id == hsid).unwrap_or(false)
+        }).cloned()
     }
 }

@@ -57,15 +57,19 @@ experimental = [
     "experimental-api",
     "hs-pow-full",
     "restricted-discovery",
+    "acme"
 ]
 experimental-api = ["restricted-discovery", "__is_experimental"]
 
 restricted-discovery = ["__is_experimental"]
 
+acme = ["tor-netdoc/acme", "__is_experimental"]
+
 __is_experimental = []
 
 [dependencies]
 amplify = { version = "4", default-features = false, features = ["derive"] }
+asn1-rs = "0.6.2"
 async-trait = "0.1.54"
 base64ct = "1.5.1"
 cfg-if = "1.0.0"
@@ -78,6 +82,7 @@ fs-mistrust = { path = "../fs-mistrust", version = "0.8.2", features = ["serde"]
 futures = "0.3.14"
 growable-bloom-filter = "2.0.1"
 hex = "0.4"
+hickory-proto = { version = "0.24.1", features = ["text-parsing", "serde-config"] }
 humantime = "2"
 itertools = "0.13.0"
 k12 = "0.3.0"

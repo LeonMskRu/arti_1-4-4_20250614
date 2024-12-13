@@ -41,6 +41,10 @@ pub(super) struct HsDescMiddle {
     ///
     /// Each of these is parsed from a `auth-client` line.
     auth_clients: Vec<AuthClient>,
+    /// Are there CAA records in the inner document?
+    #[cfg(feature = "acme")]
+    #[allow(unused)]
+    caa_critical: bool,
     /// The (encrypted) inner document of the onion service descriptor.
     encrypted: Vec<u8>,
 }
@@ -166,11 +170,23 @@ impl AuthClient {
     }
 }
 
+#[cfg(not(feature = "acme"))]
 decl_keyword! {
     pub(crate) HsMiddleKwd {
         "desc-auth-type" => DESC_AUTH_TYPE,
         "desc-auth-ephemeral-key" => DESC_AUTH_EPHEMERAL_KEY,
         "auth-client" => AUTH_CLIENT,
+        "encrypted" => ENCRYPTED,
+    }
+}
+
+#[cfg(feature = "acme")]
+decl_keyword! {
+    pub(crate) HsMiddleKwd {
+        "desc-auth-type" => DESC_AUTH_TYPE,
+        "desc-auth-ephemeral-key" => DESC_AUTH_EPHEMERAL_KEY,
+        "auth-client" => AUTH_CLIENT,
+        "caa-critical" => CAA_CRITICAL,
         "encrypted" => ENCRYPTED,
     }
 }
@@ -184,6 +200,8 @@ static HS_MIDDLE_RULES: Lazy<SectionRules<HsMiddleKwd>> = Lazy::new(|| {
     rules.add(DESC_AUTH_TYPE.rule().required().args(1..));
     rules.add(DESC_AUTH_EPHEMERAL_KEY.rule().required().args(1..));
     rules.add(AUTH_CLIENT.rule().required().may_repeat().args(3..));
+    #[cfg(feature = "acme")]
+    rules.add(CAA_CRITICAL.rule().no_args());
     rules.add(ENCRYPTED.rule().required().obj_required());
     rules.add(UNRECOGNIZED.rule().may_repeat().obj_optional());
 
@@ -233,6 +251,9 @@ impl HsDescMiddle {
             .map(AuthClient::from_item)
             .collect::<Result<Vec<_>>>()?;
 
+        #[cfg(feature = "acme")]
+        let caa_critical = body.get(CAA_CRITICAL).is_some();
+
         // The encrypted body is taken verbatim.
         let encrypted_body: Vec<u8> = body.required(ENCRYPTED)?.obj("MESSAGE")?;
 
@@ -240,6 +261,8 @@ impl HsDescMiddle {
             svc_desc_enc_key: ephemeral_key,
             auth_clients,
             encrypted: encrypted_body,
+            #[cfg(feature = "acme")]
+            caa_critical,
         })
     }
 }

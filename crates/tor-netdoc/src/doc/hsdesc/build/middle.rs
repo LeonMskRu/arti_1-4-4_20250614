@@ -30,6 +30,9 @@ pub(super) struct HsDescMiddle<'a> {
     pub(super) client_auth: Option<&'a ClientAuth<'a>>,
     /// The "subcredential" of the onion service.
     pub(super) subcredential: Subcredential,
+    /// CAA records exist in the inner document
+    #[cfg(feature = "acme")]
+    pub(super) caa_critical: bool,
     /// The (encrypted) inner document of the onion service descriptor.
     ///
     /// The `encrypted` field is created by encrypting a
@@ -48,6 +51,8 @@ impl<'a> NetdocBuilder for HsDescMiddle<'a> {
         let HsDescMiddle {
             client_auth,
             subcredential,
+            #[cfg(feature = "acme")]
+            caa_critical,
             encrypted,
         } = self;
 
@@ -120,6 +125,11 @@ impl<'a> NetdocBuilder for HsDescMiddle<'a> {
                 .arg(&Base64::encode_string(&auth_client.encrypted_cookie));
         }
 
+        #[cfg(feature = "acme")]
+        if caa_critical {
+            encoder.item(CAA_CRITICAL);
+        }
+
         encoder.item(ENCRYPTED).object("MESSAGE", encrypted);
         encoder.finish().map_err(|e| e.into())
     }
@@ -158,6 +168,7 @@ mod test {
             client_auth: None,
             subcredential: TEST_SUBCREDENTIAL.into(),
             encrypted: TEST_ENCRYPTED_VALUE.into(),
+            caa_critical: false,
         }
         .build_sign(&mut Config::Deterministic.into_rng())
         .unwrap();
@@ -193,6 +204,7 @@ AQIDBA==
         let err = HsDescMiddle {
             client_auth: Some(&client_auth),
             subcredential: TEST_SUBCREDENTIAL.into(),
+            caa_critical: false,
             encrypted: TEST_ENCRYPTED_VALUE.into(),
         }
         .build_sign(&mut rng)
@@ -227,6 +239,7 @@ AQIDBA==
             client_auth: Some(&client_auth),
             subcredential: TEST_SUBCREDENTIAL.into(),
             encrypted: TEST_ENCRYPTED_VALUE.into(),
+            caa_critical: true,
         }
         .build_sign(&mut Config::Deterministic.into_rng())
         .unwrap();
@@ -237,6 +250,7 @@ AQIDBA==
 desc-auth-ephemeral-key 9Upi9XNWyqx3ZwHeQ5r3+Dh116k+C4yHeE9BcM68HDc=
 auth-client pxfSbhBMPw0= F+Z6EDfG7ofsQhdG2VKjNQ== fEursUD9Bj5Q9mFP8sIddA==
 auth-client DV7nt+CDOno= bRgLOvpjbo2k21IjKIJqFA== 2yVT+Lpm/WL4JAU64zlGpQ==
+caa-critical
 encrypted
 -----BEGIN MESSAGE-----
 AQIDBA==

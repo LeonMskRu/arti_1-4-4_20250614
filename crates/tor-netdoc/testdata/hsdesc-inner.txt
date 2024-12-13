@@ -1,5 +1,7 @@
 create2-formats 2
 flow-control 1-2 31
+caa 128 issue "test.acmeforonions.org; validationmethods=onion-csr-01"
+caa 128 iodef "mailto:tor@example.com"
 introduction-point BAAGkExRxiD7AhQ49zLdNJouWQeENGURYqL0IBk0pQMgw1eln3yXVWwqSIfX1dGKcQQl5S43/Y0XTeY0hBhAaowBEioBBPgBkgPFAAAAAAAAAAIg+w==
 onion-key ntor eNcVZi04zhg4x1/wogQfH3/4ReCn+hgfqvPwoYgFBzk=
 auth-key

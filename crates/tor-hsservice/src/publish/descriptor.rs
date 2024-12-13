@@ -113,8 +113,9 @@ pub(super) fn build_sign<Rng: RngCore + CryptoRng>(
         "failed to sign the descriptor signing key"
     ))?;
 
-    let desc = HsDescBuilder::default()
-        .blinded_id(&(&blind_id_kp).into())
+    let blinded_id = (&blind_id_kp).into();
+    let mut desc_builder = HsDescBuilder::default()
+        .blinded_id(&blinded_id)
         .hs_desc_sign(hs_desc_sign.as_ref())
         .hs_desc_sign_cert(desc_signing_key_cert)
         .create2_formats(CREATE2_FORMATS)
@@ -126,7 +127,14 @@ pub(super) fn build_sign<Rng: RngCore + CryptoRng>(
         .lifetime(((ipt_set.lifetime.as_secs() / 60) as u16).into())
         .revision_counter(revision_counter)
         .subcredential(subcredential)
-        .auth_clients(auth_clients.as_deref())
+        .auth_clients(auth_clients.as_deref());
+
+    #[cfg(feature = "acme")]
+    {
+        desc_builder = desc_builder.caa_records(&config.caa_records);
+    }
+
+    let desc = desc_builder
         .build_sign(rng)
         .map_err(|e| into_internal!("failed to build descriptor")(e))?;
 

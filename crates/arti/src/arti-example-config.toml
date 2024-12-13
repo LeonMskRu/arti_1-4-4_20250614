@@ -547,6 +547,17 @@
 #    alice = "descriptor:x25519:PU63REQUH4PP464E2Y7AVQ35HBB5DXDH5XEUVUNP3KCPNOXZGIBA"
 #    bob = "descriptor:x25519:B5ZQGTPERMMUDA6VC63LHJUF5IHPOKJMUK26LY2XKSF7VG52AESQ"
 
+# Certification Authority Authorization records to publish for the onion service as per RFC 6844
+# `tag` must be one of `Issue`, `IssueWild`, `Iodef`, or `{ Unknown = "<value>" }`
+# `value` must be one of:
+# - `{ Issuer = ["<issuer name>", [{ key = "<key name>", value = "<key value>"}, ...]] }`
+# - `{ Url = "<url>" }`
+# - `{ Unknown = [<byte value>, ...] }`
+#    [[onion_services."allium-cepa".caa_records]]
+#    issuer_critical = true
+#    tag = "Issue"
+#    value = { Issuer = ["test.acmeforonions.org", [{ key = "validationmethods", value = "onion-csr-01" }]] }
+
 [vanguards]
 # The kind of vanguard to use when building onion service circuits.
 #
