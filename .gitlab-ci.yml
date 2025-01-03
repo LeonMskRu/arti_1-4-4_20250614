@@ -19,6 +19,10 @@ variables:
   # Alternatively if we decide to keep this, consider to actually start managing
   # versions in chutney and using a version tag here.
   CHUTNEY_COMMIT: b05403758dc81593256a93a10d896e68e0398fe7
+  SHADOW_REPO: "https://github.com/shadow/shadow.git"
+  SHADOW_BRANCH: "main"
+  # 2024-12-05
+  SHADOW_COMMIT: 7541367944284c4bf7ee3f9d1c843941d46660ce
 
 default:
   image:
@@ -80,14 +84,22 @@ python3-checks:
   allow_failure: true
   script:
     - maint/common/apt-install python3-pip python3-venv git
+    - python3 -m venv lint
+    - source lint/bin/activate
     # AFAICT these python packages do not have debian packages.
-    #
     # (`black` does have a debian package, but we need the latest version.)
-    - |
-      python3 -m venv lint
-      source lint/bin/activate
-      pip3 install marko tomli_w types-toml types-PyYAML types-beautifulsoup4 types-requests black flake8 mypy
-      ./maint/python-lints
+    - pip3 install
+        marko
+        tomli_w
+        types-toml
+        types-PyYAML
+        types-beautifulsoup4
+        types-requests
+        black
+        flake8
+        mypy
+        git+${SHADOW_REPO}@${SHADOW_COMMIT}#subdirectory=shadowtools
+    - ./maint/python-lints
 
 maint-checks:
   stage: check
@@ -475,22 +487,18 @@ build-repro-macos:
 # We use shadow in multiple tests. Build it here once.
 build-shadow:
   stage: build
-  variables:
-    JOB_SHADOW_REPO: "https://github.com/shadow/shadow.git"
-    JOB_SHADOW_BRANCH: "main"
-    # This commit has not-yet-released support for running scripts directly and
-    # for improved logging in the CI.
-    JOB_SHADOW_COMMIT: "4a1d8ac8d83266be2afa1f0c34fdc8a486688031"
   artifacts:
     paths:
       - opt/shadow
+      - wheels
     # Intended for consumption later in the pipeline; no need to keep them
     # around for longer.
     expire_in: 1 day
   cache:
-    - key: $CI_JOB_NAME-shadow-$JOB_SHADOW_COMMIT
+    - key: $CI_JOB_NAME-shadow-$SHADOW_COMMIT
       paths:
       - opt/shadow
+      - wheels
   tags:
     - amd64
   script:
@@ -502,15 +510,24 @@ build-shadow:
       else
         echo "Building shadow"
         maint/common/apt-install git
-        git clone --shallow-since=2021-08-01 -b $JOB_SHADOW_BRANCH $JOB_SHADOW_REPO ~/src/shadow
+        git clone --shallow-since=2021-08-01 -b $SHADOW_BRANCH $SHADOW_REPO ~/src/shadow
         cd ~/src/shadow
-        git checkout $JOB_SHADOW_COMMIT
+        git checkout $SHADOW_COMMIT
         export CC=gcc CXX=g++ CONTAINER=debian:12-slim BUILDTYPE=release RUSTPROFILE=minimal
         ci/container_scripts/install_deps.sh
         ci/container_scripts/install_extra_deps.sh
         export PATH="$HOME/.cargo/bin:${PATH}"
         ./setup build --jobs $(nproc) --prefix $CI_PROJECT_DIR/opt/shadow
         ./setup install
+
+        # Workaround from https://github.com/yaml/pyyaml/issues/736
+        apt-get install -y python3-pip
+        echo 'Cython < 3.0' > /tmp/constraint.txt
+        PIP_CONSTRAINT=/tmp/constraint.txt pip wheel PyYAML==5.4.1
+        pip install 'PyYAML==5.4.1'
+
+        mkdir $CI_PROJECT_DIR/wheels
+        python3 -m pip wheel --wheel-dir=$CI_PROJECT_DIR/wheels ./shadowtools
       fi
 
 integration-chutney:
@@ -569,6 +586,9 @@ integration-chutney-shadow:
     - maint/common/apt-install libglib2.0-0
     - stow -d opt -t $HOME/.local shadow
 
+    # Install shadowtools, built in build-shadow
+    - python3 -m pip install --no-index --find-links=./wheels shadowtools
+
     - tests/chutney/integration-e2e-shadow
   artifacts:
     paths:
@@ -586,7 +606,7 @@ integration-shadow:
     JOB_TGEN_COMMIT: "v1.1.2"
   stage: test
   cache:
-    - key: $CI_JOB_NAME-shadow-$JOB_SHADOW_COMMIT
+    - key: $CI_JOB_NAME-shadow-$SHADOW_COMMIT
       paths:
       - opt/shadow
     - key: $CI_JOB_NAME-tgen-$JOB_TGEN_COMMIT
