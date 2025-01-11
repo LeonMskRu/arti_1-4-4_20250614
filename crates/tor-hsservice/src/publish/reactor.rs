@@ -371,7 +371,7 @@ struct Inner {
     config: Arc<OnionServiceConfigPublisherView>,
     /// Watcher for key_dirs.
     ///
-    /// Set to `None` if the reactor is not running, or if `watch_configuration` is false.
+    /// Set to `None` if the reactor is not running.
     ///
     /// The watcher is recreated whenever the `restricted_discovery.key_dirs` change.
     file_watcher: Option<FileWatcher>,
@@ -1028,28 +1028,10 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
     /// Recreate the FileWatcher for watching the restricted discovery key_dirs.
     fn update_file_watcher(&self) {
         let mut inner = self.inner.lock().expect("poisoned lock");
-        if inner.config.restricted_discovery.watch_configuration() {
-            debug!("The restricted_discovery.key_dirs have changed, updating file watcher");
-            let mut watcher = FileWatcher::builder(self.imm.runtime.clone());
-
-            let dirs = inner.config.restricted_discovery.key_dirs().clone();
-
-            watch_dirs(&mut watcher, &dirs, &self.path_resolver);
-
-            let watcher = watcher
-                .start_watching(self.key_dirs_tx.clone())
-                .map_err(|e| {
-                    // TODO: update the publish status (see also the module-level TODO about this).
-                    error_report!(e, "Cannot set file watcher");
-                })
-                .ok();
-            inner.file_watcher = watcher;
-        } else {
-            if inner.file_watcher.is_some() {
-                debug!("removing key_dirs watcher");
-            }
-            inner.file_watcher = None;
+        if inner.file_watcher.is_some() {
+            debug!("removing key_dirs watcher");
         }
+        inner.file_watcher = None;
     }
 
     /// Read the intro points from `ipt_watcher`, and decide whether we're ready to start
