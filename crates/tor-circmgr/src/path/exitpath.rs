@@ -251,7 +251,7 @@ mod test {
         let r3 = &relays[2];
 
         if let MaybeOwnedRelay::Relay(r1) = r1 {
-            assert!(r1.low_level_details().is_suitable_as_guard());
+            assert!(r1.low_level_details().is_flagged_guard());
         }
 
         assert!(!r1.same_relay_ids(r2));
