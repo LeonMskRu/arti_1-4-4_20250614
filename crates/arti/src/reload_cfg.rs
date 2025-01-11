@@ -61,8 +61,6 @@ pub(crate) fn watch_for_config_changes<R: Runtime>(
     config: &ArtiConfig,
     modules: Vec<Weak<dyn ReconfigurableModule>>,
 ) -> anyhow::Result<()> {
-    let watch_file = config.application().watch_configuration;
-
     cfg_if::cfg_if! {
         if #[cfg(target_family = "unix")] {
             let sighup_stream = sighup_stream()?;
@@ -77,7 +75,6 @@ pub(crate) fn watch_for_config_changes<R: Runtime>(
             rt,
             sources,
             modules,
-            watch_file,
             sighup_stream,
             Some(DEBOUNCE_INTERVAL)
         ).await;
@@ -99,18 +96,10 @@ async fn run_watcher<R: Runtime>(
     runtime: R,
     sources: ConfigurationSources,
     modules: Vec<Weak<dyn ReconfigurableModule>>,
-    watch_file: bool,
     mut sighup_stream: impl Stream<Item = ()> + Unpin,
     debounce_interval: Option<Duration>,
 ) -> anyhow::Result<()> {
     let (tx, mut rx) = file_watcher::channel();
-    let mut watcher = if watch_file {
-        let mut watcher = FileWatcher::builder(runtime.clone());
-        prepare(&mut watcher, &sources)?;
-        Some(watcher.start_watching(tx.clone())?)
-    } else {
-        None
-    };
 
     debug!("Entering FS event loop");
 
@@ -122,14 +111,6 @@ async fn run_watcher<R: Runtime>(
                 };
 
                 info!("Received SIGHUP");
-
-                watcher = reload_configuration(
-                    runtime.clone(),
-                    watcher,
-                    &sources,
-                    &modules,
-                    tx.clone()
-                ).await?;
             },
             event = rx.next().fuse() => {
                 if let Some(debounce_interval) = debounce_interval {
@@ -144,14 +125,6 @@ async fn run_watcher<R: Runtime>(
                     // events: if we're disconnected, we'll notice it when we next
                     // call recv() in the outer loop.
                 }
-                debug!("Config reload event {:?}: reloading configuration.", event);
-                watcher = reload_configuration(
-                    runtime.clone(),
-                    watcher,
-                    &sources,
-                    &modules,
-                    tx.clone()
-                ).await?;
             },
         }
     }
@@ -307,7 +280,7 @@ fn reconfigure(
         module.reconfigure(&config)?;
     }
 
-    Ok(has_modules && config.0.application().watch_configuration)
+    Ok(has_modules)
 }
 
 #[cfg(test)]
@@ -394,7 +367,6 @@ mod test {
         tor_rtcompat::test_with_one_runtime!(|rt| async move {
             let temp_dir = test_temp_dir!();
             let mut config_builder =  ArtiConfigBuilder::default();
-            config_builder.application().watch_configuration(true);
 
             let cfg_file = write_config(&temp_dir, CONFIG_NAME1, &config_builder);
             let mut cfg_sources = ConfigurationSources::new_empty();
@@ -411,7 +383,6 @@ mod test {
                     runtime,
                     cfg_sources,
                     vec![Arc::downgrade(&module)],
-                    true,
                     sighup_rx,
                     None,
                 ).await.unwrap();
@@ -439,7 +410,6 @@ mod test {
         tor_rtcompat::test_with_one_runtime!(|rt| async move {
             let temp_dir = test_temp_dir!();
             let mut config_builder1 =  ArtiConfigBuilder::default();
-            config_builder1.application().watch_configuration(true);
 
             let _: PathBuf = write_config(&temp_dir, CONFIG_NAME1, &config_builder1);
             let mut cfg_sources = ConfigurationSources::new_empty();
@@ -458,7 +428,6 @@ mod test {
                     runtime,
                     cfg_sources,
                     vec![Arc::downgrade(&module)],
-                    true,
                     sighup_rx,
                     None,
                 ).await.unwrap();
@@ -472,7 +441,6 @@ mod test {
             assert_eq!(config.0, config_builder1.build().unwrap());
 
             let mut config_builder2 =  ArtiConfigBuilder::default();
-            config_builder2.application().watch_configuration(true);
             // Write another config file...
             config_builder2.system().max_files(0_u64);
             let _: PathBuf = write_config(&temp_dir, CONFIG_NAME2, &config_builder2);

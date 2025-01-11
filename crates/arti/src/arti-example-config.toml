@@ -3,21 +3,6 @@
 
 # Rules about how arti should behave as an application
 [application]
-# If true, we should watch our configuration files for changes.
-#
-# (Note that this feature may misbehave if you change symlinks in the
-# paths to the directory holding the configuration files, if you
-# remove and recreate those directories, or if those directories
-# change for some other reason.)
-#
-# **Warning**: on platforms other than Windows, Linux, and Android,
-# the files are watched using a polling watcher,
-# which introduces a perceivable delay in configuration reloading,
-# and can be very expensive for large file trees.
-# This is due to a limitation in our file watching code,
-# which we hope to lift someday.
-#watch_configuration = false
-
 # If true, we should allow other processes run by the same user to inspect this
 # process's memory.
 #
