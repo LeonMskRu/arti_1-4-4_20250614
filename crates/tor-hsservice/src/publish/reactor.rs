@@ -632,9 +632,6 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
             inner.time_periods = time_periods;
         }
 
-        // Create the initial key_dirs watcher.
-        self.update_file_watcher();
-
         loop {
             match self.run_once().await {
                 Ok(ShutdownStatus::Continue) => continue,
@@ -1025,15 +1022,6 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
         true
     }
 
-    /// Recreate the FileWatcher for watching the restricted discovery key_dirs.
-    fn update_file_watcher(&self) {
-        let mut inner = self.inner.lock().expect("poisoned lock");
-        if inner.file_watcher.is_some() {
-            debug!("removing key_dirs watcher");
-        }
-        inner.file_watcher = None;
-    }
-
     /// Read the intro points from `ipt_watcher`, and decide whether we're ready to start
     /// uploading.
     fn note_ipt_change(&self) -> PublishStatus {
@@ -1143,7 +1131,6 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
     ) -> Result<(), FatalError> {
         let new_config = Arc::new(config.into());
         if self.replace_config_if_changed(Arc::clone(&new_config)) {
-            self.update_file_watcher();
             self.update_authorized_clients_if_changed().await?;
 
             info!(nickname=%self.imm.nickname, "Config has changed, generating a new descriptor");
@@ -1171,9 +1158,6 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
             }
             _ => return Err(internal!("file watcher event {event:?}").into()),
         };
-
-        // Update the file watcher, in case the change was triggered by a key_dir move.
-        self.update_file_watcher();
 
         if self.update_authorized_clients_if_changed().await? {
             self.mark_all_dirty();
