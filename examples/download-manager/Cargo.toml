@@ -7,6 +7,9 @@ description = "Download the Tor Browser using multiple tor connections."
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 publish = false
 
+[lints]
+    workspace = true
+
 [dependencies]
 anyhow = { version = "1.0.95" }
 arti-client = { path = "../../crates/arti-client" }
