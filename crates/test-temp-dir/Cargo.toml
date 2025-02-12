@@ -12,6 +12,9 @@ keywords = ["testing", "fs", "filesystem", "temporary", "temp"]
 categories = ["development-tools::testing"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = []
 full = []

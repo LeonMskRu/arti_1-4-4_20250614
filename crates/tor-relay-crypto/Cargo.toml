@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "cryptography"]
 categories = ["cryptography"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = []
 full = [

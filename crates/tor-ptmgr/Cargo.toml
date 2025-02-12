@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "censorship"]
 categories = ["network-programming", "cryptography"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = ["managed-pts", "tor-channel-factory"]
 tor-channel-factory = []

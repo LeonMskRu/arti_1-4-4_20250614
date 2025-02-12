@@ -15,6 +15,9 @@ repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 # earlier versions of it were published by accident.
 publish = false
 
+[lints]
+    workspace = true
+
 [dependencies]
 anyhow = "1.0.23"
 arti = { path = "../arti", version = "1.4.0" }

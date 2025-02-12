@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "encoding"]
 categories = ["parsing", "encoding"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 bytes = "1"
 derive-deftly = { version = "~1.0.0", features = ["full", "beta"] }

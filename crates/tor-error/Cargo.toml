@@ -11,6 +11,9 @@ keywords = ["tor", "arti"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 categories = ["rust-patterns"]
 
+[lints]
+    workspace = true
+
 [features]
 default = ["backtrace", "futures"]
 full = ["backtrace", "futures", "tracing", "retry-error/full"]

@@ -15,6 +15,9 @@ repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 # See https://gitlab.torproject.org/tpo/core/arti/-/issues/1864.
 publish = true
 
+[lints]
+    workspace = true
+
 [dependencies]
 
 [features]

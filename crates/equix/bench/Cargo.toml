@@ -4,6 +4,10 @@ version = "0.0.0"
 publish = false
 edition = "2021"
 
+[lints]
+    workspace = true
+
+
 [[bench]]
 name = "equix_bench"
 harness = false

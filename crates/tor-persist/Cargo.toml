@@ -11,6 +11,9 @@ keywords = ["tor", "arti"]
 categories = ["config"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 # Enable the state_dir module
 state-dir = ["__is_experimental", "amplify", "fslock-guard"]

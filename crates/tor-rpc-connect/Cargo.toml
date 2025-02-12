@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "rpc"]
 categories = ["asynchronous"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 full = [
     "rpc-client",
