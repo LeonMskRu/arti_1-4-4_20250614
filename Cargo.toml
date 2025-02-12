@@ -125,3 +125,52 @@ incremental = true
 # Inherits release build settings, but adds full debug symbols.
 debug = 2
 strip = "none"
+
+
+#![allow(renamed_and_removed_lints)] // @@REMOVE_WHEN(ci_arti_stable)
+#![allow(unknown_lints)] // @@REMOVE_WHEN(ci_arti_nightly)
+
+# Setting workspace default warnings
+# IMPORTANT this list applies only to the main code, the lints in [./maint/add_warning] still applies to test code
+# NOTE the `renamed_and_removed_lints` and `unknown_lints` should be in the pipeline code (se issue)
+[workspace.lints.rust]
+    missing_docs = { level = "warn" }
+    noop_method_call = { level = "warn" }
+    unreachable_pub = { level = "warn" }
+
+[workspace.lints.clippy]
+    all = { level = "warn" }
+    await_holding_lock = { level = "deny" }
+    cargo_common_metadata = { level = "deny" }
+    cast_lossless = { level = "deny" }
+    checked_conversions = { level = "deny" }
+    cognitive_complexity = { level = "warn" }
+    debug_assert_with_mut_call = { level = "deny" }
+    exhaustive_enums = { level = "deny" }
+    exhaustive_struCts = { level = "deny" }
+    expl_impl_clone_on_copy = { level = "deny" }
+    fallible_impl_from = { level = "deny" }
+    implicit_clone = { level = "deny" }
+    large_stack_arrays = { level = "deny" }
+    manual_ok_or = { level = "warn" }
+    missing_docs_in_private_items = { level = "deny" }
+    needless_borrow = { level = "warn" }
+    needless_pass_by_value = { level = "warn" }
+    option_option = { level = "warn" }
+    print_stderr = { level = "deny" }
+    print_stdout = { level = "deny" }
+    rc_buffer = { level = "warn" }
+    ref_option_ref = { level = "deny" }
+    semicolon_if_nothing_returned = { level = "warn" }
+    trait_duplication_in_bounds = { level = "warn" }
+    unchecked_duration_subtraction = { level = "deny" }
+    unnecessary_wraps = { level = "deny" }
+    unseparated_literal_suffix = { level = "warn" }
+    unwrap_used = { level = "deny" }
+    mod_module_files = { level = "deny" }
+    let_unit_value = { level = "allow" } # This can reasonably be done for explicitness
+    uninlined_format_args = { level = "allow" }
+    significant_drop_in_scrutinee = { level = "allow" } # arti/-/merge_requests/588/#note_2812945
+    result_large_err = { level = "allow" } # temporary workaround for arti#587
+    needless_raw_string_hashes = { level = "allow" } # complained-about code is fine, often best
+    needless_lifetimes = { level = "allow" } # See arti#1765
