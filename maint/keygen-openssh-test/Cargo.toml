@@ -9,6 +9,9 @@ license = "MIT OR Apache-2.0"
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Tool used by arti to generate OpenSSH keys for testing"
 
+[lints]
+    workspace = true
+
 [dependencies]
 base32 = "0.5"
 clap = { version = "4.3.24", features = ["derive"] }
