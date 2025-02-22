@@ -15,48 +15,8 @@ import subprocess
 # a future version of the compiler might refuse to build our code
 # entirely.
 
-WANT_LINTS = """
-#![allow(renamed_and_removed_lints)] // @@REMOVE_WHEN(ci_arti_stable)
-#![allow(unknown_lints)] // @@REMOVE_WHEN(ci_arti_nightly)
-#![warn(missing_docs)]
-#![warn(noop_method_call)]
-#![warn(unreachable_pub)]
-#![warn(clippy::all)]
-#![deny(clippy::await_holding_lock)]
-#![deny(clippy::cargo_common_metadata)]
-#![deny(clippy::cast_lossless)]
-#![deny(clippy::checked_conversions)]
-#![warn(clippy::cognitive_complexity)]
-#![deny(clippy::debug_assert_with_mut_call)]
-#![deny(clippy::exhaustive_enums)]
-#![deny(clippy::exhaustive_structs)]
-#![deny(clippy::expl_impl_clone_on_copy)]
-#![deny(clippy::fallible_impl_from)]
-#![deny(clippy::implicit_clone)]
-#![deny(clippy::large_stack_arrays)]
-#![warn(clippy::manual_ok_or)]
-#![deny(clippy::missing_docs_in_private_items)]
-#![warn(clippy::needless_borrow)]
-#![warn(clippy::needless_pass_by_value)]
-#![warn(clippy::option_option)]
-#![deny(clippy::print_stderr)]
-#![deny(clippy::print_stdout)]
-#![warn(clippy::rc_buffer)]
-#![deny(clippy::ref_option_ref)]
-#![warn(clippy::semicolon_if_nothing_returned)]
-#![warn(clippy::trait_duplication_in_bounds)]
-#![deny(clippy::unchecked_duration_subtraction)]
-#![deny(clippy::unnecessary_wraps)]
-#![warn(clippy::unseparated_literal_suffix)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::mod_module_files)]
-#![allow(clippy::let_unit_value)] // This can reasonably be done for explicitness
-#![allow(clippy::uninlined_format_args)]
-#![allow(clippy::significant_drop_in_scrutinee)] // arti/-/merge_requests/588/#note_2812945
-#![allow(clippy::result_large_err)] // temporary workaround for arti#587
-#![allow(clippy::needless_raw_string_hashes)] // complained-about code is fine, often best
-#![allow(clippy::needless_lifetimes)] // See arti#1765
-"""
+## MOVED TO ../Cargo.toml
+WANT_LINTS = """"""
 
 # ---------- list of lints to apply or disapply *in tests* ----------
 
@@ -85,32 +45,12 @@ EXAMPLE_LINTS = (
 
 
 # ---------- some notes about lints we might use - NOT USED by any code here ----------
-
-SOON = """
-"""
-
-WISH_WE_COULD = """
-#![warn(unused_crate_dependencies)]
-"""
-
-DECIDED_NOT = """
-#![deny(clippy::redundant_pub_crate)]
-#![deny(clippy::future_not_send)]
-#![deny(clippy::redundant_closure_for_method_calls)]
-#![deny(clippy::panic)]
-#![deny(clippy::if_then_some_else_none)]
-#![deny(clippy::expect_used)]
-#![deny(clippy::option_if_let_else)]
-#![deny(missing_debug_implementations)]
-#![deny(clippy::pub_enum_variant_names)]
-"""
-
+## MOVED TO ../Cargo.toml
 # ---------- code for autoprocessing Rust source files ----------
 
 PAT = re.compile(r"^ *#!\[(?:cfg_attr\(.*)?(allow|deny|warn)")
 
 LINT_LISTS = {
-    "lint": WANT_LINTS,
     "test lint": TEST_LINTS,
     "example lint": EXAMPLE_LINTS,
 }

@@ -138,6 +138,11 @@ strip = "none"
     noop_method_call = { level = "warn" }
     unreachable_pub = { level = "warn" }
 
+# Wish we could
+#  unused_crate_dependencies = { level: "warn" }
+# Decided not:
+#   missing_debug_implementations = { level: "deny" }
+
 [workspace.lints.clippy]
     all = { level = "warn" }
     await_holding_lock = { level = "deny" }
@@ -174,3 +179,14 @@ strip = "none"
     result_large_err = { level = "allow" } # temporary workaround for arti#587
     needless_raw_string_hashes = { level = "allow" } # complained-about code is fine, often best
     needless_lifetimes = { level = "allow" } # See arti#1765
+# Decided not: 
+# redundant_pub_crate= { level = "deny" }
+# future_not_send= { level = "deny" }
+# redundant_closure_for_method_calls= { level = "deny" }
+# panic= { level = "deny" }
+# if_then_some_else_none= { level = "deny" }
+# expect_used= { level = "deny" }
+# option_if_let_else= { level = "deny" }
+# pub_enum_variant_names= { level = "deny" }
+
+
