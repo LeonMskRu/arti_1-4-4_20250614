@@ -1,5 +1,4 @@
 // @@ begin example lint list maintained by maint/add_warning @@
-#![allow(unknown_lints)] // @@REMOVE_WHEN(ci_arti_nightly)
 #![allow(clippy::bool_assert_comparison)]
 #![allow(clippy::clone_on_copy)]
 #![allow(clippy::dbg_macro)]
