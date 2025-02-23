@@ -36,13 +36,7 @@ TEST_LINTS = """
 
 # ---------- list of lints to apply or disapply *in examples* ----------
 
-EXAMPLE_LINTS = (
-    """
-#![allow(unknown_lints)] // @@REMOVE_WHEN(ci_arti_nightly)
-"""
-    + TEST_LINTS.strip()
-)
-
+EXAMPLE_LINTS = TEST_LINTS.strip()
 
 # ---------- some notes about lints we might use - NOT USED by any code here ----------
 ## MOVED TO ../Cargo.toml
@@ -176,10 +170,12 @@ def main(lints, files):
         files = files.decode("utf-8").rstrip("\n").split("\n")
         always_insist = False
 
-    if opts.ci_nightly:
-        strip_lints_containing("@@REMOVE_WHEN(ci_arti_nightly)")
-    if opts.ci_stable:
-        strip_lints_containing("@@REMOVE_WHEN(ci_arti_stable)")
+    ## check moved to RUSTFLAGS in ../.gitlab-ci.yml
+    # legacy:
+    #if opts.ci_nightly:
+    #    strip_lints_containing("@@REMOVE_WHEN(ci_arti_nightly)")
+    #if opts.ci_stable:
+    #    strip_lints_containing("@@REMOVE_WHEN(ci_arti_stable)")
 
     for fn in files:
         process(lints, fn, always_insist)
@@ -199,8 +195,9 @@ def main(lints, files):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("standardise Rust lint blocks")
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--ci-nightly", action="store_true")
-    parser.add_argument("--ci-stable", action="store_true")
+    # options moved to RUSTFLAGS in ../.gitlab-ci.yml
+    #parser.add_argument("--ci-nightly", action="store_true")
+    #parser.add_argument("--ci-stable", action="store_true")
     parser.add_argument("file", nargs="*")
     opts = parser.parse_args()
 
