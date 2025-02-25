@@ -126,10 +126,6 @@ incremental = true
 debug = 2
 strip = "none"
 
-
-#![allow(renamed_and_removed_lints)] // @@REMOVE_WHEN(ci_arti_stable)
-#![allow(unknown_lints)] // @@REMOVE_WHEN(ci_arti_nightly)
-
 # Setting workspace default warnings
 # IMPORTANT this list applies only to the main code, the lints in [./maint/add_warning] still applies to test code
 # NOTE the `renamed_and_removed_lints` and `unknown_lints` should be in the pipeline code (se issue)
@@ -137,7 +133,10 @@ strip = "none"
 #  unused_crate_dependencies = { level: "warn" }
 # Decided not:
 #   missing_debug_implementations = { level: "deny" }
-
+#
+# the following lints are applied / turned off in CI 
+# renamed_and_removed_lints -D (stable) / -A (nightly)
+# unknown_lints -A (stable) / -D (nightly)
 [workspace.lints.rust]
     missing_docs = { level = "warn" }
     noop_method_call = { level = "warn" }
