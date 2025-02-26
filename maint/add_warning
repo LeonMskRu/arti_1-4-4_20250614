@@ -57,6 +57,10 @@ START_LINE = re.compile(r"^(\s*)// @@ begin (.*) list")
 # It does end up in the output HTML from Rustdoc, but it is harmless there.
 END_LINE = re.compile(r"^\s*//! <!-- @@ end (.*) list")
 
+# Lints Cargo.toml entry
+WORKSPACE_LINTS = re.compile(r"\[lints\]\n\s{4}workspace = true")
+
+
 opts = None
 deferred_errors = []
 
@@ -67,14 +71,15 @@ class ImproperFile(Exception):
         self.message = message
 
 
-def strip_lints_containing(s):
-    """Remove every lint containing 's'."""
-
-    def rmv_lints(inp, s):
-        return "\n".join(line for line in inp.split("\n") if s not in line)
-
-    global LINT_LISTS
-    LINT_LISTS = dict((k, rmv_lints(v, s)) for (k, v) in LINT_LISTS.items())
+# legacy
+# def strip_lints_containing(s):
+#    """Remove every lint containing 's'."""
+#
+#    def rmv_lints(inp, s):
+#        return "\n".join(line for line in inp.split("\n") if s not in line)
+#
+#    global LINT_LISTS
+#    LINT_LISTS = dict((k, rmv_lints(v, s)) for (k, v) in LINT_LISTS.items())
 
 
 def filter_file(lints, inp, outp, insist):
@@ -156,6 +161,19 @@ def process(lints, fn, always_insist):
     else:
         shutil.move(tmp_name, fn)
 
+def verify_tomls():
+    # mindepth 2 to not include the top level Cargo.toml file
+    subcrate_cargo_tomls = subprocess.run(["find", ".", "-mindepth", "2", "-name", "Cargo.toml"], stdout = subprocess.PIPE, check = True).stdout
+    subcrate_cargo_tomls = subcrate_cargo_tomls.decode("utf-8").rstrip("\n").split("\n")
+    for toml in subcrate_cargo_tomls:
+        toml_contents = open(toml, "r").read()
+        if WORKSPACE_LINTS.search(toml_contents):
+            continue
+        else:
+            deferred_errors.append(toml)
+
+
+
 
 def main(lints, files):
     if not os.path.exists("./crates/tor-proto/src/lib.rs"):
@@ -176,6 +194,8 @@ def main(lints, files):
     #    strip_lints_containing("@@REMOVE_WHEN(ci_arti_nightly)")
     #if opts.ci_stable:
     #    strip_lints_containing("@@REMOVE_WHEN(ci_arti_stable)")
+    if opts.check:
+        verify_tomls()
 
     for fn in files:
         process(lints, fn, always_insist)
