@@ -161,9 +161,14 @@ def process(lints, fn, always_insist):
     else:
         shutil.move(tmp_name, fn)
 
+
 def verify_tomls():
     # mindepth 2 to not include the top level Cargo.toml file
-    subcrate_cargo_tomls = subprocess.run(["find", ".", "-mindepth", "2", "-name", "Cargo.toml"], stdout = subprocess.PIPE, check = True).stdout
+    subcrate_cargo_tomls = subprocess.run(
+        ["find", ".", "-mindepth", "2", "-name", "Cargo.toml"],
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout
     subcrate_cargo_tomls = subcrate_cargo_tomls.decode("utf-8").rstrip("\n").split("\n")
     for toml in subcrate_cargo_tomls:
         toml_contents = open(toml, "r").read()
@@ -171,8 +176,6 @@ def verify_tomls():
             continue
         else:
             deferred_errors.append(toml)
-
-
 
 
 def main(lints, files):
@@ -190,9 +193,9 @@ def main(lints, files):
 
     ## check moved to RUSTFLAGS in ../.gitlab-ci.yml
     # legacy:
-    #if opts.ci_nightly:
+    # if opts.ci_nightly:
     #    strip_lints_containing("@@REMOVE_WHEN(ci_arti_nightly)")
-    #if opts.ci_stable:
+    # if opts.ci_stable:
     #    strip_lints_containing("@@REMOVE_WHEN(ci_arti_stable)")
     if opts.check:
         verify_tomls()
@@ -216,8 +219,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("standardise Rust lint blocks")
     parser.add_argument("--check", action="store_true")
     # options moved to RUSTFLAGS in ../.gitlab-ci.yml
-    #parser.add_argument("--ci-nightly", action="store_true")
-    #parser.add_argument("--ci-stable", action="store_true")
+    # parser.add_argument("--ci-nightly", action="store_true")
+    # parser.add_argument("--ci-stable", action="store_true")
     parser.add_argument("file", nargs="*")
     opts = parser.parse_args()
 
