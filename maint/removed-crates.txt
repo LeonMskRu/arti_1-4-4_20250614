@@ -1,0 +1,7 @@
+# Crates that have been removed from the arti repository,
+# but have been published at least once.
+# One crate per line.
+# Lines beginning with '#' are comments.
+# No other parsing should be used.
+arti-hyper
+arti-tor-client
