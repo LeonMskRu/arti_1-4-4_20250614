@@ -112,7 +112,7 @@ def test_crate(crate):
 
 
 def main():
-    for crate in list_crates.list_crates():
+    for crate in list_crates.list_workspace_crates():
         test_crate(crate)
 
 
