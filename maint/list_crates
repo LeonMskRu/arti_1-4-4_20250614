@@ -46,7 +46,7 @@ def print_crates(args: argparse.Namespace) -> None:
         show = (
             args.package == c.name
             if args.package is not None
-            else args.all or c.publish
+            else args.include_unpublished or c.publish
         )
         if not show:
             continue
@@ -67,7 +67,9 @@ if __name__ == "__main__":
         description="list crates (by default, only the ones to publish)",
     )
     parser.add_argument(
-        "--all", action="store_true", help="list even unpublished crates"
+        "--include-unpublished",
+        action="store_true",
+        help="list even `publish = false` crates",
     )
     parser.add_argument("--version", action="store_true", help="print versions")
     parser.add_argument(
