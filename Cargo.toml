@@ -162,7 +162,7 @@ checked_conversions = { level = "deny" }
 cognitive_complexity = { level = "warn" }
 debug_assert_with_mut_call = { level = "deny" }
 exhaustive_enums = { level = "deny" }
-exhaustive_struCts = { level = "deny" }
+exhaustive_structs = { level = "deny" }
 expl_impl_clone_on_copy = { level = "deny" }
 fallible_impl_from = { level = "deny" }
 implicit_clone = { level = "deny" }
