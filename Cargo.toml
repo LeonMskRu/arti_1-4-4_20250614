@@ -154,7 +154,8 @@ unreachable_pub = { level = "warn" }
 # expect_used= { level = "deny" }
 # option_if_let_else= { level = "deny" }
 # pub_enum_variant_names= { level = "deny" }
-all = { level = "warn" }
+# group priority set to -1 to allow individual lints to override the group setting
+all = { level = "warn", priority = -1 }
 await_holding_lock = { level = "deny" }
 cargo_common_metadata = { level = "deny" }
 cast_lossless = { level = "deny" }
