@@ -105,6 +105,7 @@ maint-checks:
 
 maint-check-changelog:
   stage: test
+  needs: []
   script:
     - maint/common/apt-install python3-mistune git
     - git fetch --unshallow $ORIGIN
@@ -112,6 +113,7 @@ maint-check-changelog:
 
 maint-check-ownership:
   stage: test
+  needs: []
   allow_failure: true
   script:
     - maint/common/apt-install python3-toml curl jq
@@ -125,6 +127,7 @@ maint-check-ownership:
 
 maint-check-cbindgen:
   stage: test
+  needs: []
   # cbindgen needs nightly rust to do macro expansion
   image: rustlang/rust:nightly
   script:
@@ -154,6 +157,7 @@ blocking-todos:
 rust-checks:
   # This is too slow (and the cacheing of the "cargo build" too flaky) to be a "check"
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -176,6 +180,7 @@ cargo-audit:
   # Run it last, separately, so if we think we may want to merge anyway,
   # all the other tests will have been run.
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -215,6 +220,7 @@ cargo-audit:
 
 rust-recent:
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - *rust-recent-script
@@ -226,6 +232,7 @@ rust-recent:
 
 rust-latest:
   stage: test
+  needs: []
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   image: amd64/rust:bookworm
   rules:
@@ -257,6 +264,7 @@ rust-latest:
 
 rust-recent-arti-extra-features:
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - *rust-recent-arti-extra-features-script
@@ -271,6 +279,7 @@ rust-recent-arti-extra-features:
 
 rust-latest-arti-extra-features:
   stage: test
+  needs: []
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   image: amd64/rust:bookworm
   rules:
@@ -280,6 +289,7 @@ rust-latest-arti-extra-features:
 
 rust-recent-async-std-rustls:
   stage: build
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -288,6 +298,7 @@ rust-recent-async-std-rustls:
 
 rust-clippy-nontest:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -297,6 +308,7 @@ rust-clippy-nontest:
 
 rust-nightly:
   stage: test
+  needs: []
   image: rustlang/rust:nightly
   # In case there is a bug in rust:nightly, you can instead pin an older
   # version of the Docker image until that bug is fixed.  To find the
@@ -319,6 +331,7 @@ rust-nightly:
 
 deb-source:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - git clean -xdff
@@ -334,6 +347,7 @@ deb-source:
 
 deb-binary-amd64:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - apt-get update && apt-get build-dep -y .
@@ -354,6 +368,7 @@ deb-binary-amd64:
 # by the developers of ed25519-dalek (https://github.com/dalek-cryptography/ed25519-dalek/issues/228).
 .deb-binary-cross-template:
   stage: test
+  needs: []
   variables:
     # To be overridden in template instantiations
     CROSS_ARCH: UNDEFINED--BUG-IN-CI-YAML
@@ -381,6 +396,7 @@ deb-binary-arm64:
 
 cargo-miri:
   stage: test
+  needs: []
   # for local testing,
   #   rustup toolchain add nightly-2024-10-08
   #   rustup component add --toolchain nightly-2024-10-08 miri
@@ -401,6 +417,7 @@ coverage:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - maint/common/apt-install python3-pip python3-setuptools python3-bs4 python3-lxml
@@ -423,7 +440,7 @@ minimal-versions:
   stage: test
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   image: amd64/rust:1.77
-  needs: ["rust-checks"]
+  needs: []
   script:
     - rustup install nightly
     - ./maint/downgrade_dependencies
@@ -431,6 +448,7 @@ minimal-versions:
 
 .build-repro-template:
   stage: test
+  needs: []
   variables:
     # To be overridden in template instantiations
     TARGET: UNDEFINED--BUG-IN-CI-YAML
@@ -478,6 +496,7 @@ build-repro-macos:
 # We use shadow in multiple tests. Build it here once.
 build-shadow:
   stage: build
+  needs: []
   variables:
     JOB_SHADOW_REPO: "https://github.com/shadow/shadow.git"
     JOB_SHADOW_BRANCH: "main"
@@ -518,6 +537,7 @@ build-shadow:
 
 integration-chutney:
   stage: test
+  needs: ["rust-recent"]
   rules:
    # Job never runs.  See arti#810.
    - when: never
@@ -542,6 +562,7 @@ integration-chutney:
 # Runs the chutney integration test under shadow.
 integration-chutney-shadow:
   stage: test
+  needs: ["rust-recent", "build-shadow"]
   tags:
     - amd64
     # Non-TPA runners may not support running shadow.
@@ -588,6 +609,10 @@ integration-shadow:
     JOB_TGEN_BRANCH: "main"
     JOB_TGEN_COMMIT: "v1.1.2"
   stage: test
+  needs: [
+    "build-shadow",
+    "rust-recent",
+    "rust-recent-arti-extra-features"]
   cache:
     - key: $CI_JOB_NAME-shadow-$JOB_SHADOW_COMMIT
       paths:
@@ -648,6 +673,7 @@ integration-shadow:
 
 rust-recent-test-all-features:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - rustup show
@@ -656,7 +682,7 @@ rust-recent-test-all-features:
 every-crate:
   stage: test
   image: $RECENT_RUST_IMAGE
-  needs: ["rust-checks", "rust-recent-async-std-rustls"]
+  needs: []
   script:
     - maint/common/apt-install python3-toml
     - ./maint/every-crate
@@ -664,13 +690,14 @@ every-crate:
 matrix-check:
   stage: test
   image: $RECENT_RUST_IMAGE
-  needs: ["rust-checks", "rust-recent-async-std-rustls"]
+  needs: []
   script:
     - maint/common/apt-install python3-toml
     - ./maint/matrix-check
 
 minimal-features-test:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     # See crates/arti/build.rs.  Here, rather than in `variables:`, so it appears in the log.
@@ -680,6 +707,7 @@ minimal-features-test:
 
 matrix-test-cfg:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - ./maint/matrix_test_cfg
@@ -687,6 +715,7 @@ matrix-test-cfg:
 # TODO: consider removing this in favor of cli-test
 cli-help:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - ./maint/check-cli-help
@@ -698,6 +727,7 @@ cli-help:
 # but matrix_test runs cargo check, and we would like to cargo *test*.
 cli-test:
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     # The rust-latest job runs the CLI tests with all features enabled.
@@ -731,6 +761,7 @@ check-targets:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   stage: test
+  needs: []
   image: $RECENT_RUST_IMAGE
   script:
     - ./maint/cargo_check_target -il
