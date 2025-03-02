@@ -40,8 +40,9 @@ full = [
     "caret/full",
 ]
 
-experimental = ["experimental-api", "ntor_v3", "stream-ctrl", "testing", "bench"]
+experimental = ["experimental-api", "ntor_v3", "conflux", "stream-ctrl", "testing", "bench"]
 ntor_v3 = ["__is_experimental"]
+conflux = ["__is_experimental"]
 
 hs-client = ["hs-common"]
 hs-service = ["hs-common"]
@@ -67,10 +68,11 @@ cipher = { version = "0.4.1", features = ["zeroize"] }
 coarsetime = "0.1.20"
 derive-deftly = "1.0.0"
 derive_builder = { version = "0.11.2", package = "derive_builder_fork_arti" }
-derive_more = { version = "1.0.0", features = ["full"] }
+derive_more = { version = "2.0.1", features = ["full"] }
 digest = "0.10.0"
 educe = "0.4.6"
 futures = "0.3.14"
+futures-util = "0.3.31"
 hkdf = "0.12.0"
 hmac = "0.12.0"
 oneshot-fused-workaround = { path = "../oneshot-fused-workaround", version = "0.2.0" }
@@ -79,6 +81,7 @@ rand = "0.8"
 rand_core = "0.6.2"
 safelog = { path = "../safelog", version = "0.4.2" }
 slotmap-careful = { path = "../slotmap-careful", version = "0.2.1" }
+static_assertions = "1"
 subtle = "2"
 thiserror = "2"
 tokio-crate = { package = "tokio", version = "1.7", optional = true }

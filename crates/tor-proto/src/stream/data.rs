@@ -2,7 +2,7 @@
 //! for byte-oriented communication.
 
 use crate::{Error, Result};
-use futures::future::BoxFuture;
+use static_assertions::assert_impl_all;
 use tor_cell::relaycell::msg::EndReason;
 use tor_cell::relaycell::RelayCmd;
 
@@ -29,11 +29,11 @@ use std::sync::{Mutex, Weak};
 use educe::Educe;
 
 #[cfg(any(feature = "experimental-api", feature = "stream-ctrl"))]
-use crate::circuit::ClientCirc;
+use crate::tunnel::circuit::ClientCirc;
 
-use crate::circuit::StreamTarget;
 use crate::memquota::StreamAccount;
 use crate::stream::StreamReader;
+use crate::tunnel::StreamTarget;
 use tor_basic_utils::skip_fmt;
 use tor_cell::relaycell::msg::Data;
 use tor_error::internal;
@@ -127,6 +127,7 @@ pub struct DataStream {
     #[cfg(feature = "stream-ctrl")]
     ctrl: std::sync::Arc<ClientDataStreamCtrl>,
 }
+assert_impl_all! { DataStream: Send, Sync }
 
 /// An object used to control and monitor a data stream.
 ///
@@ -147,6 +148,7 @@ pub struct ClientDataStreamCtrl {
     ///
     /// We make this a Weak reference so that once the stream itself is closed,
     /// we can't leak circuits.
+    // TODO(conflux): use ClientTunnel
     circuit: Weak<ClientCirc>,
 
     /// Shared user-visible information about the state of this stream.
@@ -322,6 +324,7 @@ restricted_msg! {
 // ClientDataStreamCtrl?
 #[cfg(feature = "stream-ctrl")]
 impl super::ctrl::ClientStreamCtrl for ClientDataStreamCtrl {
+    // TODO(conflux): use ClientTunnel
     fn circuit(&self) -> Option<Arc<ClientCirc>> {
         self.circuit.upgrade()
     }
@@ -379,6 +382,7 @@ impl DataStream {
             }
             Arc::new(Mutex::new(data_stream_status))
         };
+
         #[cfg(feature = "stream-ctrl")]
         let ctrl = Arc::new(ClientDataStreamCtrl {
             circuit: Arc::downgrade(target.circuit()),
@@ -511,6 +515,9 @@ impl TokioAsyncWrite for DataStream {
     }
 }
 
+/// Helper type: Like BoxFuture, but also requires that the future be Sync.
+type BoxSyncFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
+
 /// An enumeration for the state of a DataWriter.
 ///
 /// We have to use an enum here because, for as long as we're waiting
@@ -526,8 +533,8 @@ enum DataWriterState {
     Ready(DataWriterImpl),
     /// The writer is flushing a cell.
     Flushing(
-        #[educe(Debug(method = "skip_fmt"))]
-        Pin<Box<dyn Future<Output = (DataWriterImpl, Result<()>)> + Send>>,
+        #[educe(Debug(method = "skip_fmt"))] //
+        BoxSyncFuture<'static, (DataWriterImpl, Result<()>)>,
     ),
 }
 
@@ -572,7 +579,7 @@ impl DataWriter {
         let state = self.state.take().expect("Missing state in DataWriter");
 
         // TODO: this whole function is a bit copy-pasted.
-        let mut future: BoxFuture<_> = match state {
+        let mut future: BoxSyncFuture<_> = match state {
             DataWriterState::Ready(imp) => {
                 if imp.n_pending == 0 {
                     // Nothing to flush!
@@ -768,8 +775,8 @@ enum DataReaderState {
     /// The reader is currently fetching a cell: this future is the
     /// progress it is making.
     ReadingCell(
-        #[educe(Debug(method = "skip_fmt"))]
-        Pin<Box<dyn Future<Output = (DataReaderImpl, Result<()>)> + Send>>,
+        #[educe(Debug(method = "skip_fmt"))] //
+        BoxSyncFuture<'static, (DataReaderImpl, Result<()>)>,
     ),
 }
 
