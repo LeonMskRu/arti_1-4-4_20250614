@@ -104,12 +104,13 @@ pub use cfg::{
 };
 pub use logging::{LoggingConfig, LoggingConfigBuilder};
 
-use arti_client::config::default_config_files;
 use arti_client::TorClient;
 use safelog::with_safe_logging_suppressed;
 use tor_config::mistrust::BuilderExt as _;
 use tor_config::ConfigurationSources;
 use tor_rtcompat::Runtime;
+
+use crate::cfg::default_config_files;
 
 use anyhow::{Context, Error, Result};
 use clap::{value_parser, Arg, ArgAction, Command};

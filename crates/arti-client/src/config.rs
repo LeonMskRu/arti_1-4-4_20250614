@@ -812,20 +812,6 @@ impl TorClientConfigBuilder {
     }
 }
 
-/// Return the filenames for the default user configuration files
-pub fn default_config_files() -> Result<Vec<ConfigurationSource>, CfgPathError> {
-    // the base path resolver includes the 'ARTI_CONFIG' variable
-    let path_resolver = tor_config_path::arti_client_base_resolver();
-
-    ["${ARTI_CONFIG}/arti.toml", "${ARTI_CONFIG}/arti.d/"]
-        .into_iter()
-        .map(|f| {
-            let path = CfgPath::new(f.into()).path(&path_resolver)?;
-            Ok(ConfigurationSource::from_path(path))
-        })
-        .collect()
-}
-
 /// The environment variable we look at when deciding whether to disable FS permissions checking.
 #[deprecated = "use tor-config::mistrust::ARTI_FS_DISABLE_PERMISSION_CHECKS instead"]
 pub const FS_PERMISSIONS_CHECKS_DISABLE_VAR: &str = "ARTI_FS_DISABLE_PERMISSION_CHECKS";
@@ -962,17 +948,6 @@ mod test {
                 path = "obfs4proxy"
             "#,
         );
-    }
-
-    #[test]
-    fn check_default() {
-        // We don't want to second-guess the directories crate too much
-        // here, so we'll just make sure it does _something_ plausible.
-
-        let dflt = default_config_files().unwrap();
-        assert!(dflt[0].as_path().unwrap().ends_with("arti.toml"));
-        assert!(dflt[1].as_path().unwrap().ends_with("arti.d"));
-        assert_eq!(dflt.len(), 2);
     }
 
     #[test]
