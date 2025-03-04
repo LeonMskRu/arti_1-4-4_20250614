@@ -33,6 +33,9 @@ use {
 #[cfg(test)]
 use {crate::congestion::sendme::CircTag, crate::Error, tor_error::internal};
 
+#[cfg(feature = "conflux")]
+use super::Circuit;
+
 use oneshot_fused_workaround as oneshot;
 
 use crate::crypto::handshake::ntor::NtorPublicKey;
@@ -43,11 +46,11 @@ use std::result::Result as StdResult;
 
 /// A message telling the reactor to do something.
 ///
-/// The difference between this and [`CtrlCmd`] is that `CtrlMsg`s
-/// are only handled when the reactor's `chan_sender` is ready to receive cells,
-/// whereas `CtrlCmd` are handled immediately as they arrive.
-///
 /// For each `CtrlMsg`, the reactor will send a cell on the underlying channel.
+///
+/// The difference between this and [`CtrlCmd`] is that `CtrlMsg`s
+/// cause the reactor to send cells on the reactor's `chan_sender`,
+/// whereas `CtrlCmd` do not.
 #[derive(educe::Educe)]
 #[educe(Debug)]
 pub(crate) enum CtrlMsg {
@@ -176,8 +179,7 @@ pub(crate) enum CtrlMsg {
 /// A message telling the reactor to do something.
 ///
 /// The difference between this and [`CtrlMsg`] is that `CtrlCmd`s
-/// are handled even if the reactor's `chan_sender` is not ready to receive cells.
-/// Another difference is that `CtrlCmd`s never cause cells to sent on the channel,
+/// never cause cells to sent on the channel,
 /// while `CtrlMsg`s potentially do: `CtrlMsg`s are mapped to [`RunOnceCmdInner`] commands,
 /// some of which instruct the reactor to send cells down the channel.
 #[derive(educe::Educe)]
@@ -236,6 +238,17 @@ pub(crate) enum CtrlCmd {
     QuerySendWindow {
         hop: HopNum,
         done: ReactorResultChannel<(u32, Vec<CircTag>)>,
+    },
+    /// Shut down the reactor, and return the underlying [`Circuit`],
+    /// if the tunnel is not multi-path.
+    ///
+    /// Returns an error if called on a multi-path reactor.
+    #[cfg(feature = "conflux")]
+    #[allow(unused)] // TODO(conflux)
+    ShutdownAndReturnCircuit {
+        /// Oneshot channel to return the underlying [`Circuit`],
+        /// or an error if the reactor's tunnel is multi-path.
+        answer: oneshot::Sender<StdResult<Circuit, Bug>>,
     },
 }
 
@@ -451,7 +464,7 @@ impl<'a> ControlHandler<'a> {
     pub(super) fn handle_cmd(&mut self, msg: CtrlCmd) -> StdResult<(), ReactorError> {
         trace!("{}: reactor received {:?}", self.reactor.unique_id, msg);
         match msg {
-            CtrlCmd::Shutdown => Err(ReactorError::Shutdown),
+            CtrlCmd::Shutdown => self.reactor.handle_shutdown().map(|_| ()),
             #[cfg(feature = "hs-common")]
             #[allow(unreachable_code)]
             CtrlCmd::ExtendVirtual {
@@ -533,6 +546,10 @@ impl<'a> ControlHandler<'a> {
                 );
 
                 Ok(())
+            }
+            #[cfg(feature = "conflux")]
+            CtrlCmd::ShutdownAndReturnCircuit { answer } => {
+                self.reactor.handle_shutdown_and_return_circuit(answer)
             }
         }
     }

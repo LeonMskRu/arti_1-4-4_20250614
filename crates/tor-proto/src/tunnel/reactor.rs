@@ -84,7 +84,7 @@ use crate::tunnel::circuit::{StreamMpscReceiver, StreamMpscSender};
 use derive_deftly::Deftly;
 use derive_more::From;
 use safelog::sensitive as sv;
-use tor_async_utils::{SinkPrepareExt as _, SinkTrySend as _, SinkTrySendError as _};
+use tor_async_utils::{SinkTrySend as _, SinkTrySendError as _};
 use tor_cell::chancell::{AnyChanCell, CircId};
 use tor_cell::chancell::{BoxedCellBody, ChanMsg};
 use tor_linkspec::RelayIds;
@@ -289,15 +289,17 @@ pub(crate) struct SendRelayCell {
     pub(crate) cell: AnyRelayMsgOuter,
 }
 
-/// A [`RunOnceCmdInner`] command to execute at the end of [`Reactor::run_once`].
+/// A command to execute at the end of [`Reactor::run_once`].
 #[derive(From, Debug)]
-enum SelectResult {
+enum CircuitAction {
     /// Run a single `RunOnceCmdInner` command.
     Single(RunOnceCmdInner),
     /// Handle a control message
     HandleControl(CtrlMsg),
     /// Handle an input message.
     HandleCell(ClientCircChanMsg),
+    /// Remove the specified circuit leg.
+    RemoveLeg(LegIdKey),
 }
 
 impl CircHop {
@@ -532,6 +534,7 @@ pub(crate) struct Circuit {
     chan_sender: SometimesUnboundedSink<AnyChanCell, ChannelSender>,
     /// Input stream, on which we receive ChanMsg objects from this circuit's
     /// channel.
+    ///
     // TODO: could use a SPSC channel here instead.
     input: CircuitRxReceiver,
     /// The cryptographic state for this circuit for inbound cells.
@@ -711,74 +714,51 @@ impl Reactor {
         // TODO(conflux): support adding and linking circuits
         // TODO(conflux): support switching the primary leg
 
-        // TODO(conflux): read from *all* the circuits, not just the primary
-        //
-        // Note: this is a big TODO, and will likely involve factoring out the
-        // chan_sender.prepare_send_from() call into a function on Circuit.
-        // Each Circuit will have its own control channel, for handling control
-        // messages meant for it (I imagine some/all CtrlMsgs will have a LegId
-        // field, and that the reactor will redirect the CtrlMsg to the appropriate
-        // Circuit's control channel?). Putting the control channel (which will
-        // probably receive a CtrlMsgInner type) inside the Circuit should enable
-        // us to lift the prepare_send_from() into a Circuit function, that will
-        // get called from ConfluxSet::poll_all_name_tbd() that can be used in
-        // this select_biased! to select between the channel readiness of *all*
-        // underlying circuits.
-        let primary_leg = self.circuits.primary_leg_mut()?;
-        let mut ready_streams = primary_leg.ready_streams_iterator();
+        let mut circs = self.circuits.circuit_action();
 
-        // Note: We don't actually use the returned SinkSendable,
-        // and continue writing to the SometimesUboundedSink :(
-        let (cmd, _sendable) = select_biased! {
-                res = self.command.next() => {
-                    let cmd = unwrap_or_shutdown!(self, res, "command channel drop")?;
-                    return ControlHandler::new(self).handle_cmd(cmd);
-                },
-                res = primary_leg.chan_sender
-                    .prepare_send_from(async {
-                        select_biased! {
-                            // Check whether we've got a control message pending.
-                            ret = self.control.next() => {
-                                let msg = unwrap_or_shutdown!(self, ret, "control drop")?;
-                                Ok::<_, ReactorError>(Some(SelectResult::HandleControl(msg)))
-                            },
-                            // Check whether we've got an input message pending.
-                            ret = primary_leg.input.next().fuse() => {
-                                let cell = unwrap_or_shutdown!(self, ret, "input drop")?;
-                                Ok(Some(SelectResult::HandleCell(cell)))
-                            },
-                            ret = ready_streams.next().fuse() => {
-                                match ret {
-                                    Some(cmd) => {
-                                        let cmd = cmd?;
-                                        Ok(Some(SelectResult::Single(cmd)))
-                                    },
-                                    None => {
-                                        // There are no ready streams (for example, they may all be
-                                        // blocked due to congestion control), so there is nothing
-                                        // to do.
-                                        Ok(None)
-                                    }
-                                }
-                            }
-                        }
-                    }) => res?,
+        let action = select_biased! {
+            res = self.command.next() => {
+                let cmd = unwrap_or_shutdown!(self, res, "command channel drop")?;
+                // Drop circs so we can borrow self mutably.
+                drop(circs);
+                return ControlHandler::new(self).handle_cmd(cmd);
+            },
+            // Check whether we've got a control message pending.
+            //
+            // Note: unfortunately, reading from control here means we might start
+            // handling control messages before our chan_senders are ready.
+            // With the current design, this is inevitable: we can't know which circuit leg
+            // a control message is meant for without first reading the control message from
+            // the channel, and at that point, we can't know for sure whether that particular
+            // circuit is ready for sending.
+            ret = self.control.next() => {
+                let msg = unwrap_or_shutdown!(self, ret, "control drop")?;
+                Some(CircuitAction::HandleControl(msg))
+            },
+            res = circs.next().fuse() => {
+                unwrap_or_shutdown!(self, res, "empty conflux set")???
+            }
         };
-        let cmd = cmd?;
 
-        let cmd = match cmd {
+        drop(circs);
+
+        let cmd = match action {
             None => None,
-            Some(SelectResult::Single(cmd)) => Some(RunOnceCmd::Single(cmd)),
-            Some(SelectResult::HandleControl(ctrl)) => ControlHandler::new(self)
+            Some(CircuitAction::Single(cmd)) => Some(RunOnceCmd::Single(cmd)),
+            Some(CircuitAction::HandleControl(ctrl)) => ControlHandler::new(self)
                 .handle_msg(ctrl)?
                 .map(RunOnceCmd::Single),
-            Some(SelectResult::HandleCell(cell)) => {
+            Some(CircuitAction::HandleCell(cell)) => {
                 // TODO(conflux): put the LegId of the circuit the cell was received on
                 // inside HandleCell
                 //let circ = self.circuits.leg(leg_id)?;
 
                 let circ = self.circuits.primary_leg_mut()?;
                 circ.handle_cell(&mut self.cell_handlers, cell)?
+            }
+            Some(CircuitAction::RemoveLeg(leg_id)) => {
+                self.circuits.remove(leg_id)?;
+                None
             }
         };
 
@@ -998,6 +978,20 @@ impl Reactor {
         );
 
         Err(ReactorError::Shutdown)
+    }
+
+    /// Handle a request to shutdown the reactor and return the only [`Circuit`] in this tunnel.
+    ///
+    /// Returns an error over the `answer` channel if the reactor has no circuits,
+    /// or more than one circuit. The reactor will shut down regardless.
+    #[cfg(feature = "conflux")]
+    fn handle_shutdown_and_return_circuit(
+        &mut self,
+        answer: oneshot::Sender<StdResult<Circuit, Bug>>,
+    ) -> StdResult<(), ReactorError> {
+        // Don't care if the receiver goes away
+        let _ = answer.send(self.circuits.take_single_leg());
+        self.handle_shutdown().map(|_| ())
     }
 }
 
@@ -1912,6 +1906,8 @@ impl Circuit {
     /// IMPORTANT: this stream locks the stream map mutexes of each `CircHop`!
     /// To avoid contention, never create more than one [`Circuit::ready_streams_iterator`]
     /// stream at a time!
+    ///
+    /// This is cancellation-safe.
     fn ready_streams_iterator(&self) -> impl Stream<Item = Result<RunOnceCmdInner>> {
         self.hops
             .iter()
@@ -1938,50 +1934,47 @@ impl Circuit {
 
                 let hop_num = HopNum::from(i as u8);
                 let hop_map = Arc::clone(&self.hops[i].map);
-                Some(async move {
-                    futures::future::poll_fn(move |cx| {
-                        // Process an outbound message from the first ready stream on
-                        // this hop. The stream map implements round robin scheduling to
-                        // ensure fairness across streams.
-                        // TODO: Consider looping here to process multiple ready
-                        // streams. Need to be careful though to balance that with
-                        // continuing to service incoming and control messages.
-                        let mut hop_map = hop_map.lock().expect("lock poisoned");
-                        let Some((sid, msg)) = hop_map.poll_ready_streams_iter(cx).next() else {
-                            // No ready streams for this hop.
-                            return Poll::Pending;
-                        };
+                Some(futures::future::poll_fn(move |cx| {
+                    // Process an outbound message from the first ready stream on
+                    // this hop. The stream map implements round robin scheduling to
+                    // ensure fairness across streams.
+                    // TODO: Consider looping here to process multiple ready
+                    // streams. Need to be careful though to balance that with
+                    // continuing to service incoming and control messages.
+                    let mut hop_map = hop_map.lock().expect("lock poisoned");
+                    let Some((sid, msg)) = hop_map.poll_ready_streams_iter(cx).next() else {
+                        // No ready streams for this hop.
+                        return Poll::Pending;
+                    };
 
-                        if msg.is_none() {
-                            return Poll::Ready(Ok(RunOnceCmdInner::CloseStream {
-                                hop_num,
-                                sid,
-                                behav: CloseStreamBehavior::default(),
-                                reason: streammap::TerminateReason::StreamTargetClosed,
-                                done: None,
-                            }));
-                        };
-                        let msg = hop_map.take_ready_msg(sid).expect("msg disappeared");
+                    if msg.is_none() {
+                        return Poll::Ready(Ok(RunOnceCmdInner::CloseStream {
+                            hop_num,
+                            sid,
+                            behav: CloseStreamBehavior::default(),
+                            reason: streammap::TerminateReason::StreamTargetClosed,
+                            done: None,
+                        }));
+                    };
+                    let msg = hop_map.take_ready_msg(sid).expect("msg disappeared");
 
-                        #[allow(unused)] // unused in non-debug builds
-                        let Some(StreamEntMut::Open(s)) = hop_map.get_mut(sid) else {
-                            panic!("Stream {sid} disappeared");
-                        };
+                    #[allow(unused)] // unused in non-debug builds
+                    let Some(StreamEntMut::Open(s)) = hop_map.get_mut(sid) else {
+                        panic!("Stream {sid} disappeared");
+                    };
 
-                        debug_assert!(
-                            s.can_send(&msg),
-                            "Stream {sid} produced a message it can't send: {msg:?}"
-                        );
+                    debug_assert!(
+                        s.can_send(&msg),
+                        "Stream {sid} produced a message it can't send: {msg:?}"
+                    );
 
-                        let cell = SendRelayCell {
-                            hop: hop_num,
-                            early: false,
-                            cell: AnyRelayMsgOuter::new(Some(sid), msg),
-                        };
-                        Poll::Ready(Ok(RunOnceCmdInner::Send { cell, done: None }))
-                    })
-                    .await
-                })
+                    let cell = SendRelayCell {
+                        hop: hop_num,
+                        early: false,
+                        cell: AnyRelayMsgOuter::new(Some(sid), msg),
+                    };
+                    Poll::Ready(Ok(RunOnceCmdInner::Send { cell, done: None }))
+                }))
             })
             .collect::<FuturesUnordered<_>>()
     }
