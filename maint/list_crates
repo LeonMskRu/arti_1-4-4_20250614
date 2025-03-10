@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 TOPDIR = os.path.split(os.path.dirname(sys.argv[0]))[0]
 WORKSPACE_TOML = os.path.join(TOPDIR, "Cargo.toml")
+REMOVED_CRATES = os.path.join(TOPDIR, "maint", "removed-crates.txt")
 
 
 @dataclass
@@ -25,7 +26,7 @@ class Crate:
     raw_metadata: Any
 
 
-def list_crates() -> Iterator[Crate]:
+def list_workspace_crates() -> Iterator[Crate]:
     """
     Iterator over all the crates in the workspace.
     """
@@ -40,13 +41,21 @@ def list_crates() -> Iterator[Crate]:
         yield Crate(package, subdir, publish, version, pt)
 
 
+def list_removed_crates() -> Iterator[str]:
+    """
+    Iterator over crate names in 'maint/removed-crates.txt'.
+    """
+    with open(REMOVED_CRATES, "r") as f:
+        return (c for c in f.read().splitlines() if not c.startswith("#"))
+
+
 def print_crates(args: argparse.Namespace) -> None:
     shown_any = False
-    for c in list_crates():
+    for c in list_workspace_crates():
         show = (
             args.package == c.name
             if args.package is not None
-            else args.all or c.publish
+            else args.include_unpublished or c.publish
         )
         if not show:
             continue
@@ -57,6 +66,13 @@ def print_crates(args: argparse.Namespace) -> None:
             print(c.subdir)
         else:
             print(c.name)
+    for n in list_removed_crates():
+        show = args.include_removed
+        if not show:
+            continue
+        shown_any = True
+        assert not args.version and not args.subdir
+        print(n)
 
     assert shown_any
 
@@ -67,7 +83,17 @@ if __name__ == "__main__":
         description="list crates (by default, only the ones to publish)",
     )
     parser.add_argument(
-        "--all", action="store_true", help="list even unpublished crates"
+        "--include-unpublished",
+        action="store_true",
+        help="list even `publish = false` crates (does not include removed crates)",
+    )
+    parser.add_argument(
+        "--include-removed",
+        action="store_true",
+        help=(
+            "list even crates that have been removed from "
+            "the arti repo but had been previously published"
+        ),
     )
     parser.add_argument("--version", action="store_true", help="print versions")
     parser.add_argument(
@@ -76,4 +102,19 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--package", help="specific crate")
 
     args = parser.parse_args()
+
+    # argparse has a 'add_mutually_exclusive_group()' to support conflicting options,
+    # but there doesn't seem to be a way to make only some mutually exclusive.
+    if args.include_removed and (args.subdir or args.version):
+        # We could support all of these options simultaneously and
+        # just not print the subdir/version for removed crates,
+        # but this seems more error-prone for users as they will
+        # need to parse lines that are formatted differently.
+        # Instead it's better just to call this program twice with different arguments.
+        print(
+            "--include-removed is incompatible with --subdir and --version",
+            file=sys.stderr,
+        )
+        exit(1)
+
     print_crates(args)

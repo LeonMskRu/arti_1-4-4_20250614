@@ -89,7 +89,7 @@ def main():
 
     skip_until = args.skip_until
 
-    for crate in list_crates.list_crates():
+    for crate in list_crates.list_workspace_crates():
         if skip_until is not None:
             if skip_until == crate.name:
                 skip_until = None

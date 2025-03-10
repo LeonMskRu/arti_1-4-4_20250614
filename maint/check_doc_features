@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-from list_crates import list_crates
+from list_crates import list_workspace_crates
 from collections import Counter
 
 # This contains annotations the script think are missing,
@@ -165,7 +165,7 @@ def for_each_rs(path, fn):
 
 
 def main():
-    for crate_info in list_crates():
+    for crate_info in list_workspace_crates():
         crate = crate_info.name
         print(f"processing {crate}")
         crate_path = f"crates/{crate}/src"
