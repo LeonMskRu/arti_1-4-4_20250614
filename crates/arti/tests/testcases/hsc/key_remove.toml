@@ -1,0 +1,10 @@
+bin.name = "arti"
+args = "hsc key remove -c hsc.toml --onion-name mnyizjj7m3hpcr7i5afph3zt7maa65johyu2ruis6z7cmnjmaj3h6tad.onion -f"
+status.code = 0
+fs.sandbox = true
+
+stdout = """
+[..]INFO arti_client::client: Using keystore from "./local/keystore"
+"""
+stderr = ""
+
