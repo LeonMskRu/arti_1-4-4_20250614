@@ -21,7 +21,7 @@ trim_trailing_whitespace = unset
 indent_style = unset
 indent_size = unset
 
-[crates/arti/tests/testcases/**/local/state/*]
+[crates/arti/tests/testcases/**/local/**/*]
 charset = unset
 end_of_line = unset
 insert_final_newline = unset
