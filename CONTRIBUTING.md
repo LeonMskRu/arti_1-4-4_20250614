@@ -144,6 +144,8 @@ syntax if it seems best;
 this is a good idea if the un-fixed state breaks the tests or is otherwise broken,
 but is not needed otherwise.
 
+We typically prefix each commit message with the main crate or top level directory it applies to.
+
 ## Where are some good places to start hacking?
 
 You might want to begin by looking around the
