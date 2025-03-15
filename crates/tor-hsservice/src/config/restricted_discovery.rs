@@ -24,15 +24,6 @@
 //! or that have more than [`MAX_RESTRICTED_DISCOVERY_CLIENTS`] users,
 //! should use other DoS resistance measures instead.
 //!
-//! # Live reloading
-//!
-//! The restricted discovery configuration is automatically reloaded
-//! if `watch_configuration` is `true`.
-//!
-//! This means that any changes to `static_keys` or to the `.auth` files
-//! from the configured `key_dirs` will be automatically detected,
-//! so you don't need to restart your service in order for them to take effect.
-//!
 //! ## Best practices
 //!
 //! Each change you make to the authorized clients can result in a new descriptor
@@ -42,8 +33,8 @@
 //! those changes may not take effect immediately due to the descriptor publishing rate limiting.
 //!
 //! To avoid generating unnecessary traffic, you should try to batch
-//! your changes as much as possible, or, alternatively, disable `watch_configuration`
-//! until you are satisfied with your configured authorized clients.
+//! your changes as much as possible until you are satisfied with your
+//! configured authorized clients.
 //!
 //! ## Caveats
 //!
@@ -202,12 +193,6 @@ pub struct RestrictedDiscoveryConfig {
     #[builder(default)]
     pub(crate) enabled: bool,
 
-    /// If true, the provided `key_dirs` will be watched for changes.
-    #[builder(default)]
-    #[builder_field_attr(serde(skip))]
-    #[getter(as_mut, as_copy)]
-    watch_configuration: bool,
-
     /// Directories containing the client keys, each in the
     /// `descriptor:x25519:<base32-encoded-x25519-public-key>` format.
     ///
@@ -315,7 +300,6 @@ impl RestrictedDiscoveryConfigBuilder {
             enabled,
             key_dirs,
             static_keys,
-            watch_configuration,
         } = self.build_unvalidated()?;
         let key_list = static_keys.as_ref().iter().collect_vec();
 
@@ -387,7 +371,6 @@ impl RestrictedDiscoveryConfigBuilder {
             enabled,
             key_dirs,
             static_keys,
-            watch_configuration,
         })
     }
 }

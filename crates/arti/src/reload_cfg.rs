@@ -61,8 +61,6 @@ pub(crate) fn watch_for_config_changes<R: Runtime>(
     config: &ArtiConfig,
     modules: Vec<Weak<dyn ReconfigurableModule>>,
 ) -> anyhow::Result<()> {
-    let watch_file = config.application().watch_configuration;
-
     cfg_if::cfg_if! {
         if #[cfg(target_family = "unix")] {
             let sighup_stream = sighup_stream()?;
@@ -77,7 +75,6 @@ pub(crate) fn watch_for_config_changes<R: Runtime>(
             rt,
             sources,
             modules,
-            watch_file,
             sighup_stream,
             Some(DEBOUNCE_INTERVAL)
         ).await;
@@ -99,18 +96,10 @@ async fn run_watcher<R: Runtime>(
     runtime: R,
     sources: ConfigurationSources,
     modules: Vec<Weak<dyn ReconfigurableModule>>,
-    watch_file: bool,
     mut sighup_stream: impl Stream<Item = ()> + Unpin,
     debounce_interval: Option<Duration>,
 ) -> anyhow::Result<()> {
     let (tx, mut rx) = file_watcher::channel();
-    let mut watcher = if watch_file {
-        let mut watcher = FileWatcher::builder(runtime.clone());
-        prepare(&mut watcher, &sources)?;
-        Some(watcher.start_watching(tx.clone())?)
-    } else {
-        None
-    };
 
     debug!("Entering FS event loop");
 
@@ -122,14 +111,6 @@ async fn run_watcher<R: Runtime>(
                 };
 
                 info!("Received SIGHUP");
-
-                watcher = reload_configuration(
-                    runtime.clone(),
-                    watcher,
-                    &sources,
-                    &modules,
-                    tx.clone()
-                ).await?;
             },
             event = rx.next().fuse() => {
                 if let Some(debounce_interval) = debounce_interval {
@@ -144,14 +125,6 @@ async fn run_watcher<R: Runtime>(
                     // events: if we're disconnected, we'll notice it when we next
                     // call recv() in the outer loop.
                 }
-                debug!("Config reload event {:?}: reloading configuration.", event);
-                watcher = reload_configuration(
-                    runtime.clone(),
-                    watcher,
-                    &sources,
-                    &modules,
-                    tx.clone()
-                ).await?;
             },
         }
     }
@@ -307,7 +280,7 @@ fn reconfigure(
         module.reconfigure(&config)?;
     }
 
-    Ok(has_modules && config.0.application().watch_configuration)
+    Ok(has_modules)
 }
 
 #[cfg(test)]
@@ -386,113 +359,5 @@ mod test {
     fn write_config(dir: &TestTempDir, name: &str, config: &ArtiConfigBuilder) -> PathBuf {
         let s = toml::to_string(&config).unwrap();
         write_file(dir, name, s.as_bytes())
-    }
-
-    #[test]
-    #[ignore] // TODO(#1607): Re-enable
-    fn watch_single_file() {
-        tor_rtcompat::test_with_one_runtime!(|rt| async move {
-            let temp_dir = test_temp_dir!();
-            let mut config_builder =  ArtiConfigBuilder::default();
-            config_builder.application().watch_configuration(true);
-
-            let cfg_file = write_config(&temp_dir, CONFIG_NAME1, &config_builder);
-            let mut cfg_sources = ConfigurationSources::new_empty();
-            cfg_sources.push_source(ConfigurationSource::File(cfg_file), MustRead::MustRead);
-
-            let (module, mut rx) = create_module().await;
-
-            // Use a fake sighup stream to wait until run_watcher()'s select_biased!
-            // loop is entered
-            let (mut sighup_tx, sighup_rx) = mpsc::unbounded();
-            let runtime = rt.clone();
-            let () = rt.spawn(async move {
-                run_watcher(
-                    runtime,
-                    cfg_sources,
-                    vec![Arc::downgrade(&module)],
-                    true,
-                    sighup_rx,
-                    None,
-                ).await.unwrap();
-            }).unwrap();
-
-            config_builder.logging().log_sensitive_information(true);
-            let _: PathBuf = write_config(&temp_dir, CONFIG_NAME1, &config_builder);
-            sighup_tx.send(()).await.unwrap();
-            // The reconfigurable modules should've been reloaded in response to sighup
-            let config = rx.next().await.unwrap();
-            assert_eq!(config.0, config_builder.build().unwrap());
-
-            // Overwrite the config
-            config_builder.logging().log_sensitive_information(false);
-            let _: PathBuf = write_config(&temp_dir, CONFIG_NAME1, &config_builder);
-            // The reconfigurable modules should've been reloaded in response to the config change
-            let config = rx.next().await.unwrap();
-            assert_eq!(config.0, config_builder.build().unwrap());
-
-        });
-    }
-
-    #[test]
-    fn watch_multiple() {
-        tor_rtcompat::test_with_one_runtime!(|rt| async move {
-            let temp_dir = test_temp_dir!();
-            let mut config_builder1 =  ArtiConfigBuilder::default();
-            config_builder1.application().watch_configuration(true);
-
-            let _: PathBuf = write_config(&temp_dir, CONFIG_NAME1, &config_builder1);
-            let mut cfg_sources = ConfigurationSources::new_empty();
-            cfg_sources.push_source(
-                ConfigurationSource::Dir(temp_dir.as_path_untracked().to_path_buf()),
-                MustRead::MustRead
-            );
-
-            let (module, mut rx) = create_module().await;
-            // Use a fake sighup stream to wait until run_watcher()'s select_biased!
-            // loop is entered
-            let (mut sighup_tx, sighup_rx) = mpsc::unbounded();
-            let runtime = rt.clone();
-            let () = rt.spawn(async move {
-                run_watcher(
-                    runtime,
-                    cfg_sources,
-                    vec![Arc::downgrade(&module)],
-                    true,
-                    sighup_rx,
-                    None,
-                ).await.unwrap();
-            }).unwrap();
-
-            config_builder1.logging().log_sensitive_information(true);
-            let _: PathBuf = write_config(&temp_dir, CONFIG_NAME1, &config_builder1);
-            sighup_tx.send(()).await.unwrap();
-            // The reconfigurable modules should've been reloaded in response to sighup
-            let config = rx.next().await.unwrap();
-            assert_eq!(config.0, config_builder1.build().unwrap());
-
-            let mut config_builder2 =  ArtiConfigBuilder::default();
-            config_builder2.application().watch_configuration(true);
-            // Write another config file...
-            config_builder2.system().max_files(0_u64);
-            let _: PathBuf = write_config(&temp_dir, CONFIG_NAME2, &config_builder2);
-            // Check that the 2 config files are merged
-            let mut config_builder_combined = config_builder1.clone();
-            config_builder_combined.system().max_files(0_u64);
-            let config = rx.next().await.unwrap();
-            assert_eq!(config.0, config_builder_combined.build().unwrap());
-            // Now write a new config file to the watched dir
-            config_builder2.logging().console("foo".to_string());
-            let mut config_builder_combined2 = config_builder_combined.clone();
-            config_builder_combined2.logging().console("foo".to_string());
-            let config3: PathBuf = write_config(&temp_dir, CONFIG_NAME3, &config_builder2);
-            let config = rx.next().await.unwrap();
-            assert_eq!(config.0, config_builder_combined2.build().unwrap());
-
-            // Removing the file should also trigger an event
-            std::fs::remove_file(config3).unwrap();
-            let config = rx.next().await.unwrap();
-            assert_eq!(config.0, config_builder_combined.build().unwrap());
-        });
     }
 }

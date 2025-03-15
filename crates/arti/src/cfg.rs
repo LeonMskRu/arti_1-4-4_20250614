@@ -54,16 +54,6 @@ const OLDEST_SUPPORTED_CONFIG: &str = concat!(include_str!("./oldest-supported-c
 #[builder(build_fn(error = "ConfigBuildError"))]
 #[builder(derive(Debug, Serialize, Deserialize))]
 pub struct ApplicationConfig {
-    /// If true, we should watch our configuration files for changes, and reload
-    /// our configuration when they change.
-    ///
-    /// Note that this feature may behave in unexpected ways if the path to the
-    /// directory holding our configuration files changes its identity (because
-    /// an intermediate symlink is changed, because the directory is removed and
-    /// recreated, or for some other reason).
-    #[builder(default)]
-    pub(crate) watch_configuration: bool,
-
     /// If true, we should allow other applications not owned by the system
     /// administrator to monitor the Arti application and inspect its memory.
     ///
@@ -258,16 +248,7 @@ impl ArtiConfigBuilder {
     /// Build the [`ArtiConfig`].
     pub fn build(&self) -> Result<ArtiConfig, ConfigBuildError> {
         #[cfg_attr(not(feature = "onion-service-service"), allow(unused_mut))]
-        let mut config = self.build_unvalidated()?;
-        #[cfg(feature = "onion-service-service")]
-        for svc in config.onion_services.values_mut() {
-            // Pass the application-level watch_configuration to each restricted discovery config.
-            *svc.svc_cfg
-                .restricted_discovery_mut()
-                .watch_configuration_mut() = config.application.watch_configuration;
-        }
-
-        Ok(config)
+        Ok(self.build_unvalidated()?)
     }
 }
 
