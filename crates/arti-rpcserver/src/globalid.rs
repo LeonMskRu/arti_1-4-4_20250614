@@ -74,9 +74,6 @@ impl MacKey {
 impl GlobalId {
     /// The number of bytes used to encode a `GlobalId` in binary form.
     const ENCODED_LEN: usize = MAC_LEN + ConnectionId::LEN + GenIdx::BYTE_LEN;
-    /// The number of bytes used to encode a `GlobalId` in base-64 form.
-    // TODO: use div_ceil once it's stable.
-    pub(crate) const B64_ENCODED_LEN: usize = (Self::ENCODED_LEN * 8 + 5) / 6;
 
     /// Create a new GlobalId from its parts.
     pub(crate) fn new(connection: ConnectionId, local_id: GenIdx) -> GlobalId {
@@ -93,7 +90,9 @@ impl GlobalId {
     pub(crate) fn encode(&self, key: &MacKey) -> ObjectId {
         use base64ct::{Base64Unpadded as B64, Encoding};
         let bytes = self.encode_as_bytes(key, &mut rand::thread_rng());
-        B64::encode_string(&bytes[..]).into()
+        let mut b64: String = "$".into();
+        b64.push_str(&B64::encode_string(&bytes[..]));
+        b64.into()
     }
 
     /// As `encode`, but do not base64-encode the result.
@@ -114,7 +113,7 @@ impl GlobalId {
     pub(crate) fn try_decode(key: &MacKey, s: &ObjectId) -> Result<Self, LookupError> {
         use base64ct::{Base64Unpadded as B64, Encoding};
         let mut bytes = [0_u8; Self::ENCODED_LEN];
-        let byte_slice = B64::decode(s.as_ref(), &mut bytes[..])
+        let byte_slice = B64::decode(&s.as_ref()[1..], &mut bytes[..])
             .map_err(|_| LookupError::NoObject(s.clone()))?;
         Self::try_decode_from_bytes(key, byte_slice).ok_or_else(|| LookupError::NoObject(s.clone()))
     }
@@ -165,6 +164,8 @@ mod test {
 
     use super::*;
 
+    const B64_ENCODED_LEN: usize = ((GlobalId::ENCODED_LEN * 8 + 5) / 6) + 1;
+
     #[test]
     fn roundtrip() {
         use crate::objmap::{StrongIdx, WeakIdx};
@@ -195,8 +196,8 @@ mod test {
         assert_eq!(gid2, gid2_decoded);
         assert_ne!(gid1_decoded, gid2_decoded);
 
-        assert_eq!(enc1.as_ref().len(), GlobalId::B64_ENCODED_LEN);
-        assert_eq!(enc2.as_ref().len(), GlobalId::B64_ENCODED_LEN);
+        assert_eq!(enc1.as_ref().len(), B64_ENCODED_LEN);
+        assert_eq!(enc2.as_ref().len(), B64_ENCODED_LEN);
     }
 
     #[test]
