@@ -3,14 +3,14 @@ name = "test-temp-dir"
 version = "0.3.2"
 # TODO make this 1.x.  Let's say, do this in December 2024 or January 2025
 authors = ["The Tor Project, Inc.", "Ian Jackson <iwj@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Temporary directories for use in tests"
 keywords = ["testing", "fs", "filesystem", "temporary", "temp"]
 categories = ["development-tools::testing"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 default = []

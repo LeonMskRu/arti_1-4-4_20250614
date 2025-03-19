@@ -1,15 +1,15 @@
 [package]
 name = "tor-rpc-connect"
 version = "0.28.0"
-edition = "2021"
-rust-version = "1.77"
+edition.workspace = true
+rust-version.workspace = true
 authors = ["The Tor Project, Inc."]
-license = "MIT OR Apache-2.0"
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Common implementation logic for Arti RPC Connect points"
 keywords = ["tor", "arti", "rpc"]
 categories = ["asynchronous"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 full = [

@@ -2,14 +2,14 @@
 name = "tor-keymgr"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "Gabriela Moldovan <gabi@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Key management for the Arti Tor implementation"
 keywords = ["tor", "arti"]
 categories = ["cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 default = ["keymgr"]

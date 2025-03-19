@@ -2,14 +2,14 @@
 name = "fslock-guard"
 version = "0.2.2"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Wrapper around a lockfile with unlock-on-drop semantics"
 keywords = ["fs", "file", "lock"]
 categories = ["filesystem"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
-rust-version = "1.77"
+repository.workspace = true
+rust-version.workspace = true
 
 [features]
 default = []

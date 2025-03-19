@@ -2,13 +2,13 @@
 name = "tor-error"
 version = "0.28.0"
 authors = ["Ian Jackson <iwj@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Provides the unified type-erased error type returned by many (esp. high-level) Tor APIs."
 keywords = ["tor", "arti"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 categories = ["rust-patterns"]
 
 [features]

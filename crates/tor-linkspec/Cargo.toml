@@ -2,14 +2,14 @@
 name = "tor-linkspec"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Parts of the Tor protocol that indicate specific relays on the network"
 keywords = ["tor", "arti"]
 categories = ["network-programming"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 default = []

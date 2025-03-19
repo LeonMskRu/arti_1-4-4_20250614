@@ -2,15 +2,15 @@
 name = "safelog"
 version = "0.4.4"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Conditionally suppress confidential information from logs"
 keywords = ["tor", "arti", "logging", "privacy"]
 # We must put *something* here and this will do
 categories = ["rust-patterns"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 default = []

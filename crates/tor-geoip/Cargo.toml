@@ -2,15 +2,15 @@
 name = "tor-geoip"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "eta <eta@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "A crate to parse C Tor GeoIP CSV files."
 keywords = ["tor", "arti"]
 readme = "README.md"
 categories = ["parser-implementations", "network-programming"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [dependencies]
 derive_more = { version = "2.0.1", features = ["full"] }

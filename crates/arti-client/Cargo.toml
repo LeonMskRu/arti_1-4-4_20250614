@@ -2,14 +2,14 @@
 name = "arti-client"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 description = "Library for connecting to the Tor network as an anonymous client"
 keywords = ["tor", "arti", "privacy", "anonymity", "networking"]
 categories = ["network-programming", "cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 #
 # examples call TorClient::create_bootstrapped which needs PreferredRuntime
 # @@ test-all-crates conditional-option minimal --features=tokio,native-tls
