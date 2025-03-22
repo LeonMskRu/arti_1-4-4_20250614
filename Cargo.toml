@@ -90,6 +90,7 @@ resolver = "2"
 edition = "2021"
 rust-version = "1.77"
 license = "MIT OR Apache-2.0"
+homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
 [profile.release]
