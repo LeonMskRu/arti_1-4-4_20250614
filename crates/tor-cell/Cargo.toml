@@ -2,14 +2,14 @@
 name = "tor-cell"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
-homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
 description = "Encode and decode Tor cells and messages"
 keywords = ["tor", "arti", "protocol"]
 categories = ["parser-implementations", "network-programming"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 default = []

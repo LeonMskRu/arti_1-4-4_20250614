@@ -2,15 +2,15 @@
 name = "arti-rpc-client-core"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
-homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
 description = "Client library for Arti RPC"
 keywords = ["tor", "arti"]
 # We must put *something* here and this will do
 categories = ["network-programming", "cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]

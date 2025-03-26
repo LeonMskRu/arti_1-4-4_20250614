@@ -1,5 +1,4 @@
 [workspace]
-
 # Here we declare that this is a workspace, containing several crates
 # within it.
 #
@@ -86,6 +85,13 @@ members = [
 ]
 
 resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
 [profile.release]
 # By default we'd like to get good performance and a small download size.

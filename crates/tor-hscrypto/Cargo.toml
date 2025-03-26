@@ -2,14 +2,14 @@
 name = "tor-hscrypto"
 version = "0.28.0"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
-homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
 description = "Basic onion service cryptography types used by Aerti"
 keywords = ["tor", "arti", "cryptography"]
 categories = ["cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 default = []

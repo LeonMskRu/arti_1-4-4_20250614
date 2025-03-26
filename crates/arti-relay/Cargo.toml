@@ -2,14 +2,14 @@
 name = "arti-relay"
 version = "0.28.0"
 authors = ["The Tor Project, Inc."]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
-homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
 description = "Library for running a relay of the Tor network"
 keywords = ["tor", "arti", "privacy", "anonymity", "networking"]
 categories = ["network-programming", "cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 [features]
 full = [

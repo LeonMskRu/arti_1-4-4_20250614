@@ -2,14 +2,14 @@
 name = "arti"
 version = "1.4.1"
 authors = ["The Tor Project, Inc.", "Nick Mathewson <nickm@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-license = "MIT OR Apache-2.0"
-homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
 description = "A rust implementation of the Tor privacy tools."
 keywords = ["tor", "arti", "privacy", "anonymity"]
 categories = ["command-line-utilities", "cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 #
 # We need a runtime
 # @@ test-all-crates conditional-option minimal --features=default-runtime

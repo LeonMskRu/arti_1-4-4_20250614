@@ -2,13 +2,13 @@
 name = "hashx"
 version = "0.2.2"
 authors = ["The Tor Project, Inc.", "Micah Elizabeth Scott <beth@torproject.org>"]
-edition = "2021"
-rust-version = "1.77"
-homepage = "https://gitlab.torproject.org/tpo/core/arti/-/wikis/home"
+edition.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
 description = "Hash function family designed for ASIC-resistant client puzzles"
 keywords = ["cryptography"]
 categories = ["cryptography"]
-repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
+repository.workspace = true
 
 # This crate is a new implementation of algorithms developed and implemented
 # by tevador here: https://github.com/tevador/equix/. The original is
