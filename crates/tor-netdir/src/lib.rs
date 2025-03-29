@@ -1576,8 +1576,16 @@ impl NetDir {
         // This code will give the wrong result if the total of all weights
         // can exceed u64::MAX.  We make sure that can't happen when we
         // set up `self.weights`.
+        let all_zero = relays[..]
+            .iter()
+            .all(|r| self.weights.weight_rs_for_role(r.rs, role) == 0);
         relays[..]
-            .choose_weighted(rng, |r| self.weights.weight_rs_for_role(r.rs, role))
+            .choose_weighted(rng, |r| {
+                if all_zero {
+                    return 1;
+                }
+                self.weights.weight_rs_for_role(r.rs, role)
+            })
             .ok()
             .cloned()
     }
