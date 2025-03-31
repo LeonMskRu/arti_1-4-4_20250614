@@ -66,6 +66,106 @@ impl From<StaticKeyProviderBuilder> for StaticKeyProvider {
     }
 }
 
+/// A file containing the client keys, each in the
+/// `descriptor:x25519:<base32-encoded-x25519-public-key>` format.
+#[derive(Debug, Clone, Builder, Eq, PartialEq, Getters)]
+#[builder(derive(Serialize, Deserialize, Debug))]
+#[builder(build_fn(error = "ConfigBuildError"))]
+pub struct StaticKeyPathProvider {
+    /// The path.
+    path: CfgPath,
+}
+
+/// The serialized format of a [`StaticKeyPathProviderBuilder`]:
+pub type StaticKeyPathProviderList = Vec<StaticKeyPathProvider>;
+
+define_list_builder_helper! {
+    pub struct StaticKeyPathProviderListBuilder {
+        keys: [StaticKeyPathProviderBuilder],
+    }
+    built: StaticKeyPathProviderList = keys;
+    default = vec![];
+}
+
+impl StaticKeyPathProvider {
+    /// Read the client service discovery keys from the specified directory.
+    pub(super) fn read_key(
+        &self,
+    ) -> Result<Vec<(HsClientNickname, HsClientDescEncKey)>, StaticKeyPathProviderError> {
+        /// The extension the client key files are expected to have.
+        const KEY_EXTENSION: &str = "auth";
+
+        let file_name: &Path = self.path.as_literal_path().unwrap();
+        let extension = file_name.extension().and_then(|e| e.to_str());
+        if extension != Some(KEY_EXTENSION) {
+            return Err(StaticKeyPathProviderError::InvalidKeyEntry {
+                path: file_name.into(),
+                problem: "invalid extension (file must end in .auth)".into(),
+            });
+        }
+
+        // We unwrap_or_default() instead of returning an error if the file stem is None,
+        // because empty slugs handled by HsClientNickname::from_str (they are rejected).
+        let client_nickname = file_name
+            .file_stem()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default();
+        let client_nickname = HsClientNickname::from_str(client_nickname)?;
+
+        let key =
+            fs::read_to_string(file_name).map_err(|err| StaticKeyPathProviderError::FsError {
+                path: file_name.to_path_buf(),
+            });
+
+        let parsed_key = HsClientDescEncKey::from_str(key?.trim()).map_err(|err| {
+            StaticKeyPathProviderError::KeyParse {
+                path: file_name.to_path_buf(),
+                err,
+            }
+        })?;
+
+        Ok(vec![(client_nickname, parsed_key)])
+    }
+}
+
+/// Error type representing an invalid [`StaticKeyPathProvider`].
+#[derive(Debug, Clone, thiserror::Error)]
+pub(super) enum StaticKeyPathProviderError {
+    /// Encountered an error while reading the keys from disk.
+    #[error("Error while reading the key {path}")]
+    FsError {
+        /// The path of the key we were trying to read.
+        path: PathBuf,
+    },
+
+    /// Encountered an error while reading the keys from disk.
+    #[error("IO error while reading discovery keys")]
+    IoError(#[source] Arc<io::Error>),
+
+    /// Found an invalid key entry.
+    #[error("{path} is not a valid key entry: {problem}")]
+    InvalidKeyEntry {
+        /// The path of the key we were trying to read.
+        path: PathBuf,
+        /// The problem we encountered.
+        problem: String,
+    },
+
+    /// Failed to parse a client nickname.
+    #[error("Invalid client nickname")]
+    ClientNicknameParse(#[from] BadSlug),
+
+    /// Failed to parse a key.
+    #[error("Failed to parse key at {path}")]
+    KeyParse {
+        /// The path of the key we were trying to parse.
+        path: PathBuf,
+        /// The underlying error.
+        #[source]
+        err: HsClientDescEncKeyParseError,
+    },
+}
+
 /// Helper for building a [`StaticKeyProvider`] out of a list of client keys.
 ///
 /// Returns an error if the list contains duplicate keys

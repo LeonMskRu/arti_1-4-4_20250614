@@ -74,8 +74,9 @@
 //!
 //! # Key providers
 //!
-//! The [`RestrictedDiscoveryConfig`] supports two key providers:
-//!   * [`StaticKeyProvider`], where keys are specified as a static mapping from nicknames to keys
+//! The [`RestrictedDiscoveryConfig`] supports three key providers:
+//!   * [`StaticKeyProvider`], where keys are specified as a static mapping from nicknames to keys.
+//!   * [`StaticKeyPathProvider`], which represents a path to a single key.
 //!   * [`DirectoryKeyProvider`], which represents a directory of client keys.
 //!
 //! # Limitations
@@ -96,7 +97,8 @@ mod key_provider;
 
 pub use key_provider::{
     DirectoryKeyProvider, DirectoryKeyProviderBuilder, DirectoryKeyProviderList,
-    DirectoryKeyProviderListBuilder, StaticKeyProvider, StaticKeyProviderBuilder,
+    DirectoryKeyProviderListBuilder, StaticKeyPathProvider, StaticKeyPathProviderList,
+    StaticKeyPathProviderListBuilder, StaticKeyProvider, StaticKeyProviderBuilder,
 };
 
 use crate::internal_prelude::*;
@@ -224,6 +226,14 @@ pub struct RestrictedDiscoveryConfig {
     #[builder(default, sub_builder(fn_name = "build"))]
     #[builder_field_attr(serde(default))]
     static_keys: StaticKeyProvider,
+
+    /// A static mapping from client nicknames to key file paths.
+    ///
+    /// Each client key path will be file containing the
+    /// `descriptor:x25519:<base32-encoded-x25519-public-key>` format.
+    #[builder(default, sub_builder(fn_name = "build"))]
+    #[builder_field_attr(serde(default))]
+    static_key_paths: StaticKeyPathProviderList,
 }
 
 impl RestrictedDiscoveryConfig {
@@ -258,6 +268,17 @@ impl RestrictedDiscoveryConfig {
             &mut authorized_clients,
             RestrictedDiscoveryKeys::from(self.static_keys.clone()),
         );
+
+        // The key_dirs are read in order of appearance,
+        // which is also the order of precedence.
+        for file in &self.static_key_paths {
+            match file.read_key() {
+                Ok(keys) => extend_key_map(&mut authorized_clients, keys),
+                Err(e) => {
+                    warn_report!(e, "Failed to read keys at {}", file.path());
+                }
+            }
+        }
 
         // The key_dirs are read in order of appearance,
         // which is also the order of precedence.
@@ -315,78 +336,118 @@ impl RestrictedDiscoveryConfigBuilder {
             enabled,
             key_dirs,
             static_keys,
+            static_key_paths,
             watch_configuration,
         } = self.build_unvalidated()?;
         let key_list = static_keys.as_ref().iter().collect_vec();
 
         cfg_if::cfg_if! {
-            if #[cfg(feature = "restricted-discovery")] {
-                match (enabled, key_dirs.as_slice(), key_list.as_slice()) {
-                    (true, &[], &[]) => {
-                        return Err(ConfigBuildError::Inconsistent {
-                            fields: vec!["key_dirs".into(), "static_keys".into(), "enabled".into()],
-                            problem: "restricted_discovery not configured, but enabled is true"
-                                .into(),
-                        });
-                    },
-                    (false, &[_, ..], _) => {
-                        return Err(ConfigBuildError::Inconsistent {
-                            fields: vec!["key_dirs".into(), "enabled".into()],
-                            problem: "restricted_discovery.key_dirs configured, but enabled is false"
-                                .into(),
-                        });
+                    if #[cfg(feature = "restricted-discovery")] {
+                        match (enabled, key_dirs.as_slice(), key_list.as_slice()) {
+                            (true, &[], &[], &[]) => {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["key_dirs".into(), "static_keys".into(), "static_key_paths".into(), "enabled".into()],
+                                    problem: "restricted_discovery not configured, but enabled is true"
+                                        .into(),
+                                });
+                            },
+                            (true, &[], &[]) => {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["key_dirs".into(), "static_keys".into(), "enabled".into()],
+                                    problem: "restricted_discovery not configured, but enabled is true"
+                                        .into(),
+                                });
+                            },
+                            (true, &[], &[]) => {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["key_dirs".into(), "static_keys_paths".into(), "enabled".into()],
+                                    problem: "restricted_discovery not configured, but enabled is true"
+                                        .into(),
+                                });
+                            },
+                            (true, &[], &[]) => {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["static_keys".into(), "static_keys_paths".into(), "enabled".into()],
+                                    problem: "restricted_discovery not configured, but enabled is true"
+                                        .into(),
+                                });
+                            },
+                            (false, &[_, ..], _) => {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["key_dirs".into(), "enabled".into()],
+                                    problem: "restricted_discovery.key_dirs configured, but enabled is false"
+                                        .into(),
+                                });
 
-                    },
-                    (false, _, &[_, ..])=> {
-                        return Err(ConfigBuildError::Inconsistent {
-                            fields: vec!["static_keys".into(), "enabled".into()],
-                            problem: "restricted_discovery.static_keys configured, but enabled is false"
-                                .into(),
-                        });
-                    }
-                    (true, &[_, ..], _) | (true, _, &[_, ..]) | (false, &[], &[]) => {
-                        // The config is valid.
+                            },
+                            (false, _, &[_, ..])=> {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["static_keys".into(), "enabled".into()],
+                                    problem: "restricted_discovery.static_keys configured, but enabled is false"
+                                        .into(),
+                                });
+                            }
+                            (false, _, &[_, ..], _)=> {
+                                return Err(ConfigBuildError::Inconsistent {
+                                    fields: vec!["static_key_paths".into(), "enabled".i
+        nto()],
+                                    problem: "restricted_discovery.static_key_paths con
+        figured, but enabled is false"
+                                        .into(),
+                                });
+                            }
+                            (true, &[_, ..], _) | (true, _, &[_, ..]) | (false, &[], &[]) => {
+                                // The config is valid.
+                            }
+                        }
+                    } else {
+                        // Restricted mode can only be enabled if the `experimental` feature is enabled.
+                        if enabled {
+                            return Err(ConfigBuildError::NoCompileTimeSupport {
+                                field: "enabled".into(),
+                                problem:
+                                    "restricted_discovery.enabled=true, but restricted-discovery feature not enabled"
+                                        .into(),
+                            });
+                        }
+
+                        match (key_dirs.as_slice(), key_list.as_slice()) {
+                            (&[_, ..], _) => {
+                                return Err(ConfigBuildError::NoCompileTimeSupport {
+                                    field: "key_dirs".into(),
+                                    problem:
+                                        "restricted_discovery.key_dirs set, but restricted-discovery feature not enabled"
+                                            .into(),
+                                });
+                            },
+                            (_, &[_, ..]) => {
+                                return Err(ConfigBuildError::NoCompileTimeSupport {
+                                    field: "static_keys".into(),
+                                    problem:
+                                        "restricted_discovery.static_keys set, but restricted-discovery feature not enabled"
+                                            .into(),
+                                });
+                            },
+                            (&[_, ..], _) => {
+                                return Err(ConfigBuildError::NoCompileTimeSupport {
+                                    field: "static_key_paths".into(),
+                                    problem:
+                                        "restricted_discovery.static_key_paths set, but restricted-discovery feature not enabled"
+                                            .into(),
+                                });
+                            },
+                            (&[], &[]) => {
+                                // The config is valid.
+                            }
+                        };
                     }
                 }
-            } else {
-                // Restricted mode can only be enabled if the `experimental` feature is enabled.
-                if enabled {
-                    return Err(ConfigBuildError::NoCompileTimeSupport {
-                        field: "enabled".into(),
-                        problem:
-                            "restricted_discovery.enabled=true, but restricted-discovery feature not enabled"
-                                .into(),
-                    });
-                }
-
-                match (key_dirs.as_slice(), key_list.as_slice()) {
-                    (&[_, ..], _) => {
-                        return Err(ConfigBuildError::NoCompileTimeSupport {
-                            field: "key_dirs".into(),
-                            problem:
-                                "restricted_discovery.key_dirs set, but restricted-discovery feature not enabled"
-                                    .into(),
-                        });
-                    },
-                    (_, &[_, ..]) => {
-                        return Err(ConfigBuildError::NoCompileTimeSupport {
-                            field: "static_keys".into(),
-                            problem:
-                                "restricted_discovery.static_keys set, but restricted-discovery feature not enabled"
-                                    .into(),
-                        });
-                    },
-                    (&[], &[]) => {
-                        // The config is valid.
-                    }
-                };
-            }
-        }
 
         Ok(RestrictedDiscoveryConfig {
             enabled,
             key_dirs,
             static_keys,
+            static_key_paths,
             watch_configuration,
         })
     }
@@ -474,6 +535,19 @@ mod test {
             err,
             Inconsistent,
             "restricted_discovery.key_dirs configured, but enabled is false"
+        );
+
+        let mut key_path_provider = StaticKeyPathProviderBuilder::default();
+        key_path_provider.path(CfgPath::new("/foo.auth".to_string()));
+        let mut builder = RestrictedDiscoveryConfigBuilder::default();
+        builder.key_dirs().access().push(dir_provider);
+
+        let err = builder.build().unwrap_err();
+
+        assert_config_error!(
+            err,
+            Inconsistent,
+            "restricted_discovery.key_path_provider configured, but enabled is false"
         );
     }
 
