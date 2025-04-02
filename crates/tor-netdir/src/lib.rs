@@ -1642,11 +1642,11 @@ impl NetDir {
                            remaining.len(), relays.len());
                     remaining
                 }
-            },
+            }
             Err(e) => {
                 warn_report!(e, "Unexpected error while sampling a set of relays");
                 Vec::new()
-            },
+            }
             Ok(iter) => iter.map(Relay::clone).collect(),
         };
         relays.shuffle(rng);
