@@ -61,6 +61,7 @@ use async_trait::async_trait;
 #[cfg(feature = "hs-service")]
 use itertools::chain;
 use static_assertions::const_assert;
+use tor_error::warn_report;
 use tor_linkspec::{
     ChanTarget, DirectChanMethodsHelper, HasAddrs, HasRelayIds, RelayIdRef, RelayIdType,
 };
@@ -1621,13 +1622,31 @@ impl NetDir {
         }) {
             Err(rand::seq::WeightError::InsufficientNonZero) => {
                 // Too few relays had nonzero weights: return all of those that are okay.
-                relays
+                let remaining: Vec<_> = relays
                     .iter()
                     .filter(|r| self.weights.weight_rs_for_role(r.rs, role) > 0)
                     .cloned()
-                    .collect()
-            }
-            Err(_) => Vec::new(),
+                    .collect();
+                if remaining.is_empty() {
+                    warn!(?self.weights, ?role,
+                          "After filtering, all {} relays had zero weight! Picking some at random. See bug #1907.",
+                          relays.len());
+                    if relays.len() >= n {
+                        relays.choose_multiple(rng, n).cloned().collect()
+                    } else {
+                        relays
+                    }
+                } else {
+                    warn!(?self.weights, ?role,
+                          "After filtering, only had {}/{} relays with nonzero weight. Returning them all. See bug #1907.",
+                           remaining.len(), relays.len());
+                    remaining
+                }
+            },
+            Err(e) => {
+                warn_report!(e, "Unexpected error while sampling a set of relays");
+                Vec::new()
+            },
             Ok(iter) => iter.map(Relay::clone).collect(),
         };
         relays.shuffle(rng);
