@@ -283,14 +283,10 @@ impl<R: Runtime> TorClientBuilder<R> {
                             humantime::Duration::from(remaining),
                         );
                     }
-                    let next_delay = if first_attempt {
-                        RETRY_INITIAL_DELAY
-                    } else {
-                        // Double the previous delay, but cap it at MAX_DELAY.
-                        previous_delay.map_or(RETRY_INITIAL_DELAY, |prev| {
-                            prev.saturating_mul(2).min(RETRY_MAX_DELAY)
-                        })
-                    };
+                    // Double the previous delay, but cap it at MAX_DELAY.
+                    let next_delay = previous_delay.map_or(RETRY_INITIAL_DELAY, |prev| {
+                        prev.saturating_mul(2).min(RETRY_MAX_DELAY)
+                    });
 
                     // We'll retry at least once.
                     Err(next_delay.min(remaining))
