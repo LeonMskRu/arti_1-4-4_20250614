@@ -69,20 +69,19 @@ members = [
     "crates/arti",
     "crates/arti-bench",
     "crates/arti-testing",
-
     "crates/arti-rpc-client-core",
 
     "maint/fixup-features",
     "maint/keygen-openssh-test",
 
+    "examples/axum/axum-hello-world",
+    "examples/download-manager",
     "examples/gsoc2023/connection-checker",
     "examples/gsoc2023/dns-resolver",
     "examples/gsoc2023/obfs4-checker",
     "examples/gsoc2023/pt-proxy",
     "examples/hyper/hyper-http-client-example",
     "examples/hyper/hyper-http-hs-example",
-    "examples/axum/axum-hello-world",
-    "examples/download-manager",
 ]
 
 resolver = "2"
