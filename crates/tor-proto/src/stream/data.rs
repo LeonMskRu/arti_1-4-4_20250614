@@ -860,7 +860,7 @@ impl AsyncRead for DataReader {
                     {
                         _imp.status.lock().expect("lock poisoned").record_error(&e);
                     }
-                    let result = if matches!(e, Error::EndReceived(EndReason::DONE)) {
+                    let result = if matches!(e, Error::EndReceived(_)) {
                         Ok(0)
                     } else {
                         Err(e.into())
