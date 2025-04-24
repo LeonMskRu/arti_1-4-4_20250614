@@ -109,6 +109,11 @@ pub(crate) mod testing {
 
     /// Return a basic configuration.
     pub(crate) fn cfg() -> RelaySelectionConfig<'static> {
+        // TODO MSRV 1.80: See about replacing this usage of
+        // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See [1] for
+        // more information.
+        //
+        // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
         static STABLE_PORTS: Lazy<HashSet<u16>> = Lazy::new(|| [22].into_iter().collect());
         RelaySelectionConfig {
             long_lived_ports: &STABLE_PORTS,
