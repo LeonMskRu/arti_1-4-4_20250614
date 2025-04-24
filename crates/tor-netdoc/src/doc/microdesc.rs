@@ -188,6 +188,11 @@ decl_keyword! {
 }
 
 /// Rules about annotations that can appear before a Microdescriptor
+//
+// TODO MSRV 1.80: See about replacing this usage of [`once_cell::sync::Lazy`]
+// with [`std::sync::LazyLock`]. See [1] for more information.
+//
+// [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
 static MICRODESC_ANNOTATIONS: Lazy<SectionRules<MicrodescKwd>> = Lazy::new(|| {
     use MicrodescKwd::*;
     let mut rules = SectionRules::builder();
@@ -200,6 +205,11 @@ static MICRODESC_ANNOTATIONS: Lazy<SectionRules<MicrodescKwd>> = Lazy::new(|| {
 });
 /// Rules about entries that must appear in an Microdesc, and how they must
 /// be formed.
+//
+// TODO MSRV 1.80: See about replacing this usage of [`once_cell::sync::Lazy`]
+// with [`std::sync::LazyLock`]. See [1] for more information.
+//
+// [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
 static MICRODESC_RULES: Lazy<SectionRules<MicrodescKwd>> = Lazy::new(|| {
     use MicrodescKwd::*;
 

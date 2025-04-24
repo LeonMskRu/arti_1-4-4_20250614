@@ -65,6 +65,12 @@ macro_rules! decl_keyword {
             fn from_idx(i : usize) -> Option<Self> {
                 // Note looking up the value in a vec.  This may or may
                 // not be faster than a case statement would be.
+                //
+                // TODO MSRV 1.80: See about replacing this usage of
+                // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See
+                // [1] for more information.
+                //
+                // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
                 static VALS: once_cell::sync::Lazy<Vec<$name>> =
                     once_cell::sync::Lazy::new(
                         || vec![ $($name::$i , )*
