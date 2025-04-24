@@ -14,6 +14,11 @@ use std::{
 use once_cell::sync::Lazy;
 
 /// Cached value of our observed home directory.
+//
+// TODO MSRV 1.80: See about replacing this usage of [`once_cell::sync::Lazy`]
+// with [`std::sync::LazyLock`]. See [1] for more information.
+//
+// [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
 static HOMEDIRS: Lazy<Vec<PathBuf>> = Lazy::new(default_homedirs);
 
 /// Return a list of home directories in official and canonical forms.

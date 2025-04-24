@@ -35,6 +35,11 @@ struct TrustedUsersCache<U: PwdGrpProvider> {
 ///
 /// It isn't 100% correct since we don't track changes to the passwd/group databases.
 /// That might not be OK everywhere, but it is OK in this application.
+//
+// TODO MSRV 1.80: See about replacing this usage of [`once_cell::sync::Lazy`]
+// with [`std::sync::LazyLock`]. See [1] for more information.
+//
+// [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
 static CACHE: Lazy<Mutex<TrustedUsersCache<PwdGrp>>> =
     Lazy::new(|| Mutex::new(TrustedUsersCache::default()));
 
