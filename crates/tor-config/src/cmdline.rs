@@ -108,6 +108,12 @@ impl figment::Provider for CmdLine {
 /// pretty happy to convert strings to other stuff.
 fn tweak_toml_bareword(s: &str) -> Option<String> {
     /// Regex to match a keyword=bareword item.
+    //
+    // TODO MSRV 1.80: See about replacing this usage of
+    // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See [1] for more
+    // information.
+    //
+    // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
     static RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(
             r#"(?x:
