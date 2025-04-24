@@ -360,6 +360,12 @@ define_derive_deftly! {
                 // In order to get a `&'static`, we need to use Box::leak().
                 // That's fine, since we only create one CastTable per
                 // instantiation of the type.
+                //
+                // TODO MSRV 1.80: See about replacing this usage of
+                // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See
+                // [1] for more information.
+                //
+                // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
                 static TABLES: Lazy<RwLock<HashMap<TypeId, &'static $crate::CastTable>>> =
                 Lazy::new(|| RwLock::new(HashMap::new()));
                 {
@@ -383,6 +389,12 @@ define_derive_deftly! {
             } else {
                 // For non-generic types, we only ever have a single CastTable,
                 // so we can just construct it once and return it.
+                //
+                // TODO MSRV 1.80: See about replacing this usage of
+                // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See
+                // [1] for more information.
+                //
+                // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
                 use $crate::once_cell::sync::Lazy;
                 static TABLE: Lazy<$crate::CastTable> = Lazy::new(|| $ttype::make_cast_table());
                 &TABLE

@@ -177,6 +177,11 @@ impl CastTable {
 ///
 /// Because this table doesn't support any casting, it is okay to use it with
 /// any concrete type.
+//
+// TODO MSRV 1.80: See about replacing this usage of [`once_cell::sync::Lazy`]
+// with [`std::sync::LazyLock`]. See [1] for more information.
+//
+// [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
 pub(super) static EMPTY_CAST_TABLE: Lazy<CastTable> = Lazy::new(|| CastTable {
     table: HashMap::new(),
 });
