@@ -40,6 +40,14 @@ pub struct RendRequest {
     ///
     /// TODO: This also contains `raw`, which is maybe not so great; it would be
     /// neat to implement more efficiently.
+    //
+    // TODO MSRV TBD: See about replacing this usage of
+    // [`once_cell::unsync::OnceCell`] with [`std::cell::OnceCell`]. Waiting on
+    // [`std::cell::OnceCell::get_or_try_init`] to stabilize and fall within our
+    // MSRV. See [1] and [2] for more information.
+    //
+    // [1]: https://github.com/rust-lang/rust/issues/109737
+    // [2]: https://doc.rust-lang.org/std/cell/struct.OnceCell.html#method.get_or_try_init
     expanded: once_cell::unsync::OnceCell<rend_handshake::IntroRequest>,
 }
 
