@@ -16,6 +16,11 @@ use crate::config::default_config_paths;
 /// A cached copy of the default config paths.
 ///
 /// We cache the values to ensure they are consistent between the help text and the values used.
+//
+// TODO MSRV 1.80: See about replacing this usage of [`once_cell::sync::Lazy`]
+// with [`std::sync::LazyLock`]. See [1] for more information.
+//
+// [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
 static DEFAULT_CONFIG_PATHS: Lazy<Result<Vec<PathBuf>, CfgPathError>> =
     Lazy::new(default_config_paths);
 
