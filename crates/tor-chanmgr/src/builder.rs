@@ -465,7 +465,10 @@ mod test {
         );
 
         // Create a builder with default timeout configuration
-        let default_builder = ChanBuilder::new(runtime.clone(), crate::transport::DefaultTransport::new(runtime));
+        let default_builder = ChanBuilder::new(
+            runtime.clone(),
+            crate::transport::DefaultTransport::new(runtime),
+        );
 
         // Check that the default timeout values are as expected
         assert_eq!(
