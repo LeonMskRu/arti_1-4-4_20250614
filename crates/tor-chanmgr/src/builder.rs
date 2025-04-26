@@ -23,6 +23,7 @@ use futures::task::SpawnExt;
 /// This struct controls how long we're willing to wait when establishing
 /// channel connections.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChannelTimeoutConfig {
     /// Timeout for direct connections (in seconds).
     ///
