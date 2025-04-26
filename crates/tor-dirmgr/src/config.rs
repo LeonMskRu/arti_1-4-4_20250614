@@ -131,6 +131,42 @@ pub struct DownloadScheduleConfig {
 
 impl_standard_builder! { DownloadScheduleConfig }
 
+/// Configuration for certificate fetching limits to prevent DOS attacks.
+///
+/// This configuration helps mitigate attacks where a malicious consensus
+/// references fictional certificates that can never be found.
+#[derive(Debug, Clone, Builder, Eq, PartialEq)]
+#[builder(derive(Debug, Serialize, Deserialize))]
+#[builder(build_fn(error = "ConfigBuildError"))]
+pub struct CertFetchLimits {
+    /// Maximum time in seconds to spend fetching certificates for a single consensus.
+    ///
+    /// After this time has elapsed, we'll give up and try a different consensus.
+    ///
+    /// Defaults to 60 seconds.
+    #[builder(default = "Duration::from_secs(60)")]
+    #[builder_field_attr(serde(default, with = "humantime_serde::option"))]
+    pub(crate) max_cert_fetch_time: Duration,
+
+    /// Maximum number of attempts to fetch any single certificate.
+    ///
+    /// After this many attempts, we'll give up on that certificate.
+    ///
+    /// Defaults to 3 attempts.
+    #[builder(default = "3")]
+    pub(crate) max_cert_fetch_attempts: u32,
+
+    /// Maximum total number of certificate fetch attempts for a single consensus.
+    ///
+    /// This limits the total number of fetch attempts across all certificates.
+    ///
+    /// Defaults to 50 attempts.
+    #[builder(default = "50")]
+    pub(crate) max_total_cert_fetch_attempts: u32,
+}
+
+impl_standard_builder! { CertFetchLimits }
+
 /// Configuration for how much much to extend the official tolerances of our
 /// directory information.
 ///
@@ -241,6 +277,9 @@ pub struct DirMgrConfig {
     /// How much skew do we tolerate in directory validity times?
     pub tolerance: DirTolerance,
 
+    /// Limits for certificate fetching to prevent DOS attacks.
+    pub cert_fetch_limits: CertFetchLimits,
+
     /// A map of network parameters that we're overriding from their settings in
     /// the consensus.
     ///
@@ -299,6 +338,7 @@ impl DirMgrConfig {
             },
             schedule: new_config.schedule.clone(),
             tolerance: new_config.tolerance.clone(),
+            cert_fetch_limits: new_config.cert_fetch_limits.clone(),
             override_net_params: new_config.override_net_params.clone(),
             extensions: new_config.extensions.clone(),
         }
@@ -443,6 +483,30 @@ mod test {
         bld.cache_dir = tmp.path().into();
 
         assert_eq!(bld.override_net_params.get("circwindow").unwrap(), &999);
+
+        Ok(())
+    }
+
+    #[test]
+    fn build_cert_fetch_limits() -> Result<()> {
+        use std::time::Duration;
+        let mut bld = CertFetchLimits::builder();
+
+        // Check defaults
+        let cfg = bld.build().unwrap();
+        assert_eq!(cfg.max_cert_fetch_time, Duration::from_secs(60));
+        assert_eq!(cfg.max_cert_fetch_attempts, 3);
+        assert_eq!(cfg.max_total_cert_fetch_attempts, 50);
+
+        // Check custom values
+        bld.max_cert_fetch_time(Duration::from_secs(30));
+        bld.max_cert_fetch_attempts(5);
+        bld.max_total_cert_fetch_attempts(100);
+
+        let cfg = bld.build().unwrap();
+        assert_eq!(cfg.max_cert_fetch_time, Duration::from_secs(30));
+        assert_eq!(cfg.max_cert_fetch_attempts, 5);
+        assert_eq!(cfg.max_total_cert_fetch_attempts, 100);
 
         Ok(())
     }
