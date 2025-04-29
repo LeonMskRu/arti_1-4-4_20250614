@@ -496,13 +496,17 @@ impl<R: Runtime> GetCertsState<R> {
     fn check_cert_fetch_limits(&self) -> Result<()> {
         // Check if we've exceeded the maximum time for certificate fetching
         let now = self.rt.wallclock();
-        let elapsed = now.duration_since(self.cert_fetch_start_time).unwrap_or_default();
+        let elapsed = now
+            .duration_since(self.cert_fetch_start_time)
+            .unwrap_or_default();
         if elapsed > self.config.cert_fetch_limits.max_cert_fetch_time {
             return Err(Error::CertFetchLimitExceeded("time limit"));
         }
 
         // Check if we've exceeded the maximum total number of certificate fetch attempts
-        if self.total_cert_fetch_attempts >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts {
+        if self.total_cert_fetch_attempts
+            >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+        {
             return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
         }
 
@@ -515,7 +519,9 @@ impl<R: Runtime> GetCertsState<R> {
     /// or if the total number of fetch attempts has exceeded the limit.
     fn increment_cert_fetch_attempt(&mut self, cert_id: &AuthCertKeyIds) -> Result<()> {
         // First check if we've already exceeded the total limit
-        if self.total_cert_fetch_attempts >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts {
+        if self.total_cert_fetch_attempts
+            >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+        {
             return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
         }
 
@@ -528,7 +534,9 @@ impl<R: Runtime> GetCertsState<R> {
 
         // Check if we've exceeded the maximum number of attempts for this certificate
         if *attempts > self.config.cert_fetch_limits.max_cert_fetch_attempts {
-            return Err(Error::CertFetchLimitExceeded("per-certificate attempt limit"));
+            return Err(Error::CertFetchLimitExceeded(
+                "per-certificate attempt limit",
+            ));
         }
 
         Ok(())
@@ -720,7 +728,7 @@ impl<R: Runtime> DirState for GetCertsState<R> {
                     }
                 }
                 a.keys().collect()
-            },
+            }
             _ => return Err(internal!("expected an AuthCert request").into()),
         };
 
@@ -1964,13 +1972,17 @@ mod test {
             fn check_cert_fetch_limits(&self) -> Result<()> {
                 // Check if we've exceeded the maximum time for certificate fetching
                 let now = SystemTime::now();
-                let elapsed = now.duration_since(self.cert_fetch_start_time).unwrap_or_default();
+                let elapsed = now
+                    .duration_since(self.cert_fetch_start_time)
+                    .unwrap_or_default();
                 if elapsed > self.config.cert_fetch_limits.max_cert_fetch_time {
                     return Err(Error::CertFetchLimitExceeded("time limit"));
                 }
 
                 // Check if we've exceeded the maximum total number of certificate fetch attempts
-                if self.total_cert_fetch_attempts >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts {
+                if self.total_cert_fetch_attempts
+                    >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+                {
                     return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
                 }
 
@@ -1980,7 +1992,9 @@ mod test {
             // Simplified version of the increment_cert_fetch_attempt function
             fn increment_cert_fetch_attempt(&mut self, cert_id: &AuthCertKeyIds) -> Result<()> {
                 // First check if we've already exceeded the total limit
-                if self.total_cert_fetch_attempts >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts {
+                if self.total_cert_fetch_attempts
+                    >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+                {
                     return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
                 }
 
@@ -1993,7 +2007,9 @@ mod test {
 
                 // Check if we've exceeded the maximum number of attempts for this certificate
                 if *attempts > self.config.cert_fetch_limits.max_cert_fetch_attempts {
-                    return Err(Error::CertFetchLimitExceeded("per-certificate attempt limit"));
+                    return Err(Error::CertFetchLimitExceeded(
+                        "per-certificate attempt limit",
+                    ));
                 }
 
                 Ok(())
