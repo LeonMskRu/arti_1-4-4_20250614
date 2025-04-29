@@ -113,6 +113,8 @@ $ git push _name_ main
 
 Please do not to rebase and squash MRs during the review cycle. If you want to make changes to your MR, please add new commits rather than squashing. You can use the [`fixup!`](https://git-scm.com/docs/git-rebase#Documentation/git-rebase.txt---autosquash) or `squash!` ([autosquash](https://thoughtbot.com/blog/autosquashing-git-commits)) syntax. This is a good idea if the un-fixed state breaks the tests or is otherwise broken, but is not needed otherwise.
 
+We typically prefix each commit message with the main crate or root level directory it applies to.
+
 ## Getting started
 
 You might want to begin by looking around the [codebase](https://gitlab.torproject.org/tpo/core/arti/), or getting to know our [architecture](/contributing/for-developers/architecture).
@@ -135,7 +137,7 @@ Finally, check out [the bugtracker](https://gitlab.torproject.org/tpo/core/arti/
 
 ## What to watch out for
 
-There are some instances where we deviating from the existing Tor protocol under the assumption that certain proposals will be accepted. See our [protocol support and compatibility guide](/guides/compatibility) for more information. This code does not attempt to be indistinguishable from the current Tor implementation.
+There are some instances where we're deviating from the existing Tor protocol under the assumption that certain proposals will be accepted. See our [protocol support and compatibility guide](/guides/compatibility) for more information. This code does not attempt to be indistinguishable from the current Tor implementation.
 
 When building the docs with `cargo doc`, use `--workspace --all-features`, or you may find broken links. We welcome fixes to links broken with `--all-features`. 
 You can also use the following command to reveal (unstable) internal information: 
