@@ -710,6 +710,7 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         opt_err_to_result(nonfatal_error)
     }
 
+    #[allow(clippy::cognitive_complexity)]
     fn add_from_download(
         &mut self,
         text: &str,
