@@ -777,6 +777,7 @@ impl TorClientConfig {
             tolerance:           self.directory_tolerance.clone(),
             cache_dir:           self.storage.expand_cache_dir(&self.path_resolver)?,
             cache_trust:         self.storage.permissions.clone(),
+            cert_fetch_limits:   Default::default(),
             override_net_params: self.override_net_params.clone(),
             extensions:          Default::default(),
         })
