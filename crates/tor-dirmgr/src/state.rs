@@ -709,6 +709,7 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         }
         opt_err_to_result(nonfatal_error)
     }
+
     fn add_from_download(
         &mut self,
         text: &str,
@@ -717,6 +718,7 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         storage: Option<&Mutex<DynStore>>,
         changed: &mut bool,
     ) -> Result<()> {
+        // Process the request and track certificate fetch attempts
         let asked_for: HashSet<_> = match request {
             ClientRequest::AuthCert(a) => {
                 // Increment the fetch attempt counter for each certificate we're asking for
@@ -2018,7 +2020,7 @@ mod test {
             // Simplified version of the missing_docs function
             fn missing_docs(&self) -> Vec<DocId> {
                 // Check if we've exceeded any certificate fetch limits
-                if let Err(_) = self.check_cert_fetch_limits() {
+                if self.check_cert_fetch_limits().is_err() {
                     return Vec::new();
                 }
 
@@ -2039,8 +2041,10 @@ mod test {
         }
 
         // Create a mock state for testing
-        let mut config = DirMgrConfig::default();
-        config.cert_fetch_limits = limits;
+        let config = DirMgrConfig {
+            cert_fetch_limits: limits,
+            ..Default::default()
+        };
 
         let mut state = MockState {
             cert_fetch_attempts: HashMap::new(),
