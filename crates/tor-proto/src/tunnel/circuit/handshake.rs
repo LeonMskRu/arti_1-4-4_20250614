@@ -65,6 +65,7 @@ pub(crate) enum RelayCryptLayerProtocol {
 impl From<RelayProtocol> for RelayCryptLayerProtocol {
     fn from(value: RelayProtocol) -> Self {
         match value {
+            // TODO #1948
             RelayProtocol::HsV3 => RelayCryptLayerProtocol::HsV3(RelayCellFormat::V0),
         }
     }
@@ -130,7 +131,7 @@ where
     F: OutboundClientLayer + InboundClientLayer + Send + 'static,
 {
     let layer = L::construct(keygen)?;
-    let (mut fwd, mut back, binding) = layer.split();
+    let (mut fwd, mut back, binding) = layer.split_client_layer();
     if role == HandshakeRole::Responder {
         std::mem::swap(&mut fwd, &mut back);
     }

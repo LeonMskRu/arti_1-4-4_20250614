@@ -16,12 +16,12 @@ use std::sync::Arc;
 use crate::crypto::cell::HopNum;
 use crate::{Error, Result};
 use circuit::ClientCirc;
-use circuit::{handshake, StreamMpscSender, CIRCUIT_BUFFER_SIZE};
+use circuit::{handshake, StreamMpscSender};
 use reactor::{CtrlMsg, LegId};
 
 use tor_async_utils::SinkCloseChannel as _;
 use tor_cell::relaycell::msg::AnyRelayMsg;
-use tor_cell::relaycell::StreamId;
+use tor_cell::relaycell::{RelayCellFormat, StreamId};
 
 // TODO(#1857): Make this pub and not `allow(dead_code)`.
 /// A precise position in a tunnel.
@@ -29,13 +29,8 @@ use tor_cell::relaycell::StreamId;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum HopLocation {
     /// A specific position in a tunnel.
-    #[cfg(not(feature = "conflux"))]
-    Hop(HopNum),
-    /// A specific position in a tunnel.
-    #[cfg(feature = "conflux")]
-    Leg((LegId, HopNum)),
+    Hop((LegId, HopNum)),
     /// The join point of a multi-path tunnel.
-    #[cfg(feature = "conflux")]
     JoinPoint,
 }
 
@@ -67,9 +62,14 @@ pub(crate) enum TargetHop {
 #[derive(Clone, Debug)]
 pub(crate) struct StreamTarget {
     /// Which hop of the circuit this stream is with.
-    hop_num: HopNum,
+    hop: HopLocation,
     /// Reactor ID for this stream.
     stream_id: StreamId,
+    /// Encoding to use for relay cells sent on this stream.
+    ///
+    /// This is mostly irrelevant, except when deciding
+    /// how many bytes we can pack in a DATA message.
+    relay_cell_format: RelayCellFormat,
     /// Channel to send cells down.
     tx: StreamMpscSender<AnyRelayMsg>,
     /// Reference to the circuit that this stream is on.
@@ -126,7 +126,7 @@ impl StreamTarget {
             .control
             .unbounded_send(CtrlMsg::ClosePendingStream {
                 stream_id: self.stream_id,
-                hop_num: self.hop_num,
+                hop: self.hop,
                 message,
                 done: tx,
             })
@@ -156,20 +156,29 @@ impl StreamTarget {
     }
 
     /// Send a SENDME cell for this stream.
-    pub(crate) fn send_sendme(&mut self) -> Result<()> {
+    pub(crate) async fn send_sendme(&mut self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+
         self.circ
             .control
             .unbounded_send(CtrlMsg::SendSendme {
                 stream_id: self.stream_id,
-                hop_num: self.hop_num,
+                hop: self.hop,
+                sender: tx,
             })
             .map_err(|_| Error::CircuitClosed)?;
-        Ok(())
+
+        rx.await.map_err(|_| Error::CircuitClosed)?
     }
 
     /// Return a reference to the circuit that this `StreamTarget` is using.
     #[cfg(any(feature = "experimental-api", feature = "stream-ctrl"))]
     pub(crate) fn circuit(&self) -> &Arc<ClientCirc> {
         &self.circ
+    }
+
+    /// Return the kind of relay cell in use on this `StreamTarget`.
+    pub(crate) fn relay_cell_format(&self) -> RelayCellFormat {
+        self.relay_cell_format
     }
 }

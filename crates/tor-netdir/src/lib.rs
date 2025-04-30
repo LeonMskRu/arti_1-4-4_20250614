@@ -19,6 +19,7 @@ use async_trait::async_trait;
 #[cfg(feature = "hs-service")]
 use itertools::chain;
 use static_assertions::const_assert;
+use tor_error::warn_report;
 use tor_linkspec::{
     ChanTarget, DirectChanMethodsHelper, HasAddrs, HasRelayIds, RelayIdRef, RelayIdType,
 };
@@ -32,12 +33,13 @@ use {hsdir_ring::HsDirRing, std::iter};
 use derive_more::{From, Into};
 use futures::{stream::BoxStream, StreamExt};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use rand::seq::SliceRandom;
+use rand::seq::{IndexedRandom as _, SliceRandom as _, WeightError};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::time::SystemTime;
 use strum::{EnumCount, EnumIter};
 use tracing::warn;
 use typed_index_collections::{TiSlice, TiVec};
@@ -522,6 +524,10 @@ pub enum DirEvent {
     /// (This event is _not_ broadcast when receiving new descriptors for a
     /// consensus which is not yet ready to replace the current consensus.)
     NewDescriptors,
+
+    /// We have received updated recommendations and requirements
+    /// for which subprotocols we should have to use the network.
+    NewProtocolRecommendation,
 }
 
 /// The network directory provider is shutting down without giving us the
@@ -666,6 +672,11 @@ pub trait NetDirProvider: UpcastArcNetDirProvider + Send + Sync {
             }
         }
     }
+
+    /// Return the latest set of recommended and required protocols, if there is one.
+    ///
+    /// This may be more recent (or more available) than this provider's associated NetDir.
+    fn protocol_statuses(&self) -> Option<(SystemTime, Arc<netstatus::ProtoStatuses>)>;
 }
 
 impl<T> NetDirProvider for Arc<T>
@@ -686,6 +697,10 @@ where
 
     fn params(&self) -> Arc<dyn AsRef<NetParameters>> {
         self.deref().params()
+    }
+
+    fn protocol_statuses(&self) -> Option<(SystemTime, Arc<netstatus::ProtoStatuses>)> {
+        self.deref().protocol_statuses()
     }
 }
 
@@ -1120,7 +1135,7 @@ impl NetDir {
         self.all_relays().filter_map(UncheckedRelay::into_relay)
     }
 
-    /// Look up a relay's `MicroDesc` by its `RouterStatusIdx`
+    /// Look up a relay's [`Microdesc`] by its [`RouterStatusIdx`]
     #[cfg_attr(not(feature = "hs-common"), allow(dead_code))]
     pub(crate) fn md_by_rsidx(&self, rsidx: RouterStatusIdx) -> Option<&Microdesc> {
         self.mds.get(rsidx)?.as_deref()
@@ -1513,7 +1528,7 @@ impl NetDir {
         P: FnMut(&Relay<'a>) -> bool,
     {
         let relays: Vec<_> = self.relays().filter(usable).collect();
-        // This algorithm uses rand::distributions::WeightedIndex, and uses
+        // This algorithm uses rand::distr::WeightedIndex, and uses
         // gives O(n) time and space  to build the index, plus O(log n)
         // sampling time.
         //
@@ -1534,10 +1549,23 @@ impl NetDir {
         // This code will give the wrong result if the total of all weights
         // can exceed u64::MAX.  We make sure that can't happen when we
         // set up `self.weights`.
-        relays[..]
-            .choose_weighted(rng, |r| self.weights.weight_rs_for_role(r.rs, role))
-            .ok()
-            .cloned()
+        match relays[..].choose_weighted(rng, |r| self.weights.weight_rs_for_role(r.rs, role)) {
+            Ok(relay) => Some(relay.clone()),
+            Err(WeightError::InsufficientNonZero) => {
+                if relays.is_empty() {
+                    None
+                } else {
+                    warn!(?self.weights, ?role,
+                          "After filtering, all {} relays had zero weight. Choosing one at random. See bug #1907.",
+                          relays.len());
+                    relays.choose(rng).cloned()
+                }
+            }
+            Err(e) => {
+                warn_report!(e, "Unexpected error while sampling a relay");
+                None
+            }
+        }
     }
 
     /// Choose `n` relay at random.
@@ -1553,6 +1581,7 @@ impl NetDir {
     /// This function returns an empty vector if (and only if) there
     /// are no relays with nonzero weight where `usable` returned
     /// true.
+    #[allow(clippy::cognitive_complexity)] // all due to tracing crate.
     pub fn pick_n_relays<'a, R, P>(
         &'a self,
         rng: &mut R,
@@ -1569,8 +1598,44 @@ impl NetDir {
         let mut relays = match relays[..].choose_multiple_weighted(rng, n, |r| {
             self.weights.weight_rs_for_role(r.rs, role) as f64
         }) {
-            Err(_) => Vec::new(),
-            Ok(iter) => iter.map(Relay::clone).collect(),
+            Err(WeightError::InsufficientNonZero) => {
+                // Too few relays had nonzero weights: return all of those that are okay.
+                // (This is behavior used to come up with rand 0.9; it no longer does.
+                // We still detect it.)
+                let remaining: Vec<_> = relays
+                    .iter()
+                    .filter(|r| self.weights.weight_rs_for_role(r.rs, role) > 0)
+                    .cloned()
+                    .collect();
+                if remaining.is_empty() {
+                    warn!(?self.weights, ?role,
+                          "After filtering, all {} relays had zero weight! Picking some at random. See bug #1907.",
+                          relays.len());
+                    if relays.len() >= n {
+                        relays.choose_multiple(rng, n).cloned().collect()
+                    } else {
+                        relays
+                    }
+                } else {
+                    warn!(?self.weights, ?role,
+                          "After filtering, only had {}/{} relays with nonzero weight. Returning them all. See bug #1907.",
+                           remaining.len(), relays.len());
+                    remaining
+                }
+            }
+            Err(e) => {
+                warn_report!(e, "Unexpected error while sampling a set of relays");
+                Vec::new()
+            }
+            Ok(iter) => {
+                let selection: Vec<_> = iter.map(Relay::clone).collect();
+                if selection.len() < n {
+                    warn!(?self.weights, ?role,
+                          "After filtering, choose_multiple_weighted only returned {}/{} relays with nonzero weight. See bug #1907.",
+                          selection.len(), relays.len());
+                }
+                selection
+            }
         };
         relays.shuffle(rng);
         relays
@@ -2063,7 +2128,7 @@ mod test {
     use float_eq::assert_float_eq;
     use std::collections::HashSet;
     use std::time::Duration;
-    use tor_basic_utils::test_rng;
+    use tor_basic_utils::test_rng::{self, testing_rng};
     use tor_linkspec::{RelayIdType, RelayIds};
 
     #[cfg(feature = "hs-common")]
@@ -2839,5 +2904,62 @@ mod test {
         //
         // If we use relays [A, B, C] for replica 1, and hs_index(2) = E, then replica 2 _must_ get
         // relays [E, F, D]. We should have a test that checks this.
+    }
+
+    #[test]
+    fn zero_weights() {
+        // Here we check the behavior of IndexedRandom::{choose_weighted, choose_multiple_weighted}
+        // in the presence of items whose weight is 0.
+        //
+        // We think that the behavior is:
+        //   - An item with weight 0 is never returned.
+        //   - If all items have weight 0, choose_weighted returns an error.
+        //   - If all items have weight 0, choose_multiple_weighted returns an empty list.
+        //   - If we request n items from choose_multiple_weighted,
+        //     but only m<n items have nonzero weight, we return all m of those items.
+        //   - if the request for n items can't be completely satisfied with n items of weight >= 0,
+        //     we get InsufficientNonZero.
+        let items = vec![1, 2, 3];
+        let mut rng = testing_rng();
+
+        let a = items.choose_weighted(&mut rng, |_| 0);
+        assert!(matches!(a, Err(WeightError::InsufficientNonZero)));
+
+        let x = items.choose_multiple_weighted(&mut rng, 2, |_| 0);
+        let xs: Vec<_> = x.unwrap().collect();
+        assert!(xs.is_empty());
+
+        let only_one = |n: &i32| if *n == 1 { 1 } else { 0 };
+        let x = items.choose_multiple_weighted(&mut rng, 2, only_one);
+        let xs: Vec<_> = x.unwrap().collect();
+        assert_eq!(&xs[..], &[&1]);
+
+        for _ in 0..100 {
+            let a = items.choose_weighted(&mut rng, only_one);
+            assert_eq!(a.unwrap(), &1);
+
+            let x = items
+                .choose_multiple_weighted(&mut rng, 1, only_one)
+                .unwrap()
+                .collect::<Vec<_>>();
+            assert_eq!(x, vec![&1]);
+        }
+    }
+
+    #[test]
+    fn insufficient_but_nonzero() {
+        // Here we check IndexedRandom::choose_multiple_weighted when there no zero values,
+        // but there are insufficient values.
+        // (If this behavior changes, we need to change our usage.)
+
+        let items = vec![1, 2, 3];
+        let mut rng = testing_rng();
+        let mut a = items
+            .choose_multiple_weighted(&mut rng, 10, |_| 1)
+            .unwrap()
+            .copied()
+            .collect::<Vec<_>>();
+        a.sort();
+        assert_eq!(a, items);
     }
 }

@@ -8,7 +8,7 @@
 //! allowing substitute random number generators for testing or for special
 //! purposes that don't require compatibility with HashX proper.
 //!
-//! The stateful u8 and u32 layer comes from this module's ['RngBuffer'].
+//! The stateful u8 and u32 layer comes from this module's [`RngBuffer`].
 //! It's important for the u8 and u32 queues to share a common generator.
 //! The order of dequeueing u8 items vs u32 items intentionally modifies the
 //! assignment of particular u64 [`RngCore`] values to the two queues.
@@ -135,14 +135,6 @@ impl RngCore for SipRand {
     /// Fill `dest` with random data.
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         rand_core::impls::fill_bytes_via_next(self, dest);
-    }
-
-    /// Fill `dest` with random data.
-    ///
-    /// Always succeeds.
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
-        self.fill_bytes(dest);
-        Ok(())
     }
 }
 

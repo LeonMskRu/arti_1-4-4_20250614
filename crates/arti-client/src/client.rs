@@ -10,7 +10,9 @@ use {derive_deftly::Deftly, tor_rpcbase::templates::*};
 
 use crate::address::{IntoTorAddr, ResolveInstructions, StreamInstructions};
 
-use crate::config::{ClientAddrConfig, StreamTimeoutConfig, TorClientConfig};
+use crate::config::{
+    ClientAddrConfig, SoftwareStatusOverrideConfig, StreamTimeoutConfig, TorClientConfig,
+};
 use safelog::{sensitive, Sensitive};
 use tor_async_utils::{DropNotifyWatchSender, PostageWatchSenderExt};
 use tor_circmgr::isolation::{Isolation, StreamIsolation};
@@ -60,7 +62,6 @@ use futures::lock::Mutex as AsyncMutex;
 use futures::task::SpawnExt;
 use futures::StreamExt as _;
 use std::net::IpAddr;
-use std::path::PathBuf;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 
@@ -155,24 +156,22 @@ pub struct TorClient<R: Runtime> {
     /// Guard manager
     #[cfg_attr(not(feature = "bridge-client"), allow(dead_code))]
     guardmgr: GuardMgr<R>,
-    /// Location on disk where we store persistent data (raw directory).
-    // TODO replace this and storage_mistrust with tor_persist::state_dir::StateDirectory?
-    #[cfg(feature = "onion-service-service")]
-    state_dir: PathBuf,
-    /// Permissions `Mistrust` configuration for all our on-disk storage
+    /// Location on disk where we store persistent data containing both location and Mistrust information.
     ///
-    /// This applies to `state_dir`, but it comes from `[storage]` in our config,
-    /// so this configuration is the same one as used for eg the netdir cache.
-    /// (It's mostly copied during `TorClient` creation, and ends up within
-    /// the subsystems in fields like `dirmgr`, `keymgr` and `statemgr`.)
+    ///
+    /// This path is configured via `[storage]` in the config but is not used directly as a
+    /// StateDirectory in most places. Instead, its path and Mistrust information are copied
+    /// to subsystems like `dirmgr`, `keymgr`, and `statemgr` during `TorClient` creation.
     #[cfg(feature = "onion-service-service")]
-    storage_mistrust: fs_mistrust::Mistrust,
+    state_directory: StateDirectory,
     /// Location on disk where we store persistent data (cooked state manager).
     statemgr: FsStateMgr,
     /// Client address configuration
     addrcfg: Arc<MutCfg<ClientAddrConfig>>,
     /// Client DNS configuration
     timeoutcfg: Arc<MutCfg<StreamTimeoutConfig>>,
+    /// Software status configuration.
+    software_status_cfg: Arc<MutCfg<SoftwareStatusOverrideConfig>>,
     /// Mutex used to serialize concurrent attempts to reconfigure a TorClient.
     ///
     /// See [`TorClient::reconfigure`] for more information on its use.
@@ -328,7 +327,7 @@ impl InertTorClient {
         selector: KeystoreSelector,
         hsid: HsId,
     ) -> crate::Result<HsClientDescEncKey> {
-        let mut rng = rand::thread_rng();
+        let mut rng = tor_llcrypto::rng::CautiousRng;
         let spec = HsClientDescEncKeypairSpecifier::new(hsid);
         let key = self
             .keymgr
@@ -365,7 +364,7 @@ impl InertTorClient {
         selector: KeystoreSelector,
         hsid: HsId,
     ) -> crate::Result<HsClientDescEncKey> {
-        let mut rng = rand::thread_rng();
+        let mut rng = tor_llcrypto::rng::CautiousRng;
         let spec = HsClientDescEncKeypairSpecifier::new(hsid);
         let key = self
             .keymgr
@@ -787,6 +786,12 @@ impl TorClient<PreferredRuntime> {
     /// If using `async-std`, either take care to ensure Arti is not compiled with Tokio support,
     /// or manually create an `async-std` runtime using [`tor_rtcompat`] and use it with
     /// [`TorClient::with_runtime`].
+    ///
+    /// # Do not fork
+    ///
+    /// The process [**may not fork**](tor_rtcompat#do-not-fork)
+    /// (except, very carefully, before exec)
+    /// after calling this function, because it creates a [`PreferredRuntime`].
     pub async fn create_bootstrapped(config: TorClientConfig) -> crate::Result<Self> {
         let runtime = PreferredRuntime::current()
             .expect("TorClient could not get an asynchronous runtime; are you running in the right context?");
@@ -811,6 +816,12 @@ impl TorClient<PreferredRuntime> {
     /// If using `async-std`, either take care to ensure Arti is not compiled with Tokio support,
     /// or manually create an `async-std` runtime using [`tor_rtcompat`] and use it with
     /// [`TorClient::with_runtime`].
+    ///
+    /// # Do not fork
+    ///
+    /// The process [**may not fork**](tor_rtcompat#do-not-fork)
+    /// (except, very carefully, before exec)
+    /// after calling this function, because it creates a [`PreferredRuntime`].
     pub fn builder() -> TorClientBuilder<PreferredRuntime> {
         let runtime = PreferredRuntime::current()
             .expect("TorClient could not get an asynchronous runtime; are you running in the right context?");
@@ -848,6 +859,9 @@ impl<R: Runtime> TorClient<R> {
         let path_resolver = Arc::new(config.path_resolver.clone());
 
         let (state_dir, mistrust) = config.state_dir()?;
+        #[cfg(feature = "onion-service-service")]
+        let state_directory =
+            StateDirectory::new(&state_dir, mistrust).map_err(ErrorDetail::StateAccess)?;
 
         let dormant = DormantMode::Normal;
         let dir_cfg = {
@@ -917,6 +931,34 @@ impl<R: Runtime> TorClient<R> {
                 dir_cfg,
             )
             .map_err(crate::Error::into_detail)?;
+
+        let software_status_cfg = Arc::new(MutCfg::new(config.use_obsolete_software.clone()));
+        let rtclone = runtime.clone();
+        #[allow(clippy::print_stderr)]
+        crate::protostatus::enforce_protocol_recommendations(
+            &runtime,
+            Arc::clone(&dirmgr),
+            crate::software_release_date(),
+            crate::supported_protocols(),
+            Arc::clone(&software_status_cfg),
+            // TODO #1932: It would be nice to have a cleaner shutdown mechanism here,
+            // but that will take some work.
+            |fatal| async move {
+                use tor_error::ErrorReport as _;
+                // We already logged this error, but let's tell stderr too.
+                eprintln!(
+                    "Shutting down because of unsupported software version.\nError was:\n{}",
+                    fatal.report(),
+                );
+                if let Some(hint) = crate::err::Error::from(fatal).hint() {
+                    eprintln!("{}", hint);
+                }
+                // Give the tracing module a while to flush everything, since it has no built-in
+                // flush function.
+                rtclone.sleep(std::time::Duration::new(5, 0)).await;
+                std::process::exit(1);
+            },
+        )?;
 
         let mut periodic_task_handles = circmgr
             .launch_background_tasks(&runtime, &dirmgr, statemgr.clone())
@@ -1012,10 +1054,9 @@ impl<R: Runtime> TorClient<R> {
             should_bootstrap: autobootstrap,
             dormant: Arc::new(Mutex::new(dormant_send)),
             #[cfg(feature = "onion-service-service")]
-            state_dir,
-            #[cfg(feature = "onion-service-service")]
-            storage_mistrust: mistrust.clone(),
+            state_directory,
             path_resolver,
+            software_status_cfg,
         })
     }
 
@@ -1249,6 +1290,8 @@ impl<R: Runtime> TorClient<R> {
 
         self.addrcfg.replace(addr_cfg.clone());
         self.timeoutcfg.replace(timeout_cfg.clone());
+        self.software_status_cfg
+            .replace(new_config.use_obsolete_software.clone());
 
         Ok(())
     }
@@ -1392,10 +1435,6 @@ impl<R: Runtime> TorClient<R> {
                 if let Some(keymgr) = &self.inert_client.keymgr {
                     let desc_enc_key_spec = HsClientDescEncKeypairSpecifier::new(hsid);
 
-                    // TODO hs: refactor to reduce code duplication.
-                    //
-                    // The code that reads ks_hsc_desc_enc and ks_hsc_intro_auth and builds the
-                    // HsClientSecretKeys is very repetitive and should be refactored.
                     let ks_hsc_desc_enc =
                         keymgr.get::<HsClientDescEncKeypair>(&desc_enc_key_spec)?;
 
@@ -1693,8 +1732,7 @@ impl<R: Runtime> TorClient<R> {
                 action: "launch onion service",
             })?
             .clone();
-        let state_dir = self::StateDirectory::new(&self.state_dir, &self.storage_mistrust)
-            .map_err(ErrorDetail::StateAccess)?;
+        let state_dir = self.state_directory.clone();
 
         let service = tor_hsservice::OnionService::builder()
             .config(config) // TODO #1186: Allow override of KeyMgr for "ephemeral" operation?
@@ -1969,8 +2007,7 @@ impl<R: Runtime> TorClient<R> {
             .keymgr(keymgr)
             .state_dir(state_dir)
             .build()
-            // TODO: do we need an ErrorDetail::CreateOnionService?
-            .map_err(ErrorDetail::LaunchOnionService)?)
+            .map_err(ErrorDetail::OnionServiceSetup)?)
     }
 
     /// Return a current [`status::BootstrapStatus`] describing how close this client

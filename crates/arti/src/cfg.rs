@@ -224,11 +224,32 @@ pub struct ArtiConfig {
     #[builder_field_attr(serde(default))]
     logging: LoggingConfig,
 
+    /// Metrics configuration
+    #[builder(sub_builder(fn_name = "build"))]
+    #[builder_field_attr(serde(default))]
+    pub(crate) metrics: MetricsConfig,
+
     /// Configuration for RPC subsystem
     #[cfg(feature = "rpc")]
     #[builder(sub_builder(fn_name = "build"))]
     #[builder_field_attr(serde(default))]
     pub(crate) rpc: RpcConfig,
+
+    /// Configuration for the RPC subsystem (disabled)
+    //
+    // This set of options allows us to detect and warn
+    // when anything is set under "rpc" in the config.
+    //
+    // The incantations are a bit subtle: we use an Option<toml::Value> in the builder,
+    // to ensure that our configuration will continue to round-trip thorough serde.
+    // We use () in the configuration type, since toml::Value isn't Eq,
+    // and since we don't want to expose whatever spurious options were in the config.
+    // We use builder(private), since using builder(setter(skip))
+    // would (apparently) override the type of the field in builder and make it a PhantomData.
+    #[cfg(not(feature = "rpc"))]
+    #[builder_field_attr(serde(default))]
+    #[builder(field(type = "Option<toml::Value>", build = "()"), private)]
+    rpc: (),
 
     /// Information on system resources used by Arti.
     ///
@@ -267,6 +288,11 @@ impl ArtiConfigBuilder {
                 .watch_configuration_mut() = config.application.watch_configuration;
         }
 
+        #[cfg(not(feature = "rpc"))]
+        if self.rpc.is_some() {
+            tracing::warn!("rpc options were set, but Arti was built without support for rpc.");
+        }
+
         Ok(config)
     }
 }
@@ -287,6 +313,38 @@ define_list_builder_accessors! {
 ///
 /// Used primarily as a type parameter on calls to [`tor_config::resolve`]
 pub type ArtiCombinedConfig = (ArtiConfig, TorClientConfig);
+
+/// Configuration for exporting metrics (eg, perf data)
+#[derive(Debug, Clone, Builder, Eq, PartialEq)]
+#[builder(build_fn(error = "ConfigBuildError"))]
+#[builder(derive(Debug, Serialize, Deserialize))]
+pub struct MetricsConfig {
+    /// Where to listen for incoming HTTP connections.
+    #[builder(sub_builder(fn_name = "build"))]
+    #[builder_field_attr(serde(default))]
+    pub(crate) prometheus: PrometheusConfig,
+}
+impl_standard_builder! { MetricsConfig }
+
+/// Configuration for one or more proxy listeners.
+#[derive(Debug, Clone, Builder, Eq, PartialEq)]
+#[builder(build_fn(error = "ConfigBuildError"))]
+#[builder(derive(Debug, Serialize, Deserialize))]
+#[allow(clippy::option_option)] // Builder port fields: Some(None) = specified to disable
+pub struct PrometheusConfig {
+    /// Port on which to establish a Prometheus scrape endpoint
+    ///
+    /// We listen here for incoming HTTP connections.
+    ///
+    /// If just a port is provided, we don't support IPv6.
+    /// Alternatively, (only) a single address and port can be specified.
+    /// These restrictions are due to upstream limitations:
+    /// <https://github.com/metrics-rs/metrics/issues/567>.
+    #[builder(default)]
+    #[builder_field_attr(serde(default))]
+    pub(crate) listen: Listen,
+}
+impl_standard_builder! { PrometheusConfig }
 
 impl ArtiConfig {
     /// Return the [`ApplicationConfig`] for this configuration.
@@ -508,6 +566,7 @@ mod test {
                 "path_rules.long_lived_ports",
                 "proxy.socks_listen",
                 "proxy.dns_listen",
+                "use_obsolete_software",
             ],
         );
 
@@ -566,6 +625,24 @@ mod test {
                 "system.memory",
                 "system.memory.max",
                 "system.memory.low_water",
+            ],
+        );
+
+        declare_exceptions(
+            None,
+            Some(InNew), // The top-level section is in the new file (only).
+            Recognized,
+            &["metrics"],
+        );
+
+        declare_exceptions(
+            None,
+            None, // The inner information is not formatted for auto-testing
+            Recognized,
+            &[
+                // Prometheus metrics exporter, tested by fn metrics (below)
+                "metrics.prometheus",
+                "metrics.prometheus.listen",
             ],
         );
 
@@ -983,9 +1060,12 @@ example config file {which:?}, uncommented={uncommented:?}
 
         // If this assert fails, it might be because in `fn exhaustive`, below,
         // a newly-defined config item has not been added to the list for OLDEST_SUPPORTED_CONFIG.
-        assert! { problems.is_empty(),
-        "example config exhaustiveness check failed: {}\n-----8<-----\n{}\n-----8<-----\n",
-                  problems.join("\n"), example_file}
+        assert!(
+            problems.is_empty(),
+ "example config {which:?} exhaustiveness check failed: {}\n-----8<-----\n{}\n-----8<-----\n",
+            problems.join("\n"),
+            example_file,
+        );
     }
 
     #[test]
@@ -1127,6 +1207,9 @@ example config file {which:?}, uncommented={uncommented:?}
         }
     }
 
+    // TODO there is quite some duplication between these next several functions
+    // Maybe it could be abstracted.
+
     #[test]
     fn transports() {
         // Extract and uncomment our transports lines.
@@ -1229,6 +1312,49 @@ example config file {which:?}, uncommented={uncommented:?}
     }
 
     #[test]
+    fn metrics() {
+        // Test that uncommenting the example generates a config
+        // with prometheus enabled.
+
+        let mut file = ExampleSectionLines::from_string(ARTI_EXAMPLE_CONFIG);
+        file.narrow((r"^\[metrics\]", true), (r"^\[", false));
+        file.lines.retain(|line| {
+            [
+                //
+                "[",
+                "#    prometheus.",
+            ]
+            .iter()
+            .any(|t| line.starts_with(t))
+        });
+        file.strip_prefix("#    ");
+
+        let result = file.resolve_return_results::<(TorClientConfig, ArtiConfig)>();
+
+        let result = result.unwrap();
+
+        // Test that the example config doesn't have any unrecognised keys
+        assert_eq!(result.unrecognized, []);
+        assert_eq!(result.deprecated, []);
+
+        // Check that the example is as we expected
+        assert_eq!(
+            result
+                .value
+                .1
+                .metrics
+                .prometheus
+                .listen
+                .single_address_legacy()
+                .unwrap(),
+            Some("127.0.0.1:9035".parse().unwrap()),
+        );
+
+        // We don't test "compiled out but not used" here.
+        // That case is handled in proxy.rs at startup time.
+    }
+
+    #[test]
     fn onion_services() {
         // Here we require that the onion services configuration is between a
         // line labeled with `#     [onion_service."allium-cepa"]` and
@@ -1237,7 +1363,7 @@ example config file {which:?}, uncommented={uncommented:?}
         let mut file = ExampleSectionLines::from_string(ARTI_EXAMPLE_CONFIG);
         file.narrow(
             (r#"^#    \[onion_services."allium\-cepa"\]"#, true),
-            (r#"^\[vanguards\]"#, true),
+            (r#"^##### RPC"#, true),
         );
         file.lines.retain(|line| line.starts_with("#    "));
         file.strip_prefix("#    ");
@@ -1333,6 +1459,65 @@ example config file {which:?}, uncommented={uncommented:?}
         {
             expect_err_contains(result.unwrap_err(), "no support for running onion services");
         }
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn rpc_defaults() {
+        let mut file = ExampleSectionLines::from_string(ARTI_EXAMPLE_CONFIG);
+        // This will get us all the RPC entries that correspond to our defaults.
+        //
+        // The examples that _aren't_ in our defaults have '#      ' at the start.
+        file.narrow((r"^##### RPC", false), (r"^\[vanguards\]", false));
+        file.lines
+            .retain(|line| line.starts_with("#    ") && !line.starts_with("#      "));
+        file.strip_prefix("#    ");
+
+        let parsed = file
+            .resolve_return_results::<(TorClientConfig, ArtiConfig)>()
+            .unwrap();
+        assert!(parsed.unrecognized.is_empty());
+        assert!(parsed.deprecated.is_empty());
+        let rpc_parsed: &RpcConfig = parsed.value.1.rpc();
+        let rpc_default = RpcConfig::default();
+        assert_eq!(rpc_parsed, &rpc_default);
+    }
+
+    #[cfg(feature = "rpc")]
+    #[test]
+    fn rpc_full() {
+        use crate::rpc::listener::{ConnectPointOptionsBuilder, RpcListenerSetConfigBuilder};
+
+        let mut file = ExampleSectionLines::from_string(ARTI_EXAMPLE_CONFIG);
+        // This will get us all the RPC entries, including those that _don't_ correspond to our defaults.
+        file.narrow((r"^##### RPC", false), (r"^\[vanguards\]", false));
+        // We skip the "file" item because it conflicts with "dir" and "file_options"
+        file.lines
+            .retain(|line| line.starts_with("#    ") && !line.contains("file ="));
+        file.strip_prefix("#    ");
+
+        let parsed = file
+            .resolve_return_results::<(TorClientConfig, ArtiConfig)>()
+            .unwrap();
+        let rpc_parsed: &RpcConfig = parsed.value.1.rpc();
+
+        let expected = {
+            let mut bld_opts = ConnectPointOptionsBuilder::default();
+            bld_opts.enable(false);
+
+            let mut bld_set = RpcListenerSetConfigBuilder::default();
+            bld_set.dir(CfgPath::new("${HOME}/.my_connect_files/".to_string()));
+            bld_set.listener_options().enable(true);
+            bld_set
+                .file_options()
+                .insert("bad_file.json".to_string(), bld_opts);
+
+            let mut bld = RpcConfigBuilder::default();
+            bld.listen().insert("label".to_string(), bld_set);
+            bld.build().unwrap()
+        };
+
+        assert_eq!(&expected, rpc_parsed);
     }
 
     /// Helper for fishing out parts of the config file and uncommenting them.

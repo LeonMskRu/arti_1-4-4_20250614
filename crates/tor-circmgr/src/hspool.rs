@@ -284,6 +284,14 @@ pub(crate) struct HsCircPoolInner<B: AbstractCircBuilder<R> + 'static, R: Runtim
     // TODO: I think we may want to move this into the same Mutex as Pool
     // eventually.  But for now, this is fine, since it's just an implementation
     // detail.
+    //
+    // TODO MSRV TBD: If still relevant, see about replacing this usage of
+    // [`once_cell::sync::OnceCell`] with [`std::sync::OnceLock`]. Waiting on
+    // [`std::sync::OnceLock::get_or_try_init`] to stabilize and fall within our
+    // MSRV. See [1] and [2] for more information.
+    //
+    // [1]: https://github.com/rust-lang/rust/issues/109737
+    // [2]: https://doc.rust-lang.org/std/sync/struct.OnceLock.html#method.get_or_try_init
     launcher_handle: OnceCell<TaskHandle>,
     /// The mutable state of this pool.
     inner: Mutex<Inner<B::Circ>>,
@@ -458,7 +466,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> HsCircPoolInner<B, R> {
 
         // Make a future to extend the circuit.
         let extend_future = circ
-            .extend_ntor(&target, &params)
+            .extend_ntor(&target, params)
             .map_err(|error| Error::Protocol {
                 action: "extending to chosen HS hop",
                 peer: None, // Either party could be to blame.
@@ -560,7 +568,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> HsCircPoolInner<B, R> {
             let found_usable_circ =
                 inner
                     .pool
-                    .take_one_where(&mut rand::thread_rng(), restrictions, &prefs);
+                    .take_one_where(&mut rand::rng(), restrictions, &prefs);
 
             // Tell the background task to fire immediately if we have very few circuits
             // circuits left, or if we found nothing.
@@ -661,7 +669,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> HsCircPoolInner<B, R> {
                     &hops,
                     netdir,
                     &target_exclusion,
-                    &mut rand::thread_rng(),
+                    &mut rand::rng(),
                 )?;
 
                 // Since full vanguards are enabled and the circuit we got is NAIVE,

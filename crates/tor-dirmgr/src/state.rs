@@ -20,7 +20,7 @@ use tor_basic_utils::RngExt as _;
 use tor_error::{internal, warn_report};
 use tor_netdir::{MdReceiver, NetDir, PartialNetDir};
 use tor_netdoc::doc::authcert::UncheckedAuthCert;
-use tor_netdoc::doc::netstatus::Lifetime;
+use tor_netdoc::doc::netstatus::{Lifetime, ProtoStatuses};
 use tracing::{debug, warn};
 
 use crate::event::DirProgress;
@@ -69,6 +69,13 @@ pub(crate) enum NetDirChange<'a> {
     },
     /// Add the provided microdescriptors to the current `NetDir`.
     AddMicrodescs(&'a mut Vec<Microdesc>),
+    /// Replace the recommended set of subprotocols.
+    SetRequiredProtocol {
+        /// The time at which the protocol statuses were recommended
+        timestamp: SystemTime,
+        /// The recommended set of protocols.
+        protos: Arc<ProtoStatuses>,
+    },
 }
 
 /// A "state" object used to represent our progress in downloading a
@@ -402,6 +409,7 @@ impl<R: Runtime> GetConsensusState<R> {
             rt: self.rt.clone(),
             config: self.config.clone(),
             prev_netdir: self.prev_netdir.take(),
+            protocol_statuses: None,
             #[cfg(feature = "dirfilter")]
             filter: self.filter.clone(),
         });
@@ -462,6 +470,9 @@ struct GetCertsState<R: Runtime> {
     config: Arc<DirMgrConfig>,
     /// If one exists, the netdir we're trying to update.
     prev_netdir: Option<Arc<dyn PreviousNetDir>>,
+
+    /// If present a set of protocols to install as our latest recommended set.
+    protocol_statuses: Option<(SystemTime, Arc<ProtoStatuses>)>,
 
     /// A filter that gets applied to directory objects before we use them.
     #[cfg(feature = "dirfilter")]
@@ -528,6 +539,18 @@ impl<R: Runtime> GetCertsState<R> {
             ),
         };
         self.consensus = new_consensus;
+
+        // Update our protocol recommendations if we have a validated consensus,
+        // and if we haven't already updated our recommendations.
+        if let GetCertsConsensus::Validated(v) = &self.consensus {
+            if self.protocol_statuses.is_none() {
+                let protoset: &Arc<ProtoStatuses> = v.protocol_statuses();
+                self.protocol_statuses = Some((
+                    self.consensus_meta.lifetime().valid_after(),
+                    Arc::clone(protoset),
+                ));
+            }
+        }
 
         outcome
     }
@@ -623,7 +646,9 @@ impl<R: Runtime> DirState for GetCertsState<R> {
 
         let mut nonfatal_error = None;
         let mut newcerts = Vec::new();
-        for cert in AuthCert::parse_multiple(text) {
+        for cert in
+            AuthCert::parse_multiple(text).map_err(|e| Error::from_netdoc(source.clone(), e))?
+        {
             match self.check_parsed_certificate(cert, &source, text) {
                 Ok((cert, cert_text)) => {
                     newcerts.push((cert, cert_text));
@@ -693,6 +718,15 @@ impl<R: Runtime> DirState for GetCertsState<R> {
             )),
             _ => self,
         }
+    }
+
+    fn get_netdir_change(&mut self) -> Option<NetDirChange<'_>> {
+        self.protocol_statuses.as_ref().map(|(timestamp, protos)| {
+            NetDirChange::SetRequiredProtocol {
+                timestamp: *timestamp,
+                protos: Arc::clone(protos),
+            }
+        })
     }
 
     fn reset_time(&self) -> Option<SystemTime> {
@@ -1055,7 +1089,9 @@ impl<R: Runtime> DirState for GetMicrodescsState<R> {
         let mut new_mds = Vec::new();
         let mut nonfatal_err = None;
 
-        for anno in MicrodescReader::new(text, &AllowAnnotations::AnnotationsNotAllowed) {
+        for anno in MicrodescReader::new(text, &AllowAnnotations::AnnotationsNotAllowed)
+            .map_err(|e| Error::from_netdoc(source.clone(), e))?
+        {
             let anno = match anno {
                 Err(e) => {
                     nonfatal_err.get_or_insert_with(|| Error::from_netdoc(source.clone(), e));
@@ -1159,7 +1195,7 @@ impl<R: Runtime> DirState for GetMicrodescsState<R> {
 /// is `lifetime`.
 fn pick_download_time(lifetime: &Lifetime) -> SystemTime {
     let (lowbound, uncertainty) = client_download_range(lifetime);
-    lowbound + rand::thread_rng().gen_range_infallible(..=uncertainty)
+    lowbound + rand::rng().gen_range_infallible(..=uncertainty)
 }
 
 /// Based on the lifetime for a consensus, return the time range during which
@@ -1270,6 +1306,7 @@ mod test {
     use time::macros::datetime;
     use tor_netdoc::doc::authcert::AuthCertKeyIds;
     use tor_rtcompat::RuntimeSubstExt as _;
+    #[allow(deprecated)] // TODO #1885
     use tor_rtmock::time::MockSleepProvider;
 
     #[test]
@@ -1310,6 +1347,7 @@ mod test {
     }
 
     fn make_time_shifted_runtime(now: SystemTime, rt: impl Runtime) -> impl Runtime {
+        #[allow(deprecated)] // TODO #1885
         let msp = MockSleepProvider::new(now);
         rt.with_sleep_provider(msp.clone())
             .with_coarse_time_provider(msp)
@@ -1378,6 +1416,7 @@ mod test {
         const MICRODESCS: &str = include_str!("../testdata/microdescs.txt");
         let text = MICRODESCS;
         MicrodescReader::new(text, &AllowAnnotations::AnnotationsNotAllowed)
+            .unwrap()
             .map(|res| {
                 let anno = res.unwrap();
                 let text = anno.within(text).unwrap();

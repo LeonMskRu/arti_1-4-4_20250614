@@ -22,7 +22,8 @@ mod imp;
 #[cfg(all(
     target_family = "unix",
     not(target_os = "ios"),
-    not(target_os = "android")
+    not(target_os = "android"),
+    not(target_os = "tvos")
 ))]
 mod user;
 
@@ -51,7 +52,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[cfg(all(
     target_family = "unix",
     not(target_os = "ios"),
-    not(target_os = "android")
+    not(target_os = "android"),
+    not(target_os = "tvos")
 ))]
 pub use user::{TrustedGroup, TrustedUser};
 
@@ -137,7 +139,8 @@ pub struct Mistrust {
     #[cfg(all(
         target_family = "unix",
         not(target_os = "ios"),
-        not(target_os = "android")
+        not(target_os = "android"),
+        not(target_os = "tvos")
     ))]
     #[builder(
         setter(into),
@@ -149,7 +152,8 @@ pub struct Mistrust {
     #[cfg(all(
         target_family = "unix",
         not(target_os = "ios"),
-        not(target_os = "android")
+        not(target_os = "android"),
+        not(target_os = "tvos")
     ))]
     #[builder(
         setter(into),
@@ -184,7 +188,8 @@ impl MistrustBuilder {
     #[cfg(all(
         target_family = "unix",
         not(target_os = "ios"),
-        not(target_os = "android")
+        not(target_os = "android"),
+        not(target_os = "tvos"),
     ))]
     pub fn trust_admin_only(&mut self) -> &mut Self {
         self.trust_user = TrustedUser::None;
@@ -203,7 +208,8 @@ impl MistrustBuilder {
     #[cfg(all(
         target_family = "unix",
         not(target_os = "ios"),
-        not(target_os = "android")
+        not(target_os = "android"),
+        not(target_os = "tvos"),
     ))]
     pub fn trust_no_group_id(&mut self) -> &mut Self {
         self.trust_group = TrustedGroup::None;

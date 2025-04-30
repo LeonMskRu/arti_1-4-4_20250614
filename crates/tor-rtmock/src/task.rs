@@ -10,8 +10,8 @@ use std::future::Future;
 use std::io::{self, Write as _};
 use std::iter;
 use std::mem;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::pin::Pin;
+use std::panic::{catch_unwind, panic_any, AssertUnwindSafe};
+use std::pin::{pin, Pin};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
@@ -20,8 +20,9 @@ use futures::pin_mut;
 use futures::task::{FutureObj, Spawn, SpawnError};
 use futures::FutureExt as _;
 
+use assert_matches::assert_matches;
 use educe::Educe;
-use itertools::Either;
+use itertools::Either::{self, *};
 use itertools::{chain, izip};
 use slotmap_careful::DenseSlotMap;
 use std::backtrace::Backtrace;
@@ -35,7 +36,7 @@ use tracing::{error, trace};
 
 use oneshot_fused_workaround::{self as oneshot, Canceled, Receiver};
 use tor_error::error_report;
-use tor_rtcompat::{BlockOn, SpawnBlocking};
+use tor_rtcompat::{Blocking, ToplevelBlockOn};
 
 use Poll::*;
 use TaskState::*;
@@ -53,11 +54,11 @@ type MainFuture<'m> = Pin<&'m mut dyn Future<Output = ()>>;
 /// For test cases which don't actually wait for anything in the real world.
 ///
 /// This is the executor.
-/// It implements [`Spawn`] and [`BlockOn`]
+/// It implements [`Spawn`] and [`ToplevelBlockOn`]
 ///
 /// It will usually be used as part of a `MockRuntime`.
 ///
-/// To run futures, call [`BlockOn::block_on`],
+/// To run futures, call [`ToplevelBlockOn::block_on`]
 ///
 /// # Restricted environment
 ///
@@ -135,7 +136,8 @@ use task_id::Ti as TaskId;
 /// So we cannot store that future in `Data` because `Data` is `'static`.
 /// Instead, this main task future is passed as an argument down the call stack.
 /// In the data structure we simply store a placeholder, `TaskFutureInfo::Main`.
-#[derive(Default, derive_more::Debug)]
+#[derive(Educe, derive_more::Debug)]
+#[educe(Default)]
 struct Data {
     /// Tasks
     ///
@@ -168,6 +170,7 @@ struct Data {
     ///
     ///  1. no-one but the named thread is allowed to modify this field.
     ///  2. after modifying this field, signal `thread_condvar`
+    #[educe(Default(expression = "ThreadDescriptor::Executor"))]
     thread_to_run: ThreadDescriptor,
 }
 
@@ -203,26 +206,31 @@ struct Task {
     state: TaskState,
     /// The actual future (or a placeholder for it)
     ///
-    /// May be `None` because we've temporarily moved it out so we can poll it,
+    /// May be `None` briefly in the executor main loop, because we've
+    /// temporarily moved it out so we can poll it,
     /// or if this is a Subthread task which is currently running sync code
     /// (in which case we're blocked in the executor waiting to be
     /// woken up by [`thread_context_switch`](Shared::thread_context_switch).
-    fut: Option<TaskFutureInfo>,
-    /// Is this task actually a [`Subthread`](MockExecutor::subthread_spawn)?
     ///
-    /// Subthread tasks do not end when `fut` is `Ready` -
-    /// instead, `fut` is `Some` when the thread is within `subthread_block_on_future`.
-    /// The rest of the time this is `None`, but we don't run the executor,
-    /// because `Data.thread_to_run` is `ThreadDescriptor::Task(this_task)`.
-    is_subthread: Option<IsSubthread>,
+    /// Note that the `None` can be observed outside the main loop, because
+    /// the main loop unlocks while it polls, so other (non-main-loop) code
+    /// might see it.
+    fut: Option<TaskFutureInfo>,
 }
 
 /// A future as stored in our record of a [`Task`]
+#[derive(Educe)]
+#[educe(Debug)]
 enum TaskFutureInfo {
     /// The [`Future`].  All is normal.
-    Normal(TaskFuture),
+    Normal(#[educe(Debug(ignore))] TaskFuture),
     /// The future isn't here because this task is the main future for `block_on`
     Main,
+    /// This task is actually a [`Subthread`](MockExecutor::subthread_spawn)
+    ///
+    /// Instead of polling it, we'll switch to it with
+    /// [`thread_context_switch`](Shared::thread_context_switch).
+    Subthread,
 }
 
 /// State of a task - do we think it needs to be polled?
@@ -312,11 +320,13 @@ struct ProgressUntilStalledFuture {
 /// This being a thread-local and not scoped by which `MockExecutor` we're talking about
 /// means that we can't cope if there are multiple `MockExecutor`s involved in the same thread.
 /// That's OK (and documented).
-#[derive(Default, Copy, Clone, Eq, PartialEq, derive_more::Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, derive_more::Debug)]
 enum ThreadDescriptor {
+    /// Foreign - neither the (running) executor, nor a Subthread
+    #[debug("FOREIGN")]
+    Foreign,
     /// The executor.
     #[debug("Exe")]
-    #[default]
     Executor,
     /// This task, which is a Subthread.
     #[debug("{_0:?}")]
@@ -329,10 +339,14 @@ enum ThreadDescriptor {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct IsSubthread;
 
+/// [`Shared::subthread_yield`] should set our task awake before switching to the executor
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct SetAwake;
+
 thread_local! {
     /// Identifies this thread.
     pub static THREAD_DESCRIPTOR: Cell<ThreadDescriptor> = const {
-        Cell::new(ThreadDescriptor::Executor)
+        Cell::new(ThreadDescriptor::Foreign)
     };
 }
 
@@ -412,24 +426,18 @@ impl MockExecutor {
     /// The future passed to `block_on` is not handled here.
     fn spawn_internal(&self, desc: String, fut: TaskFuture) -> TaskId {
         let mut data = self.shared.lock();
-        data.insert_task(desc, TaskFutureInfo::Normal(fut), None)
+        data.insert_task(desc, TaskFutureInfo::Normal(fut))
     }
 }
 
 impl Data {
     /// Insert a task given its `TaskFutureInfo` and return its `TaskId`.
-    fn insert_task(
-        &mut self,
-        desc: String,
-        fut: TaskFutureInfo,
-        is_subthread: Option<IsSubthread>,
-    ) -> TaskId {
+    fn insert_task(&mut self, desc: String, fut: TaskFutureInfo) -> TaskId {
         let state = Awake;
         let id = self.tasks.insert(Task {
             state,
             desc,
             fut: Some(fut),
-            is_subthread,
         });
         self.awake.push_back(id);
         trace!("MockExecutor spawned {:?}={:?}", id, self.tasks[id]);
@@ -444,18 +452,17 @@ impl Spawn for MockExecutor {
     }
 }
 
-impl SpawnBlocking for MockExecutor {
-    type Handle<T: Send + 'static> = Map<Receiver<T>, Box<dyn FnOnce(Result<T, Canceled>) -> T>>;
-
-    fn spawn_blocking<F, T>(&self, f: F) -> Self::Handle<T>
+impl MockExecutor {
+    /// Implementation of `spawn_blocking` and `blocking_io`
+    fn spawn_thread_inner<F, T>(&self, f: F) -> <Self as Blocking>::ThreadHandle<T>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        // For the mock executor, everything goes on the same threadpool.
+        // For the mock executor, everything runs on the same thread.
         // If we need something more complex in the future, we can change this.
         let (tx, rx) = oneshot::channel();
-        self.spawn_identified("spawn_blocking".to_string(), async move {
+        self.spawn_identified("Blocking".to_string(), async move {
             match tx.send(f()) {
                 Ok(()) => (),
                 Err(_) => panic!("Failed to send future's output, did future panic?"),
@@ -465,9 +472,48 @@ impl SpawnBlocking for MockExecutor {
     }
 }
 
+impl Blocking for MockExecutor {
+    type ThreadHandle<T: Send + 'static> =
+        Map<Receiver<T>, Box<dyn FnOnce(Result<T, Canceled>) -> T>>;
+
+    fn spawn_blocking<F, T>(&self, f: F) -> Self::ThreadHandle<T>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        assert_matches!(
+            THREAD_DESCRIPTOR.get(),
+            ThreadDescriptor::Executor | ThreadDescriptor::Subthread(_),
+ "MockExecutor::spawn_blocking_io only allowed from future or subthread, being run by this executor"
+        );
+        self.spawn_thread_inner(f)
+    }
+
+    fn reenter_block_on<F>(&self, future: F) -> F::Output
+    where
+        F: Future,
+        F::Output: Send + 'static,
+    {
+        self.subthread_block_on_future(future)
+    }
+
+    fn blocking_io<F, T>(&self, f: F) -> impl Future<Output = T>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        assert_eq!(
+            THREAD_DESCRIPTOR.get(),
+            ThreadDescriptor::Executor,
+            "MockExecutor::blocking_io only allowed from future being polled by this executor"
+        );
+        self.spawn_thread_inner(f)
+    }
+}
+
 //---------- block_on ----------
 
-impl BlockOn for MockExecutor {
+impl ToplevelBlockOn for MockExecutor {
     fn block_on<F>(&self, input_fut: F) -> F::Output
     where
         F: Future,
@@ -496,7 +542,7 @@ impl BlockOn for MockExecutor {
             let main_id = self
                 .shared
                 .lock()
-                .insert_task("main".into(), TaskFutureInfo::Main, None);
+                .insert_task("main".into(), TaskFutureInfo::Main);
             trace!("MockExecutor {main_id:?} is task for block_on");
             self.execute_to_completion(run_store_fut);
         }
@@ -601,9 +647,35 @@ impl MockExecutor {
     /// # Panics
     ///
     /// Might malfunction or panic if called reentrantly
-    #[allow(clippy::cognitive_complexity)]
-    fn execute_until_first_stall(&self, mut main_fut: MainFuture) {
+    fn execute_until_first_stall(&self, main_fut: MainFuture) {
         trace!("MockExecutor execute_until_first_stall ...");
+
+        assert_eq!(
+            THREAD_DESCRIPTOR.get(),
+            ThreadDescriptor::Foreign,
+            "MockExecutor executor re-entered"
+        );
+        THREAD_DESCRIPTOR.set(ThreadDescriptor::Executor);
+
+        let r = catch_unwind(AssertUnwindSafe(|| self.executor_main_loop(main_fut)));
+
+        THREAD_DESCRIPTOR.set(ThreadDescriptor::Foreign);
+
+        match r {
+            Ok(()) => trace!("MockExecutor execute_until_first_stall done."),
+            Err(e) => {
+                trace!("MockExecutor executor, or async task, panicked!");
+                panic_any(e)
+            }
+        }
+    }
+
+    /// Keep polling tasks until `awake` is empty (inner, executor main loop)
+    ///
+    /// This is only called from [`MockExecutor::execute_until_first_stall`],
+    /// so it could also be called `execute_until_first_stall_inner`.
+    #[allow(clippy::cognitive_complexity)]
+    fn executor_main_loop(&self, mut main_fut: MainFuture) {
         'outer: loop {
             // Take a `Awake` task off `awake` and make it `Asleep`
             let (id, mut fut) = 'inner: loop {
@@ -621,16 +693,13 @@ impl MockExecutor {
             };
 
             // Poll the selected task
-            let waker = ActualWaker {
-                data: Arc::downgrade(&self.shared),
-                id,
-            }
-            .new_waker();
             trace!("MockExecutor {id:?} polling...");
+            let waker = ActualWaker::make_waker(&self.shared, id);
             let mut cx = Context::from_waker(&waker);
-            let r = match &mut fut {
-                TaskFutureInfo::Normal(fut) => fut.poll_unpin(&mut cx),
-                TaskFutureInfo::Main => main_fut.as_mut().poll(&mut cx),
+            let r: Either<Poll<()>, IsSubthread> = match &mut fut {
+                TaskFutureInfo::Normal(fut) => Left(fut.poll_unpin(&mut cx)),
+                TaskFutureInfo::Main => Left(main_fut.as_mut().poll(&mut cx)),
+                TaskFutureInfo::Subthread => Right(IsSubthread),
             };
 
             // Deal with the returned `Poll`
@@ -642,8 +711,8 @@ impl MockExecutor {
                     .get_mut(id)
                     .expect("task vanished while we were polling it");
 
-                match (r, task.is_subthread) {
-                    (Pending, _) => {
+                match r {
+                    Left(Pending) => {
                         trace!("MockExecutor {id:?} -> Pending");
                         if task.fut.is_some() {
                             panic!("task reinserted while we polled it?!");
@@ -653,7 +722,7 @@ impl MockExecutor {
                         // All we need to do is put the future back.
                         task.fut = Some(fut);
                     }
-                    (Ready(()), None) => {
+                    Left(Ready(())) => {
                         trace!("MockExecutor {id:?} -> Ready");
                         // Oh, it finished!
                         // It might be in `awake`, but that's allowed to contain stale tasks,
@@ -665,15 +734,13 @@ impl MockExecutor {
                         // So, move `fut` to a variable with scope outside the block with `data`.
                         _fut_drop_late = fut;
                     }
-                    (Ready(()), Some(IsSubthread)) => {
+                    Right(IsSubthread) => {
                         trace!("MockExecutor {id:?} -> Ready, waking Subthread");
-                        // Task was blocking on the future given to .subthread_block_on_future().
-                        // That future has completed and stored its result where the Subthread
-                        // can see it.  Now we need to wake up that thread, and let it run
-                        // until it blocks again.
-                        //
-                        // We leave `.fut` as `None`.
-                        // subthread_block_on_future is responsible for filling it in again.
+                        // Task is a subthread, which has called thread_context_switch
+                        // to switch to us.  We "poll" it by switching back.
+
+                        // Put back `TFI::Subthread`, which was moved out temporarily, above.
+                        task.fut = Some(fut);
 
                         self.shared.thread_context_switch(
                             data,
@@ -681,19 +748,14 @@ impl MockExecutor {
                             ThreadDescriptor::Subthread(id),
                         );
 
-                        // Now, if the Subthread still exists, that's because it's waiting
-                        // in subthread_block_on_future again, in which case `fut` is `Some`.
+                        // Now, if the Subthread still exists, that's because it's switched
+                        // back to us, and is waiting in subthread_block_on_future again.
                         // Or it might have ended, in which case it's not in `tasks` any more.
-                        // We can go back to scheduling futures.
-
-                        // `fut` contains the future passed to `subthread_block_on_future`,
-                        // ie it owns an external type.  See above.
-                        _fut_drop_late = fut;
+                        // In any case we can go back to scheduling futures.
                     }
                 }
             }
         }
-        trace!("MockExecutor execute_until_first_stall done.");
     }
 }
 
@@ -732,6 +794,15 @@ impl ActualWaker {
             return;
         };
         task.set_awake(self.id, &mut data.awake);
+    }
+
+    /// Create and return a `Waker` for task `id`
+    fn make_waker(shared: &Arc<Shared>, id: TaskId) -> Waker {
+        ActualWaker {
+            data: Arc::downgrade(shared),
+            id,
+        }
+        .new_waker()
     }
 }
 
@@ -814,7 +885,9 @@ impl MockExecutor {
     ///  * Only a Subthread can re-enter the async context from sync code:
     ///    this must be done with
     ///    using [`subthread_block_on_future`](MockExecutor::subthread_block_on_future).
-    ///    (Re-entering the executor with [`block_on`](BlockOn::block_on) is not allowed.)
+    ///    (Re-entering the executor with
+    ///    [`block_on`](tor_rtcompat::ToplevelBlockOn::block_on)
+    ///    is not allowed.)
     ///  * If async tasks want to suspend waiting for synchronous code,
     ///    the synchronous code must run on a Subthread.
     ///    This allows the `MockExecutor` to know when
@@ -827,9 +900,6 @@ impl MockExecutor {
     ///    they only run as scheduled deterministically by the `MockExecutor`.
     ///    So using Subthreads eliminates a source of test nonndeterminism.
     ///    (Execution order is still varied due to explicitly varying the scheduling policy.)
-    ///
-    /// **TODO [\#1835](https://gitlab.torproject.org/tpo/core/arti/-/issues/1835)**:
-    /// Currently the traits in `tor_rtcompat` do not support proper usage very well.
     ///
     /// # Panics, abuse, and malfunctions
     ///
@@ -867,16 +937,7 @@ impl MockExecutor {
 
         {
             let mut data = self.shared.lock();
-            let fut = TaskFutureInfo::Normal(
-                Box::new(
-                    // When the executor decides that this new task is to be polled,
-                    // its future (this future) returns Ready immediately,
-                    // and the executor mainloop will context switch to the new thread.
-                    futures::future::ready(()),
-                )
-                .into(),
-            );
-            let id = data.insert_task(desc.clone(), fut, Some(IsSubthread));
+            let id = data.insert_task(desc.clone(), TaskFutureInfo::Subthread);
 
             let _: std::thread::JoinHandle<()> = std::thread::Builder::new()
                 .name(desc)
@@ -898,6 +959,7 @@ impl MockExecutor {
     /// including `fut`, until `fut` completes.
     ///
     /// `fut` is polled on the executor thread, not on the Subthread.
+    /// (We may change that in the future, allowing passing a non-`Send` future.)
     ///
     /// # Panics, abuse, and malfunctions
     ///
@@ -909,44 +971,50 @@ impl MockExecutor {
     ///
     /// If the executor isn't running, `subthread_block_on_future` will hang indefinitely.
     /// See `spawn_subthread`.
-    pub fn subthread_block_on_future<T: Send + 'static>(
-        &self,
-        fut: impl Future<Output = T> + Send + 'static,
-    ) -> T {
-        let ret = Arc::new(Mutex::new(None));
-        let fut = {
-            let ret = ret.clone();
-            async move {
-                let t = fut.await;
-                *ret.lock().expect("poison") = Some(t);
-            }
-        };
-        let fut = TaskFutureInfo::Normal(Box::new(fut).into());
-
+    #[allow(clippy::cognitive_complexity)] // Splitting this up would be worse
+    pub fn subthread_block_on_future<T: Send + 'static>(&self, fut: impl Future<Output = T>) -> T {
         let id = match THREAD_DESCRIPTOR.get() {
             ThreadDescriptor::Subthread(id) => id,
-            ThreadDescriptor::Executor => panic!(
-                "subthread_block_on_future called on thread not spawned with spawn_subthread"
+            ThreadDescriptor::Executor => {
+                panic!("subthread_block_on_future called from MockExecutor thread (async task?)")
+            }
+            ThreadDescriptor::Foreign => panic!(
+    "subthread_block_on_future called on foreign thread (not spawned with spawn_subthread)"
             ),
         };
         trace!("MockExecutor thread {id:?}, subthread_block_on_future...");
+        let mut fut = pin!(fut);
 
-        {
-            let mut data = self.shared.lock();
-            let data_ = &mut *data;
-            let task = data_.tasks.get_mut(id).expect("Subthread task vanished!");
-            task.fut = Some(fut);
-            task.set_awake(id, &mut data_.awake);
+        // We yield once before the first poll, and once after Ready, to shake up the
+        // execution order a bit, depending on the scheduling policy.
+        let yield_ = |set_awake| self.shared.subthread_yield(id, set_awake);
+        yield_(Some(SetAwake));
 
-            self.shared.thread_context_switch(
-                data,
-                ThreadDescriptor::Subthread(id),
-                ThreadDescriptor::Executor,
-            );
-        }
+        let ret = loop {
+            // Poll the provided future
+            trace!("MockExecutor thread {id:?}, s.t._block_on_future polling...");
+            let waker = ActualWaker::make_waker(&self.shared, id);
+            let mut cx = Context::from_waker(&waker);
+            let r: Poll<T> = fut.as_mut().poll(&mut cx);
 
-        let ret = ret.lock().expect("poison").take();
-        ret.expect("fut completed but didn't store")
+            if let Ready(r) = r {
+                trace!("MockExecutor thread {id:?}, s.t._block_on_future poll -> Ready");
+                break r;
+            }
+
+            // Pending.  Switch back to the exeuctor thread.
+            // When the future becomes ready, the Waker will be woken, waking the task,
+            // so that the executor will "poll" us again.
+            trace!("MockExecutor thread {id:?}, s.t._block_on_future poll -> Pending");
+
+            yield_(None);
+        };
+
+        yield_(Some(SetAwake));
+
+        trace!("MockExecutor thread {id:?}, subthread_block_on_future complete.");
+
+        ret
     }
 }
 
@@ -966,8 +1034,8 @@ impl Shared {
         THREAD_DESCRIPTOR.set(ThreadDescriptor::Subthread(id));
         trace!("MockExecutor thread {id:?}, entrypoint");
 
-        // Wait for the executor to tell us to run.
-        // This will be done the first time the task is polled.
+        // We start out Awake, but we wait for the executor to tell us to run.
+        // This will be done the first time the task is "polled".
         {
             let data = self.lock();
             self.thread_context_switch_waitfor_instruction_to_run(
@@ -984,7 +1052,7 @@ impl Shared {
 
         trace!("MockExecutor thread {id:?}, completed user code");
 
-        // This makes SubthreadFuture ready.
+        // This makes the return value from subthread_spawn ready.
         // It will be polled by the executor in due course, presumably.
 
         output_tx.send(ret).unwrap_or_else(
@@ -1006,6 +1074,37 @@ impl Shared {
                 ThreadDescriptor::Executor,
             );
         }
+    }
+
+    /// Yield back to the executor from a subthread
+    ///
+    /// Checks that things are in order
+    /// (in particular, that this task is in the data structure as a subhtread)
+    /// and switches to the executor thread.
+    ///
+    /// The caller must arrange that the task gets woken.
+    ///
+    /// With [`SetAwake`], sets our task awake, so that we'll be polled
+    /// again as soon as we get to the top of the executor's queue.
+    /// Otherwise, we'll be reentered after someone wakes a [`Waker`] for the task.
+    fn subthread_yield(&self, us: TaskId, set_awake: Option<SetAwake>) {
+        let mut data = self.lock();
+        {
+            let data = &mut *data;
+            let task = data.tasks.get_mut(us).expect("Subthread task vanished!");
+            match &task.fut {
+                Some(TaskFutureInfo::Subthread) => {}
+                other => panic!("subthread_block_on_future but TFI {other:?}"),
+            };
+            if let Some(SetAwake) = set_awake {
+                task.set_awake(us, &mut data.awake);
+            }
+        }
+        self.thread_context_switch(
+            data,
+            ThreadDescriptor::Subthread(us),
+            ThreadDescriptor::Executor,
+        );
     }
 
     /// Switch from (sub)thread `us` to (sub)thread `them`
@@ -1326,14 +1425,14 @@ impl MockExecutor {
     /// see [`.debug_dump()`](MockExecutor::debug_dump).
     pub fn as_debug_dump(&self) -> DebugDump {
         let data = self.shared.lock();
-        DebugDump(Either::Right(data))
+        DebugDump(Right(data))
     }
 }
 
 impl Data {
     /// Convenience function: dump including backtraces, to stderr
     fn debug_dump(&mut self) {
-        DebugDump(Either::Left(self)).to_stderr();
+        DebugDump(Left(self)).to_stderr();
     }
 }
 
@@ -1363,22 +1462,14 @@ impl Debug for DebugDump<'_> {
 // See `impl Debug for Data` for notes on the output
 impl Debug for Task {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Task {
-            desc,
-            state,
-            fut,
-            is_subthread,
-        } = self;
+        let Task { desc, state, fut } = self;
         write!(f, "{:?}", desc)?;
         write!(f, "=")?;
-        match is_subthread {
-            None => {}
-            Some(IsSubthread) => write!(f, "T")?,
-        }
         match fut {
             None => write!(f, "P")?,
             Some(TaskFutureInfo::Normal(_)) => write!(f, "f")?,
             Some(TaskFutureInfo::Main) => write!(f, "m")?,
+            Some(TaskFutureInfo::Subthread) => write!(f, "T")?,
         }
         match state {
             Awake => write!(f, "W")?,
@@ -1585,11 +1676,11 @@ mod test {
         runtime.block_on({
             let runtime = runtime.clone();
             async move {
-                let task_1 = runtime.spawn_blocking(|| 42);
-                let task_2 = runtime.spawn_blocking(|| 99);
+                let thr_1 = runtime.spawn_blocking(|| 42);
+                let thr_2 = runtime.spawn_blocking(|| 99);
 
-                assert_eq!(task_2.await, 99);
-                assert_eq!(task_1.await, 42);
+                assert_eq!(thr_2.await, 99);
+                assert_eq!(thr_1.await, 42);
             }
         });
     }
@@ -1632,7 +1723,7 @@ mod test {
 
     #[cfg_attr(not(miri), traced_test)]
     #[test]
-    fn subthread() {
+    fn subthread_oneshot() {
         for runtime in various_mock_executors() {
             runtime.block_on(async {
                 let (tx, rx) = oneshot::channel();
@@ -1652,6 +1743,49 @@ mod test {
                 let r = thr.await.unwrap();
                 info!("main task thr => {r}");
                 assert_eq!(r, 13);
+            });
+        }
+    }
+
+    #[cfg_attr(not(miri), traced_test)]
+    #[test]
+    #[allow(clippy::cognitive_complexity)] // It's is not that complicated, really.
+    fn subthread_pingpong() {
+        for runtime in various_mock_executors() {
+            runtime.block_on(async {
+                let (mut i_tx, mut i_rx) = mpsc::channel(1);
+                let (mut o_tx, mut o_rx) = mpsc::channel(1);
+                info!("spawning subthread");
+                let thr = runtime.subthread_spawn("thr", {
+                    let runtime = runtime.clone();
+                    move || {
+                        while let Some(i) = {
+                            info!("thread receiving ...");
+                            runtime.subthread_block_on_future(i_rx.next())
+                        } {
+                            let o = i + 12;
+                            info!("thread received {i}, sending {o}");
+                            runtime.subthread_block_on_future(o_tx.send(o)).unwrap();
+                            info!("thread sent {o}");
+                        }
+                        info!("thread exiting");
+                        42
+                    }
+                });
+                for i in 0..2 {
+                    info!("main task sending {i}");
+                    i_tx.send(i).await.unwrap();
+                    info!("main task sent {i}");
+                    let o = o_rx.next().await.unwrap();
+                    info!("main task recv => {o}");
+                    assert_eq!(o, i + 12);
+                }
+                info!("main task dropping sender");
+                drop(i_tx);
+                info!("main task awaiting thread");
+                let r = thr.await.unwrap();
+                info!("main task complete");
+                assert_eq!(r, 42);
             });
         }
     }

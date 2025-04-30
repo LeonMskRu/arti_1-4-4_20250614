@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use cfg_if::cfg_if;
 use clap::ArgMatches;
 #[allow(unused)]
 use tor_config_path::CfgPathResolver;
@@ -10,7 +11,7 @@ use tracing::{info, warn};
 
 use arti_client::TorClientConfig;
 use tor_config::{ConfigurationSources, Listen};
-use tor_rtcompat::Runtime;
+use tor_rtcompat::ToplevelRuntime;
 
 #[cfg(feature = "dns-proxy")]
 use crate::dns;
@@ -26,7 +27,7 @@ use crate::onion_proxy;
 type PinnedFuture<T> = std::pin::Pin<Box<dyn futures::Future<Output = T>>>;
 
 /// Run the `proxy` subcommand.
-pub(crate) fn run<R: Runtime>(
+pub(crate) fn run<R: ToplevelRuntime>(
     runtime: R,
     proxy_matches: &ArgMatches,
     cfg_sources: ConfigurationSources,
@@ -53,6 +54,32 @@ pub(crate) fn run<R: Runtime>(
         );
     }
 
+    if let Some(listen) = {
+        // https://github.com/metrics-rs/metrics/issues/567
+        config
+            .metrics
+            .prometheus
+            .listen
+            .single_address_legacy()
+            .context("can only listen on a single address for Prometheus metrics")?
+    } {
+        cfg_if! {
+            if #[cfg(feature = "metrics")] {
+                metrics_exporter_prometheus::PrometheusBuilder::new()
+                    .with_http_listener(listen)
+                    .install()
+                    .with_context(|| format!(
+                        "set up Prometheus metrics exporter on {listen}"
+                    ))?;
+                info!("Arti Prometheus metrics export scraper endpoint http://{listen}");
+            } else {
+                return Err(anyhow::anyhow!(
+        "`metrics.prometheus.listen` config set but `metrics` cargo feature compiled out in `arti` crate"
+                ));
+            }
+        }
+    }
+
     process::use_max_file_limit(&config);
 
     let rt_copy = runtime.clone();
@@ -75,7 +102,7 @@ pub(crate) fn run<R: Runtime>(
 /// Currently, might panic if things go badly enough wrong
 #[cfg_attr(feature = "experimental-api", visibility::make(pub))]
 #[cfg_attr(docsrs, doc(cfg(feature = "experimental-api")))]
-async fn run_proxy<R: Runtime>(
+async fn run_proxy<R: ToplevelRuntime>(
     runtime: R,
     socks_listen: Listen,
     dns_listen: Listen,

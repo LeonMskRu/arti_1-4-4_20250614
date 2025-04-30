@@ -18,7 +18,12 @@ use tor_cell::chancell::msg::{Destroy, DestroyReason, PaddingNegotiate};
 use tor_cell::chancell::ChanMsg;
 use tor_cell::chancell::{msg::AnyChanMsg, AnyChanCell, CircId};
 use tor_memquota::mq_queue;
-use tor_rtcompat::{SleepProvider, StreamOps};
+use tor_rtcompat::SleepProvider;
+
+#[cfg_attr(not(target_os = "linux"), allow(unused))]
+use tor_error::error_report;
+#[cfg_attr(not(target_os = "linux"), allow(unused))]
+use tor_rtcompat::StreamOps;
 
 use futures::channel::mpsc;
 use oneshot_fused_workaround as oneshot;
@@ -28,7 +33,7 @@ use futures::stream::Stream;
 use futures::Sink;
 use futures::StreamExt as _;
 use futures::{select, select_biased};
-use tor_error::{error_report, internal};
+use tor_error::internal;
 
 use std::fmt;
 use std::pin::Pin;
@@ -123,6 +128,7 @@ pub struct Reactor<S: SleepProvider> {
     /// This should also be backed by a TLS connection if you want it to be secure.
     pub(super) output: BoxedChannelSink,
     /// A handler for setting stream options on the underlying stream.
+    #[cfg_attr(not(target_os = "linux"), allow(unused))]
     pub(super) streamops: BoxedChannelStreamOps,
     /// Timer tracking when to generate channel padding
     pub(super) padding_timer: Pin<Box<padding::Timer<S>>>,
@@ -275,7 +281,7 @@ impl<S: SleepProvider> Reactor<S> {
                 sender,
                 tx,
             } => {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let my_unique_id = self.unique_id;
                 let circ_unique_id = self.circ_unique_id_ctx.next(my_unique_id);
                 let ret: Result<_> = self
@@ -301,7 +307,7 @@ impl<S: SleepProvider> Reactor<S> {
                     padding_negotiate,
                 } = &*updates;
                 if let Some(parameters) = padding_parameters {
-                    self.padding_timer.as_mut().reconfigure(parameters);
+                    self.padding_timer.as_mut().reconfigure(parameters)?;
                 }
                 if let Some(enable) = padding_enable {
                     if *enable {
@@ -669,8 +675,7 @@ pub(crate) mod test {
                 reactor.run_once().await.unwrap();
             };
 
-            let (circ, _) =
-                futures::join!(pending.create_firsthop_fast(&circparams), send_response);
+            let (circ, _) = futures::join!(pending.create_firsthop_fast(circparams), send_response);
             // Make sure statuses are as expected.
             assert!(matches!(circ.err().unwrap(), Error::BadCircHandshakeAuth));
 

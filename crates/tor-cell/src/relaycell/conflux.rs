@@ -5,8 +5,10 @@ use super::msg::{empty_body, Body};
 use amplify::Getters;
 use caret::caret_int;
 use derive_deftly::Deftly;
+use rand::{CryptoRng, Rng, RngCore};
 
-use tor_bytes::{EncodeResult, Error, Reader, Result, Writer};
+use tor_bytes::{EncodeResult, Error, Readable, Reader, Result, Writeable, Writer};
+use tor_llcrypto::util::ct::CtByteArray;
 use tor_memquota::derive_deftly_template_HasMemoryCost;
 
 /// The supported CONFLUX_LINK version.
@@ -37,6 +39,18 @@ macro_rules! impl_link_wrapper {
 #[derive_deftly(HasMemoryCost)]
 pub struct ConfluxLink(Link);
 
+impl ConfluxLink {
+    /// Create a new v1 `CONFLUX_LINK` message.
+    pub fn new(payload: V1LinkPayload) -> Self {
+        let link = Link {
+            version: CONFLUX_LINK_VERSION,
+            payload,
+        };
+
+        Self(link)
+    }
+}
+
 impl_link_wrapper!(ConfluxLink);
 
 impl Body for ConfluxLink {
@@ -53,6 +67,18 @@ impl Body for ConfluxLink {
 #[derive(Debug, Clone, Deftly)]
 #[derive_deftly(HasMemoryCost)]
 pub struct ConfluxLinked(Link);
+
+impl ConfluxLinked {
+    /// Create a new v1 `CONFLUX_LINKED` message.
+    pub fn new(payload: V1LinkPayload) -> Self {
+        let link = Link {
+            version: CONFLUX_LINK_VERSION,
+            payload,
+        };
+
+        Self(link)
+    }
+}
 
 impl_link_wrapper!(ConfluxLinked);
 
@@ -81,18 +107,69 @@ struct Link {
     payload: V1LinkPayload,
 }
 
+/// The nonce type of a [`V1LinkPayload`].
+#[derive(Debug, Clone, Copy, Deftly, PartialEq, Eq)]
+#[derive_deftly(HasMemoryCost)]
+pub struct V1Nonce(CtByteArray<V1_LINK_NONCE_LEN>);
+
+impl V1Nonce {
+    /// Create a random `V1Nonce` to put in a LINK cell.
+    pub fn new<R: RngCore + CryptoRng>(rng: &mut R) -> V1Nonce {
+        let mut nonce = [0_u8; V1_LINK_NONCE_LEN];
+        rng.fill(&mut nonce[..]);
+        Self(nonce.into())
+    }
+}
+
+impl Readable for V1Nonce {
+    fn take_from(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Self(Readable::take_from(r)?))
+    }
+}
+
+impl Writeable for V1Nonce {
+    fn write_onto<W: Writer + ?Sized>(&self, w: &mut W) -> EncodeResult<()> {
+        self.0.write_onto(w)
+    }
+}
+
 /// The v1 payload of a v1 [`ConfluxLink`] or [`ConfluxLinked`] message.
 #[derive(Debug, Clone, Deftly, Getters)]
 #[derive_deftly(HasMemoryCost)]
 pub struct V1LinkPayload {
     /// Random 256-bit secret, for associating two circuits together.
-    nonce: [u8; V1_LINK_NONCE_LEN],
+    nonce: V1Nonce,
     /// The last sequence number sent.
     last_seqno_sent: u64,
     /// The last sequence number received.
     last_seqno_recv: u64,
     /// The desired UX properties.
     desired_ux: V1DesiredUx,
+}
+
+impl V1LinkPayload {
+    /// Create a new `V1LinkPayload`.
+    pub fn new(nonce: V1Nonce, desired_ux: V1DesiredUx) -> Self {
+        Self {
+            nonce,
+            // NOTE: the two sequence number fields are 0 on the initial link.
+            // We need to support setting these for reattachment/resumption
+            // (see [CONFLUX_SET_MANAGEMENT] and [RESUMPTION]).
+            last_seqno_sent: 0,
+            last_seqno_recv: 0,
+            desired_ux,
+        }
+    }
+
+    /// Set the last sequence number sent.
+    pub fn set_last_seqno_sent(&mut self, seqno: u64) {
+        self.last_seqno_sent = seqno;
+    }
+
+    /// Set the last sequence number received.
+    pub fn set_last_seqno_recv(&mut self, seqno: u64) {
+        self.last_seqno_recv = seqno;
+    }
 }
 
 caret_int! {
@@ -136,9 +213,7 @@ impl Body for Link {
 
 impl Body for V1LinkPayload {
     fn decode_from_reader(r: &mut Reader<'_>) -> Result<Self> {
-        let mut nonce = [0; V1_LINK_NONCE_LEN];
-        r.take_into(&mut nonce)?;
-
+        let nonce = r.extract()?;
         let last_seqno_sent = r.take_u64()?;
         let last_seqno_recv = r.take_u64()?;
         let desired_ux = r.take_u8()?.into();
@@ -174,7 +249,15 @@ impl Body for V1LinkPayload {
 #[derive_deftly(HasMemoryCost)]
 pub struct ConfluxSwitch {
     /// The relative sequence number.
+    #[getter(as_copy)]
     seqno: u32,
+}
+
+impl ConfluxSwitch {
+    /// Create a new v1 `CONFLUX_SWITCH` message.
+    pub fn new(seqno: u32) -> Self {
+        Self { seqno }
+    }
 }
 
 impl Body for ConfluxSwitch {

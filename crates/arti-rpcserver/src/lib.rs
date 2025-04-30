@@ -1,5 +1,8 @@
 #![doc = include_str!("../README.md")]
 
+// TODO #1645 (either remove this, or decide to have it everywhere)
+#![cfg_attr(not(all(feature = "full", feature = "experimental")), allow(unused))]
+
 mod cancel;
 mod codecs;
 mod connection;

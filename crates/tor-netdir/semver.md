@@ -1,1 +1,2 @@
-BREAKING: in_same_family now takes a FamilyRules.
+BREAKING: New protocol_statuses() method on NetDirProvider trait.
+

@@ -12,7 +12,7 @@ use arti::cfg::ArtiCombinedConfig;
 use arti_client::{IsolationToken, TorAddr, TorClient, TorClientConfig};
 use clap::{value_parser, Arg, ArgAction};
 use futures::StreamExt;
-use rand::distributions::Standard;
+use rand::distr::StandardUniform;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,17 +26,17 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_socks::tcp::Socks5Stream;
 use tor_config::{ConfigurationSource, ConfigurationSources};
-use tor_rtcompat::Runtime;
+use tor_rtcompat::ToplevelRuntime;
 use tracing::info;
 
 /// Generate a random payload of bytes of the given size
 fn random_payload(size: usize) -> Vec<u8> {
-    rand::thread_rng()
-        .sample_iter(Standard)
+    rand::rng()
+        .sample_iter(StandardUniform)
         .take(size)
         .collect()
 }
@@ -178,6 +178,16 @@ fn run_timing(mut stream: TcpStream, send: &Arc<[u8]>, receive: &Arc<[u8]>) -> R
     };
     serde_json::to_writer(&mut stream, &st)?;
     info!("Wrote timing payload to {}.", peer_addr);
+
+    // Workaround for a shadow networking issue. If we don't wait a bit after
+    // flushing the data and before dropping the writer, then the
+    // `socket.read_to_end` in `client` never completes.
+    // See <https://gitlab.torproject.org/tpo/core/arti/-/issues/1972>.
+    {
+        stream.flush()?;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
     Ok(())
 }
 
@@ -421,7 +431,7 @@ fn main() -> Result<()> {
 #[allow(clippy::missing_docs_in_private_items)]
 struct Benchmark<R>
 where
-    R: Runtime,
+    R: ToplevelRuntime,
 {
     runtime: R,
     connect_addr: SocketAddr,
@@ -580,7 +590,7 @@ struct BenchmarkSummary {
     results: HashMap<BenchmarkType, BenchmarkResults>,
 }
 
-impl<R: Runtime> Benchmark<R> {
+impl<R: ToplevelRuntime> Benchmark<R> {
     /// Run a type of benchmark (`ty`), performing `self.samples` benchmark
     /// runs, using `self.circs_per_sample` concurrent circuits, and
     /// `self.streams_per_circ` concurrent streams on each circuit.

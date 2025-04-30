@@ -43,6 +43,7 @@ use tor_netdir::{DirEvent, MdReceiver, NetDir, NetDirProvider};
 use async_trait::async_trait;
 use futures::{stream::BoxStream, task::SpawnExt};
 use oneshot_fused_workaround as oneshot;
+use tor_netdoc::doc::netstatus::ProtoStatuses;
 use tor_rtcompat::scheduler::{TaskHandle, TaskSchedule};
 use tor_rtcompat::Runtime;
 use tracing::{debug, info, trace, warn};
@@ -178,6 +179,10 @@ impl<R: Runtime> NetDirProvider for DirMgr<R> {
         // have a full directory.  That's significant refactoring, though, for
         // an unclear amount of benefit.
     }
+
+    fn protocol_statuses(&self) -> Option<(SystemTime, Arc<ProtoStatuses>)> {
+        self.protocols.lock().expect("Poisoned lock").clone()
+    }
 }
 
 #[async_trait]
@@ -232,6 +237,9 @@ pub struct DirMgr<R: Runtime> {
     // TODO(eta): Eurgh! This is so many Arcs! (especially considering this
     //            gets wrapped in an Arc)
     netdir: Arc<SharedMutArc<NetDir>>,
+
+    /// Our latest set of recommended protocols.
+    protocols: Mutex<Option<(SystemTime, Arc<ProtoStatuses>)>>,
 
     /// A set of network parameters to hand out when we have no directory.
     default_parameters: Mutex<Arc<NetParameters>>,
@@ -656,7 +664,7 @@ impl<R: Runtime> DirMgr<R> {
                         BootstrapAction::Fatal => return Err(err),
                     }
 
-                    let delay = retry_delay.next_delay(&mut rand::thread_rng());
+                    let delay = retry_delay.next_delay(&mut rand::rng());
                     warn_report!(
                         err,
                         "Unable to download a usable directory. (We will restart in {})",
@@ -855,10 +863,20 @@ impl<R: Runtime> DirMgr<R> {
         let (task_schedule, task_handle) = TaskSchedule::new(runtime.clone());
         let task_schedule = Mutex::new(Some(task_schedule));
 
+        // We load the cached protocol recommendations unconditionally: the caller needs them even
+        // if it does not try to load the reset of the cache.
+        let protocols = {
+            let store = store.store.lock().expect("lock poisoned");
+            store
+                .cached_protocol_recommendations()?
+                .map(|(t, p)| (t, Arc::new(p)))
+        };
+
         Ok(DirMgr {
             config: config.into(),
             store: store.store,
             netdir,
+            protocols: Mutex::new(protocols),
             default_parameters,
             events,
             send_status,
@@ -1045,6 +1063,15 @@ impl<R: Runtime> DirMgr<R> {
                     self.events.publish(DirEvent::NewDescriptors);
                     Ok(())
                 }
+                NetDirChange::SetRequiredProtocol { timestamp, protos } => {
+                    if !store.is_readonly() {
+                        store.update_protocol_recommendations(timestamp, protos.as_ref())?;
+                    }
+                    let mut pr = self.protocols.lock().expect("Poisoned lock");
+                    *pr = Some((timestamp, protos));
+                    self.events.publish(DirEvent::NewProtocolRecommendation);
+                    Ok(())
+                }
             }
         } else {
             Ok(())
@@ -1094,6 +1121,20 @@ pub(crate) fn default_consensus_cutoff(
     Ok(cutoff.into())
 }
 
+/// Return a list of the protocols [supported](tor_protover::doc_supported) by this crate
+/// when running as a client.
+pub fn supported_client_protocols() -> tor_protover::Protocols {
+    use tor_protover::named::*;
+    // WARNING: REMOVING ELEMENTS FROM THIS LIST CAN BE DANGEROUS!
+    // SEE [`tor_protover::doc_changing`]
+    [
+        //
+        DIRCACHE_CONSDIFF,
+    ]
+    .into_iter()
+    .collect()
+}
+
 #[cfg(test)]
 mod test {
     // @@ begin test lint list maintained by maint/add_warning @@
@@ -1117,6 +1158,13 @@ mod test {
     use tor_netdoc::doc::netstatus::ConsensusFlavor;
     use tor_netdoc::doc::{authcert::AuthCertKeyIds, netstatus::Lifetime};
     use tor_rtcompat::SleepProvider;
+
+    #[test]
+    fn protocols() {
+        let pr = supported_client_protocols();
+        let expected = "DirCache=2".parse().unwrap();
+        assert_eq!(pr, expected);
+    }
 
     pub(crate) fn new_mgr<R: Runtime>(runtime: R) -> (TempDir, DirMgr<R>) {
         let dir = TempDir::new().unwrap();
@@ -1337,8 +1385,8 @@ mod test {
             };
             let mut rng = testing_rng();
             #[cfg(feature = "routerdesc")]
-            let rd_ids: Vec<DocId> = (0..1000).map(|_| DocId::RouterDesc(rng.gen())).collect();
-            let md_ids: Vec<DocId> = (0..1000).map(|_| DocId::Microdesc(rng.gen())).collect();
+            let rd_ids: Vec<DocId> = (0..1000).map(|_| DocId::RouterDesc(rng.random())).collect();
+            let md_ids: Vec<DocId> = (0..1000).map(|_| DocId::Microdesc(rng.random())).collect();
             let config = DirMgrConfig::default();
 
             // Try an authcert.

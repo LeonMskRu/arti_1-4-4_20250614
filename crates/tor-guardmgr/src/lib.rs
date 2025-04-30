@@ -1493,7 +1493,7 @@ impl GuardMgrInner {
 
         let fallback = self
             .fallbacks
-            .choose(&mut rand::thread_rng(), now, filt)?
+            .choose(&mut rand::rng(), now, filt)?
             .as_guard();
         let fallback = filt.modify_hop(fallback)?;
         Ok((sample::ListKind::Fallback, fallback))

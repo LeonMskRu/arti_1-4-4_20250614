@@ -228,6 +228,9 @@ impl ProxyPattern {
 }
 
 /// An action to take upon receiving an incoming request.
+//
+// The variant names (but not the payloads) are part of the metrics schema.
+// When changing them, see `doc/dev/MetricsStrategy.md` re schema stability policy.
 #[derive(
     Clone,
     Debug,
@@ -236,7 +239,11 @@ impl ProxyPattern {
     serde_with::SerializeDisplay,
     Eq,
     PartialEq,
+    strum::EnumDiscriminants,
 )]
+#[strum_discriminants(derive(Hash, strum::EnumIter))] //
+#[strum_discriminants(derive(strum::IntoStaticStr), strum(serialize_all = "snake_case"))]
+#[strum_discriminants(vis(pub(crate)))]
 #[non_exhaustive]
 pub enum ProxyAction {
     /// Close the circuit immediately with an error.
@@ -258,7 +265,7 @@ pub enum TargetAddr {
     /// An address that we can reach over the internet.
     Inet(SocketAddr),
     /* TODO (#1246): Put this back.
-    /// An address of a local unix socket.
+    /// An address of a local unix domain socket.
     Unix(PathBuf),
     */
 }

@@ -573,12 +573,6 @@ pub(crate) async fn download<R: Runtime>(
             dirmgr.runtime.wallclock()
         };
 
-        // Skip the downloads if we can...
-        if state.can_advance() {
-            advance(state);
-            trace!(attempt=%attempt_id, state=%state.describe(), "State has advanced.");
-            continue 'next_state;
-        }
         // Apply any netdir changes that the state gives us.
         // TODO(eta): Consider deprecating state.is_ready().
         {
@@ -586,6 +580,12 @@ pub(crate) async fn download<R: Runtime>(
             let mut store = dirmgr.store.lock().expect("store lock poisoned");
             dirmgr.apply_netdir_changes(state, &mut **store)?;
             dirmgr.update_progress(attempt_id, state.bootstrap_progress());
+        }
+        // Skip the downloads if we can...
+        if state.can_advance() {
+            advance(state);
+            trace!(attempt=%attempt_id, state=%state.describe(), "State has advanced.");
+            continue 'next_state;
         }
         if state.is_ready(Readiness::Complete) {
             trace!(attempt=%attempt_id, state=%state.describe(), "Directory is now Complete.");
@@ -604,7 +604,7 @@ pub(crate) async fn download<R: Runtime>(
             // We wait at the start of this loop, on all attempts but the first.
             // This ensures that we always wait between attempts, but not after
             // the final attempt.
-            let next_delay = retry.next_delay(&mut rand::thread_rng());
+            let next_delay = retry.next_delay(&mut rand::rng());
             if let Some(delay) = delay.replace(next_delay) {
                 let time_until_reset = {
                     reset_time

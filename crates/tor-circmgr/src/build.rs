@@ -15,15 +15,14 @@ use std::time::{Duration, Instant};
 use tor_chanmgr::{ChanMgr, ChanProvenance, ChannelUsage};
 use tor_error::into_internal;
 use tor_guardmgr::GuardStatus;
-use tor_linkspec::{ChanTarget, IntoOwnedChanTarget, OwnedChanTarget, OwnedCircTarget};
+use tor_linkspec::{ChanTarget, CircTarget, IntoOwnedChanTarget, OwnedChanTarget, OwnedCircTarget};
 use tor_netdir::params::NetParameters;
 use tor_proto::ccparams::{self, AlgorithmType};
 use tor_proto::circuit::{CircParameters, ClientCirc, PendingClientCirc};
+use tor_protover::named::{FLOWCTRL_CC, RELAY_NTORV3};
+use tor_protover::Protocols;
 use tor_rtcompat::{Runtime, SleepProviderExt};
 use tor_units::Percentage;
-
-#[cfg(feature = "ntor_v3")]
-use {tor_linkspec::CircTarget, tor_protover::ProtoKind};
 
 #[cfg(all(feature = "vanguards", feature = "hs-common"))]
 use tor_guardmgr::vanguards::VanguardMgr;
@@ -51,7 +50,7 @@ pub(crate) trait Buildable: Sized {
         rt: &RT,
         guard_status: &GuardStatusHandle,
         ct: &OwnedChanTarget,
-        params: &CircParameters,
+        params: CircParameters,
         usage: ChannelUsage,
     ) -> Result<Arc<Self>>;
 
@@ -62,7 +61,7 @@ pub(crate) trait Buildable: Sized {
         rt: &RT,
         guard_status: &GuardStatusHandle,
         ct: &OwnedCircTarget,
-        params: &CircParameters,
+        params: CircParameters,
         usage: ChannelUsage,
     ) -> Result<Arc<Self>>;
 
@@ -72,7 +71,7 @@ pub(crate) trait Buildable: Sized {
         &self,
         rt: &RT,
         ct: &OwnedCircTarget,
-        params: &CircParameters,
+        params: CircParameters,
     ) -> Result<()>;
 }
 
@@ -131,7 +130,7 @@ impl Buildable for ClientCirc {
         rt: &RT,
         guard_status: &GuardStatusHandle,
         ct: &OwnedChanTarget,
-        params: &CircParameters,
+        params: CircParameters,
         usage: ChannelUsage,
     ) -> Result<Arc<Self>> {
         let circ = create_common(chanmgr, rt, ct, guard_status, usage).await?;
@@ -150,28 +149,18 @@ impl Buildable for ClientCirc {
         rt: &RT,
         guard_status: &GuardStatusHandle,
         ct: &OwnedCircTarget,
-        params: &CircParameters,
+        params: CircParameters,
         usage: ChannelUsage,
     ) -> Result<Arc<Self>> {
         let circ = create_common(chanmgr, rt, ct, guard_status, usage).await?;
         let unique_id = Some(circ.peek_unique_id());
 
-        let params = params.clone();
-        let handshake_res;
-        #[cfg(feature = "ntor_v3")]
-        {
-            // The target supports ntor_v3 iff it supports Relay=4.
-            // <https://spec.torproject.org/tor-spec/create-created-cells.html#ntor-v3>
-            handshake_res = if ct.protovers().supports_known_subver(ProtoKind::Relay, 4) {
-                circ.create_firsthop_ntor_v3(ct, params).await
-            } else {
-                circ.create_firsthop_ntor(ct, params).await
-            };
-        }
-        #[cfg(not(feature = "ntor_v3"))]
-        {
-            handshake_res = circ.create_firsthop_ntor(ct, params).await;
-        }
+        // The target supports ntor_v3 iff it advertises the relevant protover.
+        let handshake_res = if ct.protovers().supports_named_subver(RELAY_NTORV3) {
+            circ.create_firsthop_ntor_v3(ct, params).await
+        } else {
+            circ.create_firsthop_ntor(ct, params).await
+        };
 
         handshake_res.map_err(|error| Error::Protocol {
             peer: Some(ct.to_logged()),
@@ -184,24 +173,14 @@ impl Buildable for ClientCirc {
         &self,
         _rt: &RT,
         ct: &OwnedCircTarget,
-        params: &CircParameters,
+        params: CircParameters,
     ) -> Result<()> {
-        let res;
-
-        #[cfg(feature = "ntor_v3")]
-        {
-            // The target supports ntor_v3 iff it supports Relay=4.
-            // <https://spec.torproject.org/tor-spec/create-created-cells.html#ntor-v3>
-            res = if ct.protovers().supports_known_subver(ProtoKind::Relay, 4) {
-                self.extend_ntor_v3(ct, params).await
-            } else {
-                self.extend_ntor(ct, params).await
-            };
-        }
-        #[cfg(not(feature = "ntor_v3"))]
-        {
-            res = self.extend_ntor(ct, params).await;
-        }
+        // The target supports ntor_v3 iff it advertises the relevant protover.
+        let res = if ct.protovers().supports_named_subver(RELAY_NTORV3) {
+            self.extend_ntor_v3(ct, params).await
+        } else {
+            self.extend_ntor(ct, params).await
+        };
 
         res.map_err(|error| Error::Protocol {
             error,
@@ -245,6 +224,16 @@ impl<R: Runtime, C: Buildable + Sync + Send + 'static> Builder<R, C> {
         }
     }
 
+    /// Helper function that takes the circuit parameters and apply any changes from the given
+    /// subprotocol versions.
+    fn apply_protovers_to_circparams(params: &mut CircParameters, protocols: &Protocols) {
+        // Not supporting FlowCtrl=2 means we have to use the fallback congestion control algorithm
+        // which is the FixedWindow one.
+        if !protocols.supports_named_subver(FLOWCTRL_CC) {
+            params.ccontrol.use_fallback_alg();
+        }
+    }
+
     /// Build a circuit, without performing any timeout operations.
     ///
     /// After each hop is built, increments n_hops_built.  Make sure that
@@ -271,7 +260,7 @@ impl<R: Runtime, C: Buildable + Sync + Send + 'static> Builder<R, C> {
                     &self.runtime,
                     &guard_status,
                     &target,
-                    &params,
+                    params,
                     usage,
                 )
                 .await?;
@@ -285,12 +274,15 @@ impl<R: Runtime, C: Buildable + Sync + Send + 'static> Builder<R, C> {
                 let n_hops = p.len() as u8;
                 // If we fail now, it's the guard's fault.
                 guard_status.pending(GuardStatus::Failure);
+                // Each hop has its own circ parameters. This is for the first hop (CREATE).
+                let mut first_hop_params = params.clone();
+                Self::apply_protovers_to_circparams(&mut first_hop_params, p[0].protovers());
                 let circ = C::create(
                     &self.chanmgr,
                     &self.runtime,
                     &guard_status,
                     &p[0],
-                    &params,
+                    first_hop_params,
                     usage,
                 )
                 .await?;
@@ -302,7 +294,10 @@ impl<R: Runtime, C: Buildable + Sync + Send + 'static> Builder<R, C> {
                 n_hops_built.fetch_add(1, Ordering::SeqCst);
                 let mut hop_num = 1;
                 for relay in p[1..].iter() {
-                    circ.extend(&self.runtime, relay, &params).await?;
+                    // Get the params per subsequent hop (EXTEND).
+                    let mut hop_params = params.clone();
+                    Self::apply_protovers_to_circparams(&mut hop_params, relay.protovers());
+                    circ.extend(&self.runtime, relay, hop_params).await?;
                     n_hops_built.fetch_add(1, Ordering::SeqCst);
                     self.timeouts.note_hop_completed(
                         hop_num,
@@ -524,6 +519,7 @@ impl<R: Runtime> CircuitBuilder<R> {
 }
 
 /// Return the congestion control Vegas algorithm using the given network parameters.
+#[cfg(feature = "flowctl-cc")]
 fn build_cc_vegas(
     inp: &NetParameters,
     vegas_queue_params: ccparams::VegasQueueParams,
@@ -557,11 +553,8 @@ fn build_cc_fixedwindow(inp: &NetParameters) -> ccparams::Algorithm {
 /// Return a new circuit parameter struct using the given network parameters and algorithm to use.
 fn circparameters_from_netparameters(
     inp: &NetParameters,
-    _alg: ccparams::Algorithm,
+    alg: ccparams::Algorithm,
 ) -> Result<CircParameters> {
-    // TODO Remove this once circuit handshake negotiation is done for CC along flow control.
-    //  Until then, we always go fixed window.
-    let alg = build_cc_fixedwindow(inp);
     let cwnd_params = ccparams::CongestionWindowParamsBuilder::default()
         .cwnd_init(inp.cc_cwnd_init.into())
         .cwnd_inc_pct_ss(Percentage::new(
@@ -589,6 +582,7 @@ fn circparameters_from_netparameters(
         .map_err(into_internal!("Unable to build RTT params from NetParams"))?;
     let ccontrol = ccparams::CongestionControlParamsBuilder::default()
         .alg(alg)
+        .fallback_alg(build_cc_fixedwindow(inp))
         .cwnd_params(cwnd_params)
         .rtt_params(rtt_params)
         .build()
@@ -604,18 +598,29 @@ fn circparameters_from_netparameters(
 /// Extract a [`CircParameters`] from the [`NetParameters`] from a consensus for an exit circuit or
 /// single onion service (when implemented).
 pub fn exit_circparams_from_netparams(inp: &NetParameters) -> Result<CircParameters> {
-    let alg = match inp.cc_alg.get().into() {
-        AlgorithmType::VEGAS => build_cc_vegas(
-            inp,
-            (
-                inp.cc_vegas_alpha_exit.into(),
-                inp.cc_vegas_beta_exit.into(),
-                inp.cc_vegas_delta_exit.into(),
-                inp.cc_vegas_gamma_exit.into(),
-                inp.cc_vegas_sscap_exit.into(),
-            )
-                .into(),
-        ),
+    let alg = match AlgorithmType::from(inp.cc_alg.get()) {
+        #[cfg(feature = "flowctl-cc")]
+        AlgorithmType::VEGAS => {
+            // TODO(arti#88): We always use fixed window for now,
+            // even with the "flowctl-cc" feature enabled:
+            // https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/2932#note_3191196
+            // We use `if false` so that the vegas cc code is still type checked.
+            if false {
+                build_cc_vegas(
+                    inp,
+                    (
+                        inp.cc_vegas_alpha_exit.into(),
+                        inp.cc_vegas_beta_exit.into(),
+                        inp.cc_vegas_delta_exit.into(),
+                        inp.cc_vegas_gamma_exit.into(),
+                        inp.cc_vegas_sscap_exit.into(),
+                    )
+                        .into(),
+                )
+            } else {
+                build_cc_fixedwindow(inp)
+            }
+        }
         // Unrecognized, fallback to fixed window as in SENDME v0.
         _ => build_cc_fixedwindow(inp),
     };
@@ -625,18 +630,29 @@ pub fn exit_circparams_from_netparams(inp: &NetParameters) -> Result<CircParamet
 /// Extract a [`CircParameters`] from the [`NetParameters`] from a consensus for an onion circuit
 /// which also includes an onion service with Vanguard.
 pub fn onion_circparams_from_netparams(inp: &NetParameters) -> Result<CircParameters> {
-    let alg = match inp.cc_alg.get().into() {
-        AlgorithmType::VEGAS => build_cc_vegas(
-            inp,
-            (
-                inp.cc_vegas_alpha_onion.into(),
-                inp.cc_vegas_beta_onion.into(),
-                inp.cc_vegas_delta_onion.into(),
-                inp.cc_vegas_gamma_onion.into(),
-                inp.cc_vegas_sscap_onion.into(),
-            )
-                .into(),
-        ),
+    let alg = match AlgorithmType::from(inp.cc_alg.get()) {
+        #[cfg(feature = "flowctl-cc")]
+        AlgorithmType::VEGAS => {
+            // TODO(arti#88): We always use fixed window for now,
+            // even with the "flowctl-cc" feature enabled:
+            // https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/2932#note_3191196
+            // We use `if false` so that the vegas cc code is still type checked.
+            if false {
+                build_cc_vegas(
+                    inp,
+                    (
+                        inp.cc_vegas_alpha_onion.into(),
+                        inp.cc_vegas_beta_onion.into(),
+                        inp.cc_vegas_delta_onion.into(),
+                        inp.cc_vegas_gamma_onion.into(),
+                        inp.cc_vegas_sscap_onion.into(),
+                    )
+                        .into(),
+                )
+            } else {
+                build_cc_fixedwindow(inp)
+            }
+        }
         // Unrecognized, fallback to fixed window as in SENDME v0.
         _ => build_cc_fixedwindow(inp),
     };
@@ -743,6 +759,7 @@ mod test {
 
             trace!("acquiesce after test1");
             #[allow(clippy::clone_on_copy)]
+            #[allow(deprecated)] // TODO #1885
             let rt = tor_rtmock::MockSleepRuntime::new(rto.clone());
 
             // Try a future that's ready after a short delay.
@@ -767,6 +784,7 @@ mod test {
 
             trace!("acquiesce after test2");
             #[allow(clippy::clone_on_copy)]
+            #[allow(deprecated)] // TODO #1885
             let rt = tor_rtmock::MockSleepRuntime::new(rto.clone());
 
             // Try a future that passes the first timeout, and make sure that
@@ -797,6 +815,7 @@ mod test {
 
             trace!("acquiesce after test3");
             #[allow(clippy::clone_on_copy)]
+            #[allow(deprecated)] // TODO #1885
             let rt = tor_rtmock::MockSleepRuntime::new(rto.clone());
 
             // Try a future that times out and gets abandoned.
@@ -889,7 +908,7 @@ mod test {
             rt: &RT,
             _guard_status: &GuardStatusHandle,
             ct: &OwnedChanTarget,
-            _: &CircParameters,
+            _: CircParameters,
             _usage: ChannelUsage,
         ) -> Result<Arc<Self>> {
             let (d1, d2) = timeouts_from_chantarget(ct);
@@ -909,7 +928,7 @@ mod test {
             rt: &RT,
             _guard_status: &GuardStatusHandle,
             ct: &OwnedCircTarget,
-            _: &CircParameters,
+            _: CircParameters,
             _usage: ChannelUsage,
         ) -> Result<Arc<Self>> {
             let (d1, d2) = timeouts_from_chantarget(ct);
@@ -928,7 +947,7 @@ mod test {
             &self,
             rt: &RT,
             ct: &OwnedCircTarget,
-            _: &CircParameters,
+            _: CircParameters,
         ) -> Result<()> {
             let (d1, d2) = timeouts_from_chantarget(ct);
             rt.sleep(d1).await;

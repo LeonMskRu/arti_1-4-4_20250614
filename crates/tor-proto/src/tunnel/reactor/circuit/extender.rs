@@ -1,14 +1,15 @@
 //! Module providing [`CircuitExtender`].
 
-use super::{Circuit, MetaCellDisposition, MetaCellHandler, ReactorResultChannel};
+use super::{Circuit, ReactorResultChannel};
+use crate::congestion;
 use crate::crypto::cell::{
     ClientLayer, CryptInit, HopNum, InboundClientLayer, OutboundClientLayer,
 };
 use crate::crypto::handshake::fast::CreateFastClient;
-#[cfg(feature = "ntor_v3")]
 use crate::crypto::handshake::ntor_v3::NtorV3Client;
 use crate::tunnel::circuit::unique_id::UniqId;
 use crate::tunnel::circuit::CircParameters;
+use crate::tunnel::reactor::MetaCellDisposition;
 use crate::{Error, Result};
 use oneshot_fused_workaround as oneshot;
 use std::borrow::Borrow;
@@ -21,7 +22,7 @@ use tor_error::internal;
 use crate::crypto::handshake::ntor::NtorClient;
 use crate::crypto::handshake::{ClientHandshake, KeyGenerator};
 use crate::tunnel::circuit::path;
-use crate::tunnel::reactor::SendRelayCell;
+use crate::tunnel::reactor::{MetaCellHandler, SendRelayCell};
 use tor_cell::relaycell::extend::NtorV3Extension;
 use tor_linkspec::{EncodedLinkSpec, OwnedChanTarget};
 use tracing::trace;
@@ -30,7 +31,7 @@ use tracing::trace;
 ///
 /// Yes, I know having trait bounds on structs is bad, but in this case it's necessary
 /// since we want to be able to use `H::KeyType`.
-pub(super) struct CircuitExtender<H, L, FWD, REV>
+pub(crate) struct CircuitExtender<H, L, FWD, REV>
 where
     H: ClientHandshake,
 {
@@ -76,7 +77,7 @@ where
     /// current last hop which relay to connect to.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::blocks_in_conditions)]
-    pub(super) fn begin(
+    pub(crate) fn begin(
         relay_cell_format: RelayCellFormat,
         peer_id: OwnedChanTarget,
         handshake_id: HandshakeType,
@@ -88,7 +89,7 @@ where
         done: ReactorResultChannel<()>,
     ) -> Result<(Self, SendRelayCell)> {
         match (|| {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let unique_id = circ.unique_id;
 
             let (state, msg) = H::client1(&mut rng, key, client_aux_data)?;
@@ -166,14 +167,14 @@ where
 
         // Handle auxiliary data returned from the server, e.g. validating that
         // requested extensions have been acknowledged.
-        H::handle_server_aux_data(&self.params, &server_aux_data)?;
+        H::handle_server_aux_data(&mut self.params, &server_aux_data)?;
 
         let layer = L::construct(keygen)?;
 
         trace!("{}: Handshake complete; circuit extended.", self.unique_id);
 
         // If we get here, it succeeded.  Add a new hop to the circuit.
-        let (layer_fwd, layer_back, binding) = layer.split();
+        let (layer_fwd, layer_back, binding) = layer.split_client_layer();
         circ.add_hop(
             self.relay_cell_format,
             path::HopDetail::Relay(self.peer_id.clone()),
@@ -181,7 +182,7 @@ where
             Box::new(layer_back),
             Some(binding),
             &self.params,
-        );
+        )?;
         Ok(MetaCellDisposition::ConversationFinished)
     }
 }
@@ -233,38 +234,75 @@ where
 // ```
 // trait HandshakeAuxDataHandler<H> where H: ClientHandshake
 // ```
-pub(super) trait HandshakeAuxDataHandler: ClientHandshake {
+pub(crate) trait HandshakeAuxDataHandler: ClientHandshake {
     /// Handle auxiliary handshake data returned when creating or extending a
     /// circuit.
     fn handle_server_aux_data(
-        params: &CircParameters,
+        params: &mut CircParameters,
         data: &<Self as ClientHandshake>::ServerAuxData,
     ) -> Result<()>;
 }
 
-#[cfg(feature = "ntor_v3")]
 impl HandshakeAuxDataHandler for NtorV3Client {
-    fn handle_server_aux_data(_params: &CircParameters, data: &Vec<NtorV3Extension>) -> Result<()> {
-        // There are currently no accepted server extensions,
-        // particularly since we don't request any extensions yet.
-        if !data.is_empty() {
-            return Err(Error::HandshakeProto(
-                "Received unexpected ntorv3 extension".into(),
-            ));
+    fn handle_server_aux_data(
+        params: &mut CircParameters,
+        data: &Vec<NtorV3Extension>,
+    ) -> Result<()> {
+        // Process all extensions.
+        // If "flowctl-cc" is not enabled, this loop will always return an error, so tell clippy
+        // that it's okay.
+        #[cfg_attr(not(feature = "flowctl-cc"), allow(clippy::never_loop))]
+        for ext in data {
+            match ext {
+                NtorV3Extension::AckCongestionControl { sendme_inc } => {
+                    cfg_if::cfg_if! {
+                        if #[cfg(feature = "flowctl-cc")] {
+                            // Unexpected ACK extension as in if CC is disabled on our side, we would never have
+                            // requested it. Reject and circuit must be closed.
+                            if !params.ccontrol.is_enabled() {
+                                return Err(Error::HandshakeProto(
+                                    "Received unexpected ntorv3 CC ack extension".into(),
+                                ));
+                            }
+                            // Invalid increment, reject and circuit must be closed.
+                            if !congestion::params::is_sendme_inc_valid(*sendme_inc, params) {
+                                return Err(Error::HandshakeProto(
+                                    "Received invalid sendme increment in CC ntorv3 extension".into(),
+                                ));
+                            }
+                            // Excellent, we have a negotiated sendme increment. Set it for this circuit.
+                            params
+                                .ccontrol
+                                .cwnd_params_mut()
+                                .set_sendme_inc(*sendme_inc);
+                        } else {
+                            return Err(Error::HandshakeProto(
+                                "Received unexpected `AckCongestionControl` ntorv3 extension".into(),
+                            ));
+                        }
+                    }
+                }
+                // Any other extensions is not expected. Reject and circuit must be closed.
+                _ => {
+                    return Err(Error::HandshakeProto(
+                        "Received unexpected ntorv3 extension".into(),
+                    ));
+                }
+            }
         }
         Ok(())
     }
 }
 
 impl HandshakeAuxDataHandler for NtorClient {
-    fn handle_server_aux_data(_params: &CircParameters, _data: &()) -> Result<()> {
+    fn handle_server_aux_data(_params: &mut CircParameters, _data: &()) -> Result<()> {
         // This handshake doesn't have any auxiliary data; nothing to do.
         Ok(())
     }
 }
 
 impl HandshakeAuxDataHandler for CreateFastClient {
-    fn handle_server_aux_data(_params: &CircParameters, _data: &()) -> Result<()> {
+    fn handle_server_aux_data(_params: &mut CircParameters, _data: &()) -> Result<()> {
         // This handshake doesn't have any auxiliary data; nothing to do.
         Ok(())
     }

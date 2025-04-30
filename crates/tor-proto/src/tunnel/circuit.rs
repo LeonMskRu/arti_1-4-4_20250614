@@ -47,7 +47,6 @@ pub(crate) mod unique_id;
 use crate::channel::Channel;
 use crate::congestion::params::CongestionControlParams;
 use crate::crypto::cell::HopNum;
-#[cfg(feature = "ntor_v3")]
 use crate::crypto::handshake::ntor_v3::NtorV3PublicKey;
 use crate::memquota::{CircuitAccount, SpecificAccount as _};
 use crate::stream::{
@@ -59,7 +58,7 @@ use crate::tunnel::reactor::CtrlCmd;
 use crate::tunnel::reactor::{
     CircuitHandshake, CtrlMsg, Reactor, RECV_WINDOW_INIT, STREAM_READER_BUFFER,
 };
-use crate::tunnel::StreamTarget;
+use crate::tunnel::{HopLocation, LegId, StreamTarget, TargetHop};
 use crate::util::skew::ClockSkew;
 use crate::{Error, ResolveError, Result};
 use educe::Educe;
@@ -318,6 +317,19 @@ impl ClientCirc {
         self.mutable.lock().expect("poisoned_lock").path.clone()
     }
 
+    /// Get the [`LegId`] and [`Path`] of each leg of the tunnel.
+    // TODO(conflux): We probably want to replace uses of `path_ref` with
+    // this method and remove `path_ref`.
+    async fn legs(&self) -> Result<Vec<(LegId, Arc<Path>)>> {
+        let (tx, rx) = oneshot::channel();
+
+        self.command
+            .unbounded_send(CtrlCmd::QueryLegs { done: tx })
+            .map_err(|_| Error::CircuitClosed)?;
+
+        rx.await.map_err(|_| Error::CircuitClosed)?
+    }
+
     /// Get the clock skew claimed by the first hop of the circuit.
     ///
     /// See [`Channel::clock_skew()`].
@@ -521,6 +533,19 @@ impl ClientCirc {
         /// The size of the channel receiving IncomingStreamRequestContexts.
         const INCOMING_BUFFER: usize = STREAM_READER_BUFFER;
 
+        // TODO(conflux): Support tunnels with more than one leg. This requires a different approach
+        // to `CellHandlers`, as they can't be shared between the tunnel reactor and the circuits.
+        let legs = self.legs().await?;
+        if legs.len() != 1 {
+            return Err(internal!(
+                "Cannot allow stream requests on tunnel with {} legs",
+                legs.len()
+            )
+            .into());
+        }
+        let (leg_id, _path) = &legs[0];
+        let leg_id = *leg_id;
+
         let time_prov = self.time_provider.clone();
         let cmd_checker = IncomingCmdChecker::new_any(allow_commands);
         let (incoming_sender, incoming_receiver) =
@@ -551,6 +576,7 @@ impl ClientCirc {
                 receiver,
                 msg_tx,
                 memquota,
+                relay_cell_format,
             } = req_ctx;
 
             // We already enforce this in handle_incoming_stream_request; this
@@ -562,8 +588,9 @@ impl ClientCirc {
             let target = StreamTarget {
                 circ: Arc::clone(&circ),
                 tx: msg_tx,
-                hop_num,
+                hop: HopLocation::Hop((leg_id, hop_num)),
                 stream_id,
+                relay_cell_format,
             };
 
             let reader = StreamReader {
@@ -579,7 +606,7 @@ impl ClientCirc {
 
     /// Extend the circuit via the ntor handshake to a new target last
     /// hop.
-    pub async fn extend_ntor<Tg>(&self, target: &Tg, params: &CircParameters) -> Result<()>
+    pub async fn extend_ntor<Tg>(&self, target: &Tg, params: CircParameters) -> Result<()>
     where
         Tg: CircTarget,
     {
@@ -604,7 +631,7 @@ impl ClientCirc {
                 peer_id,
                 public_key: key,
                 linkspecs,
-                params: params.clone(),
+                params,
                 done: tx,
             })
             .map_err(|_| Error::CircuitClosed)?;
@@ -616,8 +643,7 @@ impl ClientCirc {
 
     /// Extend the circuit via the ntor handshake to a new target last
     /// hop.
-    #[cfg(feature = "ntor_v3")]
-    pub async fn extend_ntor_v3<Tg>(&self, target: &Tg, params: &CircParameters) -> Result<()>
+    pub async fn extend_ntor_v3<Tg>(&self, target: &Tg, params: CircParameters) -> Result<()>
     where
         Tg: CircTarget,
     {
@@ -642,7 +668,7 @@ impl ClientCirc {
                 peer_id,
                 public_key: key,
                 linkspecs,
-                params: params.clone(),
+                params,
                 done: tx,
             })
             .map_err(|_| Error::CircuitClosed)?;
@@ -721,16 +747,9 @@ impl ClientCirc {
     ) -> Result<(StreamReader, StreamTarget, StreamAccount)> {
         // TODO: Possibly this should take a hop, rather than just
         // assuming it's the last hop.
+        let hop = TargetHop::LastHop;
 
         let time_prov = self.time_provider.clone();
-
-        let hop_num = self
-            .mutable
-            .lock()
-            .expect("poisoned lock")
-            .path
-            .last_hop_num()
-            .ok_or_else(|| Error::from(internal!("Can't begin a stream at the 0th hop")))?;
 
         let memquota = StreamAccount::new(self.mq_account())?;
         let (sender, receiver) = MpscSpec::new(STREAM_READER_BUFFER)
@@ -741,7 +760,7 @@ impl ClientCirc {
 
         self.control
             .unbounded_send(CtrlMsg::BeginStream {
-                hop_num,
+                hop,
                 message: begin_msg,
                 sender,
                 rx: msg_rx,
@@ -750,13 +769,14 @@ impl ClientCirc {
             })
             .map_err(|_| Error::CircuitClosed)?;
 
-        let stream_id = rx.await.map_err(|_| Error::CircuitClosed)??;
+        let (stream_id, hop, relay_cell_format) = rx.await.map_err(|_| Error::CircuitClosed)??;
 
         let target = StreamTarget {
             circ: self.clone(),
             tx: msg_tx,
-            hop_num,
+            hop,
             stream_id,
+            relay_cell_format,
         };
 
         let reader = StreamReader {
@@ -1028,14 +1048,14 @@ impl PendingClientCirc {
     /// There's no authentication in CRATE_FAST,
     /// so we don't need to know whom we're connecting to: we're just
     /// connecting to whichever relay the channel is for.
-    pub async fn create_firsthop_fast(self, params: &CircParameters) -> Result<Arc<ClientCirc>> {
+    pub async fn create_firsthop_fast(self, params: CircParameters) -> Result<Arc<ClientCirc>> {
         let (tx, rx) = oneshot::channel();
         self.circ
             .control
             .unbounded_send(CtrlMsg::Create {
                 recv_created: self.recvcreated,
                 handshake: CircuitHandshake::CreateFast,
-                params: params.clone(),
+                params,
                 done: tx,
             })
             .map_err(|_| Error::CircuitClosed)?;
@@ -1074,7 +1094,7 @@ impl PendingClientCirc {
                         .ed_identity()
                         .ok_or(Error::MissingId(RelayIdType::Ed25519))?,
                 },
-                params: params.clone(),
+                params,
                 done: tx,
             })
             .map_err(|_| Error::CircuitClosed)?;
@@ -1092,7 +1112,6 @@ impl PendingClientCirc {
     ///
     /// Note that the provided 'target' must match the channel's target,
     /// or the handshake will fail.
-    #[cfg(feature = "ntor_v3")]
     pub async fn create_firsthop_ntor_v3<Tg>(
         self,
         target: &Tg,
@@ -1115,7 +1134,7 @@ impl PendingClientCirc {
                         pk: *target.ntor_onion_key(),
                     },
                 },
-                params: params.clone(),
+                params,
                 done: tx,
             })
             .map_err(|_| Error::CircuitClosed)?;
@@ -1157,8 +1176,8 @@ pub(crate) mod test {
     use crate::channel::OpenChanCellS2C;
     use crate::channel::{test::new_reactor, CodecError};
     use crate::congestion::sendme;
+    use crate::congestion::test_utils::params::build_cc_vegas_params;
     use crate::crypto::cell::RelayCellBody;
-    #[cfg(feature = "ntor_v3")]
     use crate::crypto::handshake::ntor_v3::NtorV3Server;
     #[cfg(feature = "hs-service")]
     use crate::stream::IncomingStreamRequestFilter;
@@ -1173,7 +1192,7 @@ pub(crate) mod test {
     use std::fmt::Debug;
     use std::time::Duration;
     use tor_basic_utils::test_rng::testing_rng;
-    use tor_cell::chancell::{msg as chanmsg, AnyChanCell, BoxedCellBody};
+    use tor_cell::chancell::{msg as chanmsg, AnyChanCell, BoxedCellBody, ChanCmd};
     use tor_cell::relaycell::extend::NtorV3Extension;
     use tor_cell::relaycell::{
         msg as relaymsg, AnyRelayMsgOuter, RelayCellFormat, RelayCmd, RelayMsg as _, StreamId,
@@ -1199,8 +1218,10 @@ pub(crate) mod test {
     }
 
     fn rmsg_to_ccmsg(id: Option<StreamId>, msg: relaymsg::AnyRelayMsg) -> ClientCircChanMsg {
+        // TODO #1947: test other formats.
+        let rfmt = RelayCellFormat::V0;
         let body: BoxedCellBody = AnyRelayMsgOuter::new(id, msg)
-            .encode(&mut testing_rng())
+            .encode(rfmt, &mut testing_rng())
             .unwrap();
         let chanmsg = chanmsg::Relay::from(body);
         ClientCircChanMsg::Relay(chanmsg)
@@ -1242,7 +1263,6 @@ pub(crate) mod test {
             EXAMPLE_RSA_ID.into(),
         )
     }
-    #[cfg(feature = "ntor_v3")]
     fn example_ntor_v3_key() -> crate::crypto::handshake::ntor_v3::NtorV3SecretKey {
         crate::crypto::handshake::ntor_v3::NtorV3SecretKey::new(
             EXAMPLE_SK.into(),
@@ -1271,11 +1291,10 @@ pub(crate) mod test {
     enum HandshakeType {
         Fast,
         Ntor,
-        #[cfg(feature = "ntor_v3")]
         NtorV3,
     }
 
-    async fn test_create<R: Runtime>(rt: &R, handshake_type: HandshakeType) {
+    async fn test_create<R: Runtime>(rt: &R, handshake_type: HandshakeType, with_cc: bool) {
         // We want to try progressing from a pending circuit to a circuit
         // via a crate_fast handshake.
 
@@ -1335,15 +1354,29 @@ pub(crate) mod test {
                     .unwrap();
                     CreateResponse::Created2(Created2::new(rep))
                 }
-                #[cfg(feature = "ntor_v3")]
                 HandshakeType::NtorV3 => {
                     let c2 = match create_cell.msg() {
                         AnyChanMsg::Create2(c2) => c2,
                         other => panic!("{:?}", other),
                     };
+                    let mut reply_fn = if with_cc {
+                        |client_exts: &[NtorV3Extension]| {
+                            let _ = client_exts
+                                .iter()
+                                .find(|e| matches!(e, NtorV3Extension::RequestCongestionControl))
+                                .expect("Client failed to request CC");
+                            Some(vec![NtorV3Extension::AckCongestionControl {
+                                // This needs to be aligned to test_utils params
+                                // value due to validation that needs it in range.
+                                sendme_inc: 31,
+                            }])
+                        }
+                    } else {
+                        |_: &_| Some(vec![])
+                    };
                     let (_, rep) = NtorV3Server::server(
                         &mut rng,
-                        &mut |_: &_| Some(vec![]),
+                        &mut reply_fn,
                         &[example_ntor_v3_key()],
                         c2.body(),
                     )
@@ -1360,14 +1393,19 @@ pub(crate) mod test {
             let ret = match handshake_type {
                 HandshakeType::Fast => {
                     trace!("doing fast create");
-                    pending.create_firsthop_fast(&params).await
+                    pending.create_firsthop_fast(params).await
                 }
                 HandshakeType::Ntor => {
                     trace!("doing ntor create");
                     pending.create_firsthop_ntor(&target, params).await
                 }
-                #[cfg(feature = "ntor_v3")]
                 HandshakeType::NtorV3 => {
+                    let params = if with_cc {
+                        // Setup CC vegas parameters.
+                        CircParameters::new(true, build_cc_vegas_params())
+                    } else {
+                        params
+                    };
                     trace!("doing ntor_v3 create");
                     pending.create_firsthop_ntor_v3(&target, params).await
                 }
@@ -1388,22 +1426,29 @@ pub(crate) mod test {
     #[test]
     fn test_create_fast() {
         tor_rtcompat::test_with_all_runtimes!(|rt| async move {
-            test_create(&rt, HandshakeType::Fast).await;
+            test_create(&rt, HandshakeType::Fast, false).await;
         });
     }
     #[traced_test]
     #[test]
     fn test_create_ntor() {
         tor_rtcompat::test_with_all_runtimes!(|rt| async move {
-            test_create(&rt, HandshakeType::Ntor).await;
+            test_create(&rt, HandshakeType::Ntor, false).await;
         });
     }
-    #[cfg(feature = "ntor_v3")]
     #[traced_test]
     #[test]
     fn test_create_ntor_v3() {
         tor_rtcompat::test_with_all_runtimes!(|rt| async move {
-            test_create(&rt, HandshakeType::NtorV3).await;
+            test_create(&rt, HandshakeType::NtorV3, false).await;
+        });
+    }
+    #[traced_test]
+    #[test]
+    #[cfg(feature = "flowctl-cc")]
+    fn test_create_ntor_v3_with_cc() {
+        tor_rtcompat::test_with_all_runtimes!(|rt| async move {
+            test_create(&rt, HandshakeType::NtorV3, true).await;
         });
     }
 
@@ -1427,13 +1472,13 @@ pub(crate) mod test {
     }
 
     impl crate::crypto::cell::OutboundClientLayer for DummyCrypto {
-        fn originate_for(&mut self, _cell: &mut RelayCellBody) -> &[u8] {
+        fn originate_for(&mut self, _cmd: ChanCmd, _cell: &mut RelayCellBody) -> &[u8] {
             self.next_tag()
         }
-        fn encrypt_outbound(&mut self, _cell: &mut RelayCellBody) {}
+        fn encrypt_outbound(&mut self, _cmd: ChanCmd, _cell: &mut RelayCellBody) {}
     }
     impl crate::crypto::cell::InboundClientLayer for DummyCrypto {
-        fn decrypt_inbound(&mut self, _cell: &mut RelayCellBody) -> Option<&[u8]> {
+        fn decrypt_inbound(&mut self, _cmd: ChanCmd, _cell: &mut RelayCellBody) -> Option<&[u8]> {
             if self.lasthop {
                 Some(self.next_tag())
             } else {
@@ -1520,9 +1565,8 @@ pub(crate) mod test {
             let target = example_target();
             match handshake_type {
                 HandshakeType::Fast => panic!("Can't extend with Fast handshake"),
-                HandshakeType::Ntor => circ.extend_ntor(&target, &params).await.unwrap(),
-                #[cfg(feature = "ntor_v3")]
-                HandshakeType::NtorV3 => circ.extend_ntor_v3(&target, &params).await.unwrap(),
+                HandshakeType::Ntor => circ.extend_ntor(&target, params).await.unwrap(),
+                HandshakeType::NtorV3 => circ.extend_ntor_v3(&target, params).await.unwrap(),
             };
             circ // gotta keep the circ alive, or the reactor would exit.
         };
@@ -1555,7 +1599,6 @@ pub(crate) mod test {
                     .unwrap();
                     reply
                 }
-                #[cfg(feature = "ntor_v3")]
                 HandshakeType::NtorV3 => {
                     let (_keygen, reply) = NtorV3Server::server(
                         &mut rng,
@@ -1610,7 +1653,6 @@ pub(crate) mod test {
         });
     }
 
-    #[cfg(feature = "ntor_v3")]
     #[traced_test]
     #[test]
     fn test_extend_ntor_v3() {
@@ -1638,7 +1680,7 @@ pub(crate) mod test {
                 sink
             })
             .unwrap();
-        let outcome = circ.extend_ntor(&target, &params).await;
+        let outcome = circ.extend_ntor(&target, params).await;
         let _sink = sink_handle.await;
 
         assert_eq!(circ.n_hops(), 3);
@@ -2049,14 +2091,15 @@ pub(crate) mod test {
         const N_CELLS: usize = 20;
         // Number of bytes that *each* stream will send, and that we'll read
         // from the channel.
-        const N_BYTES: usize = relaymsg::Data::MAXLEN * N_CELLS;
+        const N_BYTES: usize = relaymsg::Data::MAXLEN_V0 * N_CELLS;
         // Ignoring cell granularity, with perfect fairness we'd expect
         // `N_BYTES/N_STREAMS` bytes from each stream.
         //
         // We currently allow for up to a full cell less than that.  This is
         // somewhat arbitrary and can be changed as needed, since we don't
         // provide any specific fairness guarantees.
-        const MIN_EXPECTED_BYTES_PER_STREAM: usize = N_BYTES / N_STREAMS - relaymsg::Data::MAXLEN;
+        const MIN_EXPECTED_BYTES_PER_STREAM: usize =
+            N_BYTES / N_STREAMS - relaymsg::Data::MAXLEN_V0;
 
         tor_rtcompat::test_with_all_runtimes!(|rt| async move {
             let (chan, mut rx, _sink) = working_fake_channel(&rt);
@@ -2233,6 +2276,8 @@ pub(crate) mod test {
             let (chan, _rx, _sink) = working_fake_channel(&rt);
             let (circ, mut send) = newcirc(&rt, chan).await;
 
+            let rfmt = RelayCellFormat::V0;
+
             // A helper channel for coordinating the "client"/"service" interaction
             let (tx, rx) = oneshot::channel();
             let mut incoming = circ
@@ -2265,7 +2310,7 @@ pub(crate) mod test {
                 let begin = Begin::new("localhost", 80, BeginFlags::IPV6_OKAY).unwrap();
                 let body: BoxedCellBody =
                     AnyRelayMsgOuter::new(StreamId::new(12), AnyRelayMsg::Begin(begin))
-                        .encode(&mut testing_rng())
+                        .encode(rfmt, &mut testing_rng())
                         .unwrap();
                 let begin_msg = chanmsg::Relay::from(body);
 
@@ -2284,7 +2329,7 @@ pub(crate) mod test {
                 let data = relaymsg::Data::new(TEST_DATA).unwrap();
                 let body: BoxedCellBody =
                     AnyRelayMsgOuter::new(StreamId::new(12), AnyRelayMsg::Data(data))
-                        .encode(&mut testing_rng())
+                        .encode(rfmt, &mut testing_rng())
                         .unwrap();
                 let data_msg = chanmsg::Relay::from(body);
 
@@ -2306,6 +2351,7 @@ pub(crate) mod test {
         tor_rtcompat::test_with_all_runtimes!(|rt| async move {
             const TEST_DATA: &[u8] = b"ping";
             const STREAM_COUNT: usize = 2;
+            let rfmt = RelayCellFormat::V0;
 
             let (chan, _rx, _sink) = working_fake_channel(&rt);
             let (circ, mut send) = newcirc(&rt, chan).await;
@@ -2358,7 +2404,7 @@ pub(crate) mod test {
                 let begin = Begin::new("localhost", 80, BeginFlags::IPV6_OKAY).unwrap();
                 let body: BoxedCellBody =
                     AnyRelayMsgOuter::new(StreamId::new(12), AnyRelayMsg::Begin(begin))
-                        .encode(&mut testing_rng())
+                        .encode(rfmt, &mut testing_rng())
                         .unwrap();
                 let begin_msg = chanmsg::Relay::from(body);
 
@@ -2377,7 +2423,7 @@ pub(crate) mod test {
                 let data = relaymsg::Data::new(TEST_DATA).unwrap();
                 let body: BoxedCellBody =
                     AnyRelayMsgOuter::new(StreamId::new(12), AnyRelayMsg::Data(data))
-                        .encode(&mut testing_rng())
+                        .encode(rfmt, &mut testing_rng())
                         .unwrap();
                 let data_msg = chanmsg::Relay::from(body);
 
@@ -2398,6 +2444,7 @@ pub(crate) mod test {
         tor_rtcompat::test_with_all_runtimes!(|rt| async move {
             /// Expect the originator of the BEGIN cell to be hop 1.
             const EXPECTED_HOP: u8 = 1;
+            let rfmt = RelayCellFormat::V0;
 
             let (chan, _rx, _sink) = working_fake_channel(&rt);
             let (circ, mut send) = newcirc(&rt, chan).await;
@@ -2423,7 +2470,7 @@ pub(crate) mod test {
                 let begin = Begin::new("localhost", 80, BeginFlags::IPV6_OKAY).unwrap();
                 let body: BoxedCellBody =
                     AnyRelayMsgOuter::new(StreamId::new(12), AnyRelayMsg::Begin(begin))
-                        .encode(&mut testing_rng())
+                        .encode(rfmt, &mut testing_rng())
                         .unwrap();
                 let begin_msg = chanmsg::Relay::from(body);
 
