@@ -104,10 +104,14 @@ pub use compound::{CompoundRuntime, RuntimeSubstExt};
     not(any(feature = "tokio", feature = "smol"))
 ))]
 use async_std as preferred_backend_mod;
-#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio", not(feature = "smol")))]
-use tokio as preferred_backend_mod;
 #[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "smol"))]
 use smol as preferred_backend_mod;
+#[cfg(all(
+    any(feature = "native-tls", feature = "rustls"),
+    feature = "tokio",
+    not(feature = "smol")
+))]
+use tokio as preferred_backend_mod;
 
 /// The runtime that we prefer to use, out of all the runtimes compiled into the
 /// tor-rtcompat crate.

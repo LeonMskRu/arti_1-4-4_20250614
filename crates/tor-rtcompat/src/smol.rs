@@ -75,11 +75,17 @@ impl SmolNativeTlsRuntime {
     pub fn create() -> IoResult<Self> {
         let rt = create_runtime_impl();
         let ct = RealCoarseTimeProvider::new();
-        Ok(SmolNativeTlsRuntime { inner: CompoundRuntime::new(
-            rt.clone(), rt.clone(), ct,
-            rt.clone(), rt.clone(),
-            NativeTlsProvider::default(), rt.clone(),
-        ) })
+        Ok(SmolNativeTlsRuntime {
+            inner: CompoundRuntime::new(
+                rt.clone(),
+                rt.clone(),
+                ct,
+                rt.clone(),
+                rt.clone(),
+                NativeTlsProvider::default(),
+                rt.clone(),
+            ),
+        })
     }
 
     /// Return a `SmolNativeTlsRuntime` for the current smol executor.
@@ -106,11 +112,17 @@ impl SmolRustlsRuntime {
     pub fn create() -> IoResult<Self> {
         let rt = create_runtime_impl();
         let ct = RealCoarseTimeProvider::new();
-        Ok(SmolRustlsRuntime { inner: CompoundRuntime::new(
-            rt.clone(), rt.clone(), ct,
-            rt.clone(), rt.clone(),
-            RustlsProvider::default(), rt.clone(),
-        ) })
+        Ok(SmolRustlsRuntime {
+            inner: CompoundRuntime::new(
+                rt.clone(),
+                rt.clone(),
+                ct,
+                rt.clone(),
+                rt.clone(),
+                RustlsProvider::default(),
+                rt.clone(),
+            ),
+        })
     }
 
     /// Return a `SmolRustlsRuntime` for the current smol executor.
@@ -128,4 +140,3 @@ impl SmolRustlsRuntime {
         runtime.clone().block_on(func(runtime))
     }
 }
-

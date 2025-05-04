@@ -4,10 +4,11 @@
 
 /// Types used for networking (smol implementation)
 pub(crate) mod net {
+    use super::SmolRuntimeHandle;
     use crate::{impls, traits};
-    use async_net::{TcpListener, TcpStream, UdpSocket as SmolUdpSocket};
     #[cfg(unix)]
     use async_net::unix::{UnixListener, UnixStream};
+    use async_net::{TcpListener, TcpStream, UdpSocket as SmolUdpSocket};
     use async_trait::async_trait;
     use futures::future::Future;
     use futures::stream::Stream;
@@ -17,7 +18,6 @@ pub(crate) mod net {
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tor_general_addr::unix;
-    use super::SmolRuntimeHandle;
 
     /// Provide wrapper for different stream types
     // (e.g async_net::TcpStream and async_net::unix::UnixStream).
@@ -80,7 +80,7 @@ pub(crate) mod net {
             impl traits::NetStreamListener<$addr> for [<$kind Listener>] {
                 type Stream = [<$kind Stream>];
                 type Incoming = [<Incoming $kind Streams>];
-                
+
                 fn incoming(self) -> Self::Incoming {
                     [<Incoming $kind Streams>]::from_listener(self)
                 }
@@ -100,11 +100,11 @@ pub(crate) mod net {
     impl traits::NetStreamProvider<std::net::SocketAddr> for SmolRuntimeHandle {
         type Stream = TcpStream;
         type Listener = TcpListener;
-        
+
         async fn connect(&self, addr: &SocketAddr) -> IoResult<Self::Stream> {
             TcpStream::connect(addr).await
         }
-        
+
         async fn listen(&self, addr: &SocketAddr) -> IoResult<Self::Listener> {
             TcpListener::bind(addr).await
         }
@@ -115,14 +115,18 @@ pub(crate) mod net {
     impl traits::NetStreamProvider<unix::SocketAddr> for SmolRuntimeHandle {
         type Stream = UnixStream;
         type Listener = UnixListener;
-        
+
         async fn connect(&self, addr: &unix::SocketAddr) -> IoResult<Self::Stream> {
-            let path = addr.as_pathname().ok_or(crate::unix::UnsupportedAfUnixAddressType)?;
+            let path = addr
+                .as_pathname()
+                .ok_or(crate::unix::UnsupportedAfUnixAddressType)?;
             UnixStream::connect(path).await
         }
-        
+
         async fn listen(&self, addr: &unix::SocketAddr) -> IoResult<Self::Listener> {
-            let path = addr.as_pathname().ok_or(crate::unix::UnsupportedAfUnixAddressType)?;
+            let path = addr
+                .as_pathname()
+                .ok_or(crate::unix::UnsupportedAfUnixAddressType)?;
             UnixListener::bind(path)
         }
     }
@@ -133,9 +137,11 @@ pub(crate) mod net {
     #[async_trait]
     impl traits::UdpProvider for SmolRuntimeHandle {
         type UdpSocket = UdpSocket;
-        
+
         async fn bind(&self, addr: &std::net::SocketAddr) -> IoResult<Self::UdpSocket> {
-            SmolUdpSocket::bind(addr).await.map(|socket| UdpSocket { socket })
+            SmolUdpSocket::bind(addr)
+                .await
+                .map(|socket| UdpSocket { socket })
         }
     }
 
@@ -148,11 +154,11 @@ pub(crate) mod net {
         async fn recv(&self, buf: &mut [u8]) -> IoResult<(usize, SocketAddr)> {
             self.socket.recv_from(buf).await
         }
-        
+
         async fn send(&self, buf: &[u8], target: &SocketAddr) -> IoResult<usize> {
             self.socket.send_to(buf, target).await
         }
-        
+
         fn local_addr(&self) -> IoResult<SocketAddr> {
             self.socket.local_addr()
         }
@@ -162,7 +168,7 @@ pub(crate) mod net {
         fn set_tcp_notsent_lowat(&self, lowat: u32) -> IoResult<()> {
             impls::streamops::set_tcp_notsent_lowat(self, lowat)
         }
-        
+
         #[cfg(target_os = "linux")]
         fn new_handle(&self) -> Box<dyn traits::StreamOps + Send + Unpin> {
             Box::new(impls::streamops::TcpSockFd::from_fd(self))
@@ -175,20 +181,21 @@ pub(crate) mod net {
             Err(traits::UnsupportedStreamOp::new(
                 "set_tcp_notsent_lowat",
                 "unsupported on Unix streams",
-            ).into())
+            )
+            .into())
         }
     }
 }
 
 // ==============================
 
-use futures::{Future, FutureExt};
-use std::pin::Pin;
-use std::time::Duration;
 use crate::traits::*;
 use blocking::unblock;
+use futures::task::{FutureObj, Spawn, SpawnError};
+use futures::{Future, FutureExt};
 use smol::spawn as smol_spawn;
-use futures::task::{Spawn, SpawnError, FutureObj};
+use std::pin::Pin;
+use std::time::Duration;
 
 #[derive(Clone, Copy)]
 pub struct SmolRuntimeHandle;
@@ -233,4 +240,3 @@ impl Spawn for SmolRuntimeHandle {
         Ok(())
     }
 }
-
