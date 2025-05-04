@@ -20,12 +20,15 @@ pub(crate) mod net {
     use tor_general_addr::unix;
 
     /// Provide wrapper for different stream types
-    // (e.g async_net::TcpStream and async_net::unix::UnixStream).
+    /// (e.g async_net::TcpStream and async_net::unix::UnixStream).
     macro_rules! impl_stream {
         { $kind:ident, $addr:ty } => { paste! {
 
             /// A `Stream` of incoming streams.
             pub struct [<Incoming $kind Streams>] {
+                /// A state object, stored in an Option so we can take ownership of it
+                // TODO: Currently this is an Option so we can take ownership of it using `.take()`.
+                // Check if this approach can be improved once supporting Rust 2024.
                 state: Option<[<Incoming $kind StreamsState>]>,
             }
 
@@ -145,7 +148,10 @@ pub(crate) mod net {
         }
     }
 
+    /// Wrapper for `SmolUdpSocket`.
+    // Required to implement `traits::UdpSocket`.
     pub struct UdpSocket {
+        /// The underlying socket.
         socket: SmolUdpSocket,
     }
 
@@ -197,6 +203,7 @@ use smol::spawn as smol_spawn;
 use std::pin::Pin;
 use std::time::Duration;
 
+/// Handle for the smol runtime.
 #[derive(Clone, Copy)]
 pub struct SmolRuntimeHandle;
 
