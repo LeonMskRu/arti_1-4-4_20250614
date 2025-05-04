@@ -48,7 +48,7 @@
 
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio")
+    any(feature = "async-std", feature = "tokio", feature = "smol")
 ))]
 pub(crate) mod impls;
 pub mod task;
@@ -64,7 +64,7 @@ mod traits;
 pub mod unimpl;
 pub mod unix;
 
-#[cfg(any(feature = "async-std", feature = "tokio"))]
+#[cfg(any(feature = "async-std", feature = "tokio", feature = "smol"))]
 use std::io;
 pub use traits::{
     Blocking, CertifiedConn, CoarseTimeProvider, NetStreamListener, NetStreamProvider,
@@ -93,16 +93,21 @@ pub mod tokio;
 #[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "async-std"))]
 pub mod async_std;
 
+#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "smol"))]
+pub mod smol;
+
 pub use compound::{CompoundRuntime, RuntimeSubstExt};
 
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
     feature = "async-std",
-    not(feature = "tokio")
+    not(any(feature = "tokio", feature = "smol"))
 ))]
 use async_std as preferred_backend_mod;
-#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio"))]
+#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio", not(feature = "smol")))]
 use tokio as preferred_backend_mod;
+#[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "smol"))]
+use smol as preferred_backend_mod;
 
 /// The runtime that we prefer to use, out of all the runtimes compiled into the
 /// tor-rtcompat crate.
