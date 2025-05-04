@@ -8,6 +8,9 @@ pub(crate) mod async_std;
 #[cfg(feature = "tokio")]
 pub(crate) mod tokio;
 
+#[cfg(feature = "smol")]
+pub(crate) mod smol;
+
 #[cfg(feature = "rustls")]
 pub(crate) mod rustls;
 
