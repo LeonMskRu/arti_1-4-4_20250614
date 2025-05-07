@@ -29,11 +29,11 @@ additional_provided["tor-rtcompat"] = [
     ("PreferredRuntime", 'all(feature = "rustls", not(feature = "native-tls"))'),
     (
         "NativeTlsProvider",
-        'all(feature = "native-tls", any(feature = "tokio", feature = "async-std"))',
+        'all(feature = "native-tls", any(feature = "tokio", feature = "async-std", feature = "smol"))',
     ),
     (
         "RustlsProvider",
-        'all(feature = "rustls", any(feature = "tokio", feature = "async-std"))',
+        'all(feature = "rustls", any(feature = "tokio", feature = "async-std", feature = "smol"))',
     ),
 ]
 # "unix::SocketAddr" is present unconditionally,

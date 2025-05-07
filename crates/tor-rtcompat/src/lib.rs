@@ -81,9 +81,9 @@ pub use timer::{SleepProviderExt, Timeout, TimeoutError};
 pub mod tls {
     pub use crate::traits::{CertifiedConn, TlsConnector};
 
-    #[cfg(all(feature = "native-tls", any(feature = "tokio", feature = "async-std")))]
+    #[cfg(all(feature = "native-tls", any(feature = "tokio", feature = "async-std", feature = "smol")))]
     pub use crate::impls::native_tls::NativeTlsProvider;
-    #[cfg(all(feature = "rustls", any(feature = "tokio", feature = "async-std")))]
+    #[cfg(all(feature = "rustls", any(feature = "tokio", feature = "async-std", feature = "smol")))]
     pub use crate::impls::rustls::RustlsProvider;
 }
 
@@ -126,7 +126,7 @@ use tokio as preferred_backend_mod;
 /// after creating this or any other `Runtime`.
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio")
+    any(feature = "async-std", feature = "tokio", feature = "smol")
 ))]
 #[derive(Clone)]
 pub struct PreferredRuntime {
@@ -136,7 +136,7 @@ pub struct PreferredRuntime {
 
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio")
+    any(feature = "async-std", feature = "tokio", feature = "smol")
 ))]
 crate::opaque::implement_opaque_runtime! {
     PreferredRuntime { inner : preferred_backend_mod::PreferredRuntime }
@@ -144,7 +144,7 @@ crate::opaque::implement_opaque_runtime! {
 
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio")
+    any(feature = "async-std", feature = "tokio", feature = "smol")
 ))]
 impl PreferredRuntime {
     /// Obtain a [`PreferredRuntime`] from the currently running asynchronous runtime.
@@ -329,7 +329,7 @@ pub mod cond {
 #[macro_export]
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "tokio", feature = "async-std"),
+    any(feature = "tokio", feature = "async-std", feature = "smol"),
 ))]
 macro_rules! test_with_all_runtimes {
     ( $fn:expr ) => {{
@@ -368,7 +368,7 @@ macro_rules! test_with_all_runtimes {
 #[macro_export]
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "tokio", feature = "async-std"),
+    any(feature = "tokio", feature = "async-std", feature = "smol"),
 ))]
 macro_rules! test_with_one_runtime {
     ( $fn:expr ) => {{
@@ -379,7 +379,7 @@ macro_rules! test_with_one_runtime {
 #[cfg(all(
     test,
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio"),
+    any(feature = "async-std", feature = "tokio", feature = "smol"),
     not(miri), // Many of these tests use real sockets or SystemTime
 ))]
 mod test {
