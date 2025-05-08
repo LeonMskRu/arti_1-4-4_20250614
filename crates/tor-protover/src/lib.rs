@@ -1,3 +1,7 @@
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
+
 #![cfg_attr(docsrs, feature(doc_auto_cfg, doc_cfg))]
 #![doc = include_str!("../README.md")]
 #![allow(non_upper_case_globals)]

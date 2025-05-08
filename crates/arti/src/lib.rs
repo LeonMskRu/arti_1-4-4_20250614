@@ -2,6 +2,10 @@
 #![doc = include_str!("../README.md")]
 // TODO #1645 (either remove this, or decide to have it everywhere)
 #![cfg_attr(not(all(feature = "full", feature = "experimental")), allow(unused))]
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
+
 // Overrides specific to this crate:
 #![allow(clippy::print_stderr)]
 #![allow(clippy::print_stdout)]

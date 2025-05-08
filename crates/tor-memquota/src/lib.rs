@@ -174,6 +174,9 @@
 // channel.  For example, DataWriterImpl holds a substantial fixed-length buffer.  A
 // complication is that we want to know the "data age", which is possibly the time this stream
 // was last used.
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 // TODO #1176
 #![allow(clippy::blocks_in_conditions)]

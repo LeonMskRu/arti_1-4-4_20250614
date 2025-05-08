@@ -1,4 +1,7 @@
 //! A crate for performing GeoIP lookups using the Tor GeoIP database.
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 // TODO #1645 (either remove this, or decide to have it everywhere)
 #![cfg_attr(not(all(feature = "full")), allow(unused))]

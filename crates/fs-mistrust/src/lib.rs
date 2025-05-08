@@ -5,6 +5,9 @@
 
 // POSSIBLY TODO:
 //  - Cache information across runs.
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 // This crate used to have unsafe code to interact with various libc functions.
 // Nowadays we use pwd_grp, which is tested with miri.

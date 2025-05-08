@@ -2,6 +2,9 @@
 //!
 //! NOTE: This binary is still highly experimental as in in active development, not stable and
 //! without any type of guarantee of running or even working.
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 mod cli;
 mod config;

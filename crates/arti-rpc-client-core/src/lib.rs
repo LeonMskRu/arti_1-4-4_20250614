@@ -1,4 +1,8 @@
 #![doc = include_str!("../README.md")]
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
+
 // TODO RPC: Possibly add this to our big list of lints.
 #![deny(unsafe_op_in_unsafe_fn)]
 

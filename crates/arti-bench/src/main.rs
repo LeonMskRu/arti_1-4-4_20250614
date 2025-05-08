@@ -2,6 +2,9 @@
 //!
 //! This works by establishing a simple TCP server, and having Arti connect back to it via
 //! a `chutney` network of Tor nodes, benchmarking the upload and download bandwidth while doing so.
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 // This file uses `unwrap()` a fair deal, but this is fine in test/bench code
 // because it's OK if tests and benchmarks simply crash if things go wrong.

@@ -47,6 +47,9 @@
 //!   - Make streams repeatedly on different circuits with some delay.
 //! - Make sure we can replicate all/most test situations from arti#329
 //! - Actually implement those tests.
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
 
 #![allow(clippy::print_stderr)] // Allowed in this crate only.
 #![allow(clippy::print_stdout)] // Allowed in this crate only.

@@ -1,5 +1,9 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg, doc_cfg))]
 #![doc = include_str!("../README.md")]
+// @@ begin lint list maintained by maint/add_warning @@
+
+//! <!-- @@ end lint list maintained by maint/add_warning @@ -->
+
 // This clippy lint produces a false positive on `use strum`, below.
 // Attempting to apply the lint to just the use statement fails to suppress
 // this lint and instead produces another lint about a useless clippy attribute.
