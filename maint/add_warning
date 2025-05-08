@@ -2,11 +2,11 @@
 
 import argparse
 import fnmatch
-import sys
 import os
 import re
 import shutil
 import subprocess
+import sys
 
 # ---------- actual list of lints to apply (or disapply) ----------
 
@@ -47,6 +47,7 @@ PAT = re.compile(r"^ *#!\[(?:cfg_attr\(.*)?(allow|deny|warn)")
 LINT_LISTS = {
     "test lint": TEST_LINTS,
     "example lint": EXAMPLE_LINTS,
+    "lint": WANT_LINTS,
 }
 # The start delimiter is a regular comment.
 START_LINE = re.compile(r"^(\s*)// @@ begin (.*) list")
