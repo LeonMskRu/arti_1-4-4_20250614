@@ -86,11 +86,7 @@ pub mod macro_prelude {
         ratelim::{rt::rt_support, RateLim},
         Activity, Loggable,
     };
-    // TODO MSRV 1.80: See about replacing this usage of
-    // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See [1] for more
-    // information.
-    //
-    // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     pub use once_cell::sync::Lazy;
     pub use std::sync::{Arc, Mutex, Weak};
     pub use tor_error::ErrorReport;
