@@ -451,11 +451,7 @@ impl fmt::Display for DirProgress {
             /// sub-second times here, and using non-UTC offsets is confusing
             /// in this context.
             //
-            // TODO MSRV 1.80: See about replacing this usage of
-            // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See [1]
-            // for more information.
-            //
-            // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
+            // TODO MSRV 1.80: Replace with LazyLock (#1996)
             static FORMAT: Lazy<Vec<time::format_description::FormatItem>> = Lazy::new(|| {
                 time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second] UTC")
                     .expect("Invalid time format")
