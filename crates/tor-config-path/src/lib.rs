@@ -284,11 +284,7 @@ impl std::fmt::Display for CfgPath {
 pub fn home() -> Result<&'static Path, CfgPathError> {
     /// Lazy cell holding the home directory.
     //
-    // TODO MSRV 1.80: See about replacing this usage of
-    // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See [1] for more
-    // information.
-    //
-    // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static HOME_DIR: Lazy<Option<PathBuf>> =
         Lazy::new(|| Some(BaseDirs::new()?.home_dir().to_owned()));
     HOME_DIR
