@@ -23,3 +23,9 @@ $CARGO update \
       -p tap:1.0.0 \
       -p event-listener:3.0.0 \
       -p yoke:0.6.0
+
+# Update 'futures-lite@1.2.0' to 1.9.0 since this is the version which
+# implements `FutureExt::poll()`, which is required by 'async-fs@2.0.0' even
+# though it only specifies `futures-lite = "1.2.0"` in its 'Cargo.toml'.
+$CARGO update \
+       --precise 1.9.0 futures-lite@1.2.0
