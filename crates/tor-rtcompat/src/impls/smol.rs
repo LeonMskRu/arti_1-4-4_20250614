@@ -135,7 +135,7 @@ pub(crate) mod net {
     }
 
     #[cfg(not(unix))]
-    crate::impls::impl_unix_non_provider! { Smol }
+    crate::impls::impl_unix_non_provider! { SmolRuntimeHandle }
 
     #[async_trait]
     impl traits::UdpProvider for SmolRuntimeHandle {
