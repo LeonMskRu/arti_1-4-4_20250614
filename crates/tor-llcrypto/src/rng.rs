@@ -175,11 +175,7 @@ mod backup {
 
     /// Static instance of our BackupRng; None if we failed to construct one.
     //
-    // TODO MSRV 1.80: See about replacing this usage of
-    // [`once_cell::sync::Lazy`] with [`std::sync::LazyLock`]. See [1] for more
-    // information.
-    //
-    // [1]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static JITTER_BACKUP: Lazy<Option<Mutex<BackupRng>>> = Lazy::new(new_backup_rng);
 
     /// Construct a new instance of our backup Rng;
