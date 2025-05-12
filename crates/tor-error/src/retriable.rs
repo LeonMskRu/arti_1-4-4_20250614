@@ -197,11 +197,7 @@ impl RetryTime {
         I: Iterator<Item = RetryTime>,
         F: FnOnce() -> Duration,
     {
-        // TODO MSRV 1.80: See about replacing this usage of
-        // [`once_cell::unsync::Lazy`] with [`std::cell::LazyCell`]. See [1] for
-        // more information.
-        //
-        // [1]: https://doc.rust-lang.org/std/cell/struct.LazyCell.html
+        // TODO MSRV 1.80: Replace with LazyCell (#1996)
         let chosen_delay =
             once_cell::unsync::Lazy::new(|| AbsRetryTime::from_sum(now, choose_delay()));
 
