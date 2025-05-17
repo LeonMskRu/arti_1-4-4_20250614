@@ -6915,7 +6915,6 @@ dependencies = [
  "assert_matches",
  "async-io",
  "async-native-tls",
- "async-net",
  "async-std",
  "async-trait",
  "async_executors",
