@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use futures::{
-    select_biased, task::SpawnExt as _, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, Future,
-    FutureExt as _, Stream, StreamExt as _,
+    select, select_biased, task::SpawnExt as _, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+    Future, FutureExt as _, Stream, StreamExt as _,
 };
 use itertools::iproduct;
 use oneshot_fused_workaround as oneshot;
@@ -362,12 +362,11 @@ where
     let (svc_r, svc_w) = onion_service_stream.split();
     let (local_r, local_w) = local_stream.split();
 
-    runtime
-        .spawn(copy_interactive(local_r, svc_w).map(|_| ()))
-        .map_err(|e| RequestFailed::Spawn(Arc::new(e)))?;
-    runtime
-        .spawn(copy_interactive(svc_r, local_w).map(|_| ()))
-        .map_err(|e| RequestFailed::Spawn(Arc::new(e)))?;
+    // Close both streams when either side closes.
+    select! {
+        _ = copy_interactive(svc_r, local_w).fuse() => (),
+        _ = copy_interactive(local_r, svc_w).fuse() => (),
+    };
 
     Ok(())
 }
