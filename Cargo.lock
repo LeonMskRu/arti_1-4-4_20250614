@@ -6913,7 +6913,6 @@ version = "0.30.0"
 dependencies = [
  "arbitrary",
  "assert_matches",
- "async-executor",
  "async-io",
  "async-native-tls",
  "async-net",
