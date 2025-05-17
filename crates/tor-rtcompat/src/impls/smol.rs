@@ -204,12 +204,16 @@ use std::pin::Pin;
 use std::time::Duration;
 
 /// Handle for the smol runtime.
-#[derive(Clone, Copy)]
-pub struct SmolRuntimeHandle;
+#[derive(Clone)]
+pub struct SmolRuntimeHandle {
+    executor: std::sync::Arc<smol::Executor<'static>>,
+}
 
 /// Construct a new smol runtime handle.
 pub fn create_runtime() -> SmolRuntimeHandle {
-    SmolRuntimeHandle
+    SmolRuntimeHandle {
+        executor: std::sync::Arc::new(smol::Executor::new()),
+    }
 }
 
 impl SleepProvider for SmolRuntimeHandle {

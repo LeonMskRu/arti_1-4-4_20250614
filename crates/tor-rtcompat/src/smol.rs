@@ -80,7 +80,7 @@ impl SmolNativeTlsRuntime {
         let rt = create_runtime_impl();
         let ct = RealCoarseTimeProvider::new();
         Ok(SmolNativeTlsRuntime {
-            inner: CompoundRuntime::new(rt, rt, ct, rt, rt, NativeTlsProvider::default(), rt),
+            inner: CompoundRuntime::new(rt.clone(), rt.clone(), ct, rt.clone(), rt.clone(), NativeTlsProvider::default(), rt.clone()),
         })
     }
 
@@ -109,7 +109,7 @@ impl SmolRustlsRuntime {
         let rt = create_runtime_impl();
         let ct = RealCoarseTimeProvider::new();
         Ok(SmolRustlsRuntime {
-            inner: CompoundRuntime::new(rt, rt, ct, rt, rt, RustlsProvider::default(), rt),
+            inner: CompoundRuntime::new(rt.clone(), rt.clone(), ct, rt.clone(), rt.clone(), RustlsProvider::default(), rt.clone()),
         })
     }
 
