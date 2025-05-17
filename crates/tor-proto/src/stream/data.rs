@@ -302,7 +302,7 @@ impl DataStreamStatus {
         // something.  But that means making a redundant copy of the error
         // even if nobody will want it.  Do we care?
         match e {
-            Error::EndReceived(EndReason::DONE) => self.received_end = true,
+            Error::EndReceived(EndReason::DONE | EndReason::MISC) => self.received_end = true,
             Error::EndReceived(_) => {
                 self.received_end = true;
                 self.received_err = true;
@@ -860,7 +860,9 @@ impl AsyncRead for DataReader {
                     {
                         _imp.status.lock().expect("lock poisoned").record_error(&e);
                     }
-                    let result = if matches!(e, Error::EndReceived(_)) {
+                    let result = if matches!(e, Error::EndReceived(EndReason::DONE))
+                        || matches!(e, Error::EndReceived(EndReason::MISC))
+                    {
                         Ok(0)
                     } else {
                         Err(e.into())
