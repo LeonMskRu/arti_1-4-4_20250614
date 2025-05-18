@@ -196,7 +196,6 @@ pub(crate) mod net {
 // ==============================
 
 use crate::traits::*;
-use blocking::unblock;
 use futures::task::{FutureObj, Spawn, SpawnError};
 use futures::{Future, FutureExt};
 use std::pin::Pin;
@@ -236,7 +235,7 @@ impl Blocking for SmolRuntimeHandle {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        unblock(f)
+        smol::unblock(f)
     }
 
     fn reenter_block_on<F: Future>(&self, f: F) -> F::Output {
