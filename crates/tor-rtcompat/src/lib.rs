@@ -315,6 +315,16 @@ pub mod cond {
         #[doc(hidden)]
         macro if_async_std_rustls_present = ("async-std", "rustls")
     }
+    declare_conditional_macro! {
+        /// Expand a token tree if the SmolNativeTlsRuntime is available.
+        #[doc(hidden)]
+        macro if_smol_native_tls_present = ("smol", "native-tls")
+    }
+    declare_conditional_macro! {
+        /// Expand a token tree if the SmolRustlsRuntime is available.
+        #[doc(hidden)]
+        macro if_smol_rustls_present = ("smol", "rustls")
+    }
 }
 
 /// Run a test closure, passing as argument every supported runtime.
@@ -356,6 +366,12 @@ macro_rules! test_with_all_runtimes {
         }}
         if_async_std_rustls_present! {{
             $crate::async_std::AsyncStdRustlsRuntime::run_test($fn).check_ok();
+        }}
+        if_smol_native_tls_present! {{
+            $crate::smol::SmolNativeTlsRuntime::run_test($fn).check_ok();
+        }}
+        if_smol_rustls_present! {{
+            $crate::smol::SmolRustlsRuntime::run_test($fn).check_ok();
         }}
     }};
 }
