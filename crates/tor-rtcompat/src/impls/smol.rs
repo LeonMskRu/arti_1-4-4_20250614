@@ -201,7 +201,7 @@ use futures::{Future, FutureExt};
 use std::pin::Pin;
 use std::time::Duration;
 
-/// Owned reference to the smol runtime.
+/// Type to wrap `smol::Executor`.
 #[derive(Clone)]
 pub struct SmolRuntime {
     /// Instance of the smol executor we own.
