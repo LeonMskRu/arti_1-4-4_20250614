@@ -224,7 +224,7 @@ impl SleepProvider for SmolRuntimeHandle {
 
 impl ToplevelBlockOn for SmolRuntimeHandle {
     fn block_on<F: Future>(&self, f: F) -> F::Output {
-        smol::block_on(f)
+        smol::block_on(self.executor.run(f))
     }
 }
 
@@ -240,7 +240,7 @@ impl Blocking for SmolRuntimeHandle {
     }
 
     fn reenter_block_on<F: Future>(&self, f: F) -> F::Output {
-        smol::block_on(f)
+        smol::block_on(self.executor.run(f))
     }
 }
 
