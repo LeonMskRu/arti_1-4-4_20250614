@@ -402,7 +402,7 @@ macro_rules! test_with_one_runtime {
     test,
     any(feature = "native-tls", feature = "rustls"),
     any(feature = "async-std", feature = "tokio", feature = "smol"),
-    not(miri), // Many of these tests use real sockets or SystemTime
+    not(miri), // Many of these tests use real sockets or SystemTime.
 ))]
 mod test {
     #![allow(clippy::unwrap_used, clippy::unnecessary_wraps)]
@@ -684,6 +684,10 @@ mod test {
             mod async_std_runtime_tests {
                 tests_with_runtime! { &crate::async_std::PreferredRuntime::create()? => $($id),* }
             }
+            #[cfg(feature="smol")]
+            mod smol_runtime_tests {
+                tests_with_runtime! { &crate::smol::PreferredRuntime::create()? => $($id),* }
+            }
             mod default_runtime_tests {
                 tests_with_runtime! { &crate::PreferredRuntime::create()? => $($id),* }
             }
@@ -701,6 +705,10 @@ mod test {
             mod async_std_native_tls_tests {
                 tests_with_runtime! { &crate::async_std::AsyncStdNativeTlsRuntime::create()? => $($id),* }
             }
+            #[cfg(all(feature="sol", feature = "native-tls"))]
+            mod smol_native_tls_tests {
+                tests_with_runtime! { &crate::smol::SmolNativeTlsRuntime::create()? => $($id),* }
+            }
             #[cfg(all(feature="tokio", feature="rustls"))]
             mod tokio_rustls_tests {
                 tests_with_runtime! {  &crate::tokio::TokioRustlsRuntime::create()? => $($id),* }
@@ -708,6 +716,10 @@ mod test {
             #[cfg(all(feature="async-std", feature="rustls"))]
             mod async_std_rustls_tests {
                 tests_with_runtime! {  &crate::async_std::AsyncStdRustlsRuntime::create()? => $($id),* }
+            }
+            #[cfg(all(feature="smol", feature="rustls"))]
+            mod smol_rustls_tests {
+                tests_with_runtime! {  &crate::smol::SmolRustlsRuntime::create()? => $($id),* }
             }
             mod default_runtime_tls_tests {
                 tests_with_runtime! { &crate::PreferredRuntime::create()? => $($id),* }
