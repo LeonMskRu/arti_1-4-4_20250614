@@ -6,13 +6,13 @@
 pub(crate) mod net {
     use super::SmolRuntimeHandle;
     use crate::{impls, traits};
-    #[cfg(unix)]
-    use smol::net::unix::{UnixListener, UnixStream};
-    use smol::net::{TcpListener, TcpStream, UdpSocket as SmolUdpSocket};
     use async_trait::async_trait;
     use futures::future::Future;
     use futures::stream::Stream;
     use paste::paste;
+    #[cfg(unix)]
+    use smol::net::unix::{UnixListener, UnixStream};
+    use smol::net::{TcpListener, TcpStream, UdpSocket as SmolUdpSocket};
     use std::io::Result as IoResult;
     use std::net::SocketAddr;
     use std::pin::Pin;
