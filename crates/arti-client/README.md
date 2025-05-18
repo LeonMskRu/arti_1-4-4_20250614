@@ -220,9 +220,8 @@ match tor_client.connect(("example.com", 80)).await {
 * `tokio` (default) -- build with [Tokio](https://tokio.rs/) support
 * `native-tls` (default) -- build with the
   [native-tls](https://github.com/sfackler/rust-native-tls) crate for TLS
-  support
-* `async-std` -- build with [async-std](https://async.rs/) support
-* `smol` -- build with [smol](https://github.com/smol-rs/smol) support
+  support.
+* `async-std` -- build with [async-std](https://async.rs/) support.
 * `compression` (default) -- Build support for downloading compressed
   documents. Requires a C compiler.
 * `bridge-client` -- Build with support for bridges.
@@ -247,6 +246,7 @@ match tor_client.connect(("example.com", 80)).await {
   crate for TLS support.  This is not included in `full`, since it uses the
   `ring` crate, which uses the old (3BSD/SSLEay) OpenSSL license, which may
   introduce licensing compatibility issues.
+* `smol` -- build with [smol](https://github.com/smol-rs/smol) support (experimental).
 
 Note that flags `tokio`, `native-tls`, `async-std`, `smol`, `rustls` and `static`
 will enable the flags of the same name on the [`tor_rtcompat`] crate.
