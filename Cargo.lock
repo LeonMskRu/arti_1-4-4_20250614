@@ -6916,6 +6916,7 @@ dependencies = [
  "async-io",
  "async-native-tls",
  "async-std",
+ "async-task",
  "async-trait",
  "async_executors",
  "asynchronous-codec",
