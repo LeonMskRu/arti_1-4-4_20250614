@@ -157,8 +157,8 @@ Streams can be isolated in two ways:
 ## Multiple runtime support
 
 Arti uses the [`tor_rtcompat`] crate to support multiple asynchronous
-runtimes; currently, both [Tokio](https://tokio.rs) and
-[async-std](https://async.rs) are supported.
+runtimes; currently [Tokio](https://tokio.rs), [async-std](https://async.rs)
+and [smol](https://github.com/smol-rs/smol) are supported.
 
 The backend Arti uses for TCP connections ([`tor_rtcompat::NetStreamProvider`])
 and for creating TLS sessions ([`tor_rtcompat::TlsProvider`]) is also
@@ -222,6 +222,7 @@ match tor_client.connect(("example.com", 80)).await {
   [native-tls](https://github.com/sfackler/rust-native-tls) crate for TLS
   support
 * `async-std` -- build with [async-std](https://async.rs/) support
+* `smol` -- build with [smol](https://github.com/smol-rs/smol) support
 * `compression` (default) -- Build support for downloading compressed
   documents. Requires a C compiler.
 * `bridge-client` -- Build with support for bridges.
@@ -247,7 +248,7 @@ match tor_client.connect(("example.com", 80)).await {
   `ring` crate, which uses the old (3BSD/SSLEay) OpenSSL license, which may
   introduce licensing compatibility issues.
 
-Note that flags `tokio`, `native-tls`, `async-std`, `rustls` and `static`
+Note that flags `tokio`, `native-tls`, `async-std`, `smol`, `rustls` and `static`
 will enable the flags of the same name on the [`tor_rtcompat`] crate.
 
 ### Build-flag related features

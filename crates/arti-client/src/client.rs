@@ -783,8 +783,8 @@ impl TorClient<PreferredRuntime> {
     /// running Tokio runtime. See the documentation for [`PreferredRuntime::current`] for
     /// more information.
     ///
-    /// If using `async-std`, either take care to ensure Arti is not compiled with Tokio support,
-    /// or manually create an `async-std` runtime using [`tor_rtcompat`] and use it with
+    /// If using `async-std` or `smol`, either take care to ensure Arti is not compiled with Tokio support,
+    /// or manually create an `async-std` or `smol` runtime using [`tor_rtcompat`] and use it with
     /// [`TorClient::with_runtime`].
     ///
     /// # Do not fork
@@ -813,8 +813,8 @@ impl TorClient<PreferredRuntime> {
     /// running Tokio runtime. See the documentation for `tokio::runtime::Handle::current` for
     /// more information.
     ///
-    /// If using `async-std`, either take care to ensure Arti is not compiled with Tokio support,
-    /// or manually create an `async-std` runtime using [`tor_rtcompat`] and use it with
+    /// If using `async-std` or `smol`, either take care to ensure Arti is not compiled with Tokio support,
+    /// or manually create an `async-std` or `smol` runtime using [`tor_rtcompat`] and use it with
     /// [`TorClient::with_runtime`].
     ///
     /// # Do not fork
