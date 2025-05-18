@@ -204,6 +204,7 @@ use std::time::Duration;
 /// Handle for the smol runtime.
 #[derive(Clone)]
 pub struct SmolRuntimeHandle {
+    /// Instance of the smol executor we own.
     executor: std::sync::Arc<smol::Executor<'static>>,
 }
 
