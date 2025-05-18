@@ -2,9 +2,9 @@
 //! This crate defines a slim API around our async runtime so that we
 //! can swap it out easily.
 
-/// Types used for networking (smol implementation)
+/// Types used for networking (smol implementation).
 pub(crate) mod net {
-    use super::SmolRuntimeHandle;
+    use super::SmolRuntime;
     use crate::{impls, traits};
     use async_trait::async_trait;
     use futures::future::Future;
@@ -100,7 +100,7 @@ pub(crate) mod net {
     impl_stream! { Unix, unix::SocketAddr }
 
     #[async_trait]
-    impl traits::NetStreamProvider<std::net::SocketAddr> for SmolRuntimeHandle {
+    impl traits::NetStreamProvider<std::net::SocketAddr> for SmolRuntime {
         type Stream = TcpStream;
         type Listener = TcpListener;
 
@@ -115,7 +115,7 @@ pub(crate) mod net {
 
     #[cfg(unix)]
     #[async_trait]
-    impl traits::NetStreamProvider<unix::SocketAddr> for SmolRuntimeHandle {
+    impl traits::NetStreamProvider<unix::SocketAddr> for SmolRuntime {
         type Stream = UnixStream;
         type Listener = UnixListener;
 
@@ -135,10 +135,10 @@ pub(crate) mod net {
     }
 
     #[cfg(not(unix))]
-    crate::impls::impl_unix_non_provider! { SmolRuntimeHandle }
+    crate::impls::impl_unix_non_provider! { SmolRuntime }
 
     #[async_trait]
-    impl traits::UdpProvider for SmolRuntimeHandle {
+    impl traits::UdpProvider for SmolRuntime {
         type UdpSocket = UdpSocket;
 
         async fn bind(&self, addr: &std::net::SocketAddr) -> IoResult<Self::UdpSocket> {
@@ -201,34 +201,34 @@ use futures::{Future, FutureExt};
 use std::pin::Pin;
 use std::time::Duration;
 
-/// Handle for the smol runtime.
+/// Owned reference to the smol runtime.
 #[derive(Clone)]
-pub struct SmolRuntimeHandle {
+pub struct SmolRuntime {
     /// Instance of the smol executor we own.
     executor: std::sync::Arc<smol::Executor<'static>>,
 }
 
-/// Construct a new smol runtime handle.
-pub fn create_runtime() -> SmolRuntimeHandle {
-    SmolRuntimeHandle {
+/// Construct new instance of the smol runtime.
+pub fn create_runtime() -> SmolRuntime {
+    SmolRuntime {
         executor: std::sync::Arc::new(smol::Executor::new()),
     }
 }
 
-impl SleepProvider for SmolRuntimeHandle {
+impl SleepProvider for SmolRuntime {
     type SleepFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
     fn sleep(&self, duration: Duration) -> Self::SleepFuture {
         Box::pin(async_io::Timer::after(duration).map(|_| ()))
     }
 }
 
-impl ToplevelBlockOn for SmolRuntimeHandle {
+impl ToplevelBlockOn for SmolRuntime {
     fn block_on<F: Future>(&self, f: F) -> F::Output {
         smol::block_on(self.executor.run(f))
     }
 }
 
-impl Blocking for SmolRuntimeHandle {
+impl Blocking for SmolRuntime {
     type ThreadHandle<T: Send + 'static> = blocking::Task<T>;
 
     fn spawn_blocking<F, T>(&self, f: F) -> blocking::Task<T>
@@ -244,7 +244,7 @@ impl Blocking for SmolRuntimeHandle {
     }
 }
 
-impl Spawn for SmolRuntimeHandle {
+impl Spawn for SmolRuntime {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.executor.spawn(future).detach();
         Ok(())

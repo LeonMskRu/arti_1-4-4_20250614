@@ -13,8 +13,8 @@ use crate::impls::native_tls::NativeTlsProvider;
 #[cfg(feature = "rustls")]
 use crate::impls::rustls::RustlsProvider;
 
-// Bring in our Smol handle type
-use crate::impls::smol::SmolRuntimeHandle;
+// Bring in our SmolRuntime type.
+use crate::impls::smol::SmolRuntime;
 
 /// An alias for the smol runtime that we prefer to use, based on whatever TLS
 /// implementation has been enabled.
@@ -31,16 +31,16 @@ pub struct SmolNativeTlsRuntime {
     inner: NativeTlsInner,
 }
 
-/// Implementation type for SmolRuntimeHandle using NativeTls.
+/// Implementation type for SmolRuntime using NativeTls.
 #[cfg(feature = "native-tls")]
 type NativeTlsInner = CompoundRuntime<
-    SmolRuntimeHandle,
-    SmolRuntimeHandle,
+    SmolRuntime,
+    SmolRuntime,
     RealCoarseTimeProvider,
-    SmolRuntimeHandle,
-    SmolRuntimeHandle,
+    SmolRuntime,
+    SmolRuntime,
     NativeTlsProvider,
-    SmolRuntimeHandle,
+    SmolRuntime,
 >;
 
 #[cfg(feature = "native-tls")]
@@ -56,16 +56,16 @@ pub struct SmolRustlsRuntime {
     inner: RustlsInner,
 }
 
-/// Implementation type for SmolRuntimeHandle using Rustls.
+/// Implementation type for SmolRuntime using Rustls.
 #[cfg(feature = "rustls")]
 type RustlsInner = CompoundRuntime<
-    SmolRuntimeHandle,
-    SmolRuntimeHandle,
+    SmolRuntime,
+    SmolRuntime,
     RealCoarseTimeProvider,
-    SmolRuntimeHandle,
-    SmolRuntimeHandle,
+    SmolRuntime,
+    SmolRuntime,
     RustlsProvider,
-    SmolRuntimeHandle,
+    SmolRuntime,
 >;
 
 #[cfg(feature = "rustls")]
