@@ -705,7 +705,7 @@ mod test {
             mod async_std_native_tls_tests {
                 tests_with_runtime! { &crate::async_std::AsyncStdNativeTlsRuntime::create()? => $($id),* }
             }
-            #[cfg(all(feature="sol", feature = "native-tls"))]
+            #[cfg(all(feature="smol", feature = "native-tls"))]
             mod smol_native_tls_tests {
                 tests_with_runtime! { &crate::smol::SmolNativeTlsRuntime::create()? => $($id),* }
             }
