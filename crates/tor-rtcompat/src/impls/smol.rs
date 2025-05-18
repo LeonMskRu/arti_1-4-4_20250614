@@ -199,7 +199,6 @@ use crate::traits::*;
 use blocking::unblock;
 use futures::task::{FutureObj, Spawn, SpawnError};
 use futures::{Future, FutureExt};
-use smol::spawn as smol_spawn;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -247,7 +246,7 @@ impl Blocking for SmolRuntimeHandle {
 
 impl Spawn for SmolRuntimeHandle {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
-        smol_spawn(future).detach();
+        self.executor.spawn(future).detach();
         Ok(())
     }
 }
