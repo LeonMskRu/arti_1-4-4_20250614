@@ -235,11 +235,16 @@ impl LowLevelRelayPredicate for RelayUsage {
             }
             Middle => true,
             // TODO: Is there a distinction we should implement?
-            // TODO: Move is_hs_intro_point logic here.
-            NewIntroPoint | ContinuingIntroPoint => relay.is_hs_intro_point(),
+            NewIntroPoint | ContinuingIntroPoint => {
+                relay.is_flagged_fast() && relay.is_flagged_stable()
+            }
             // TODO: Is there a distinction we should implement?
-            // TODO: Move is_suitable_as_guard logic here.
-            NewGuard | ContinuingGuard => relay.is_suitable_as_guard() && relay.is_dir_cache(),
+            NewGuard | ContinuingGuard => {
+                relay.is_flagged_guard()
+                    && relay.is_flagged_fast()
+                    && relay.is_flagged_stable()
+                    && relay.is_dir_cache()
+            }
             #[cfg(feature = "vanguards")]
             Vanguard => {
                 // TODO: we might want to impose additional restrictions here
@@ -397,10 +402,7 @@ mod test {
         let (yes, no) = split_netdir(&nd, &usage);
         let p1 = |relay: &Relay<'_>| {
             let r = relay.low_level_details();
-            r.is_flagged_fast()
-                && r.is_flagged_stable()
-                && r.is_suitable_as_guard()
-                && r.is_dir_cache()
+            r.is_flagged_fast() && r.is_flagged_stable() && r.is_flagged_guard() && r.is_dir_cache()
         };
         assert!(yes.iter().all(p1));
         assert!(no.iter().all(|r| !p1(r)));
