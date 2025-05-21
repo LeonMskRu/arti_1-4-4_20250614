@@ -28,116 +28,85 @@ an extension.  Due to this design decision, all dirauth related data structures
 
 ## Caching as a middle layer
 
-Reading data from disk is very expensive compared to storing it in the memory,
-hence why we need to implement some sort of caching facility in order to not
-always read large blobs of data (such as all server descriptors, which make up
-to around 6MB) from the disk, every time an onion proxy requests them from us.
+Right now, there is a problem that we avoid redundant copies of the same data
+in memory.  Let's say 10,000 clients request the same piece of data.  In that
+sense, we should not store the same data 10,000 times in memory but only once
+and read from the same reference in 10,000 different contextes.
 
-To tackle this problem, we add a caching layer as an intermediate layer between
-interfacing code and actual database access, as well as designing our database
-structure in a way that allows fast look-ups, in case an actual reading from
-disk is required.
-
-In general, all `HTTP GET` requests that request some sort of directory
-information *SHOULD* go through the cache.
+To achieve this, various techniques in the database scheme and database access
+are being used, which is being explained later in the document.
 
 ## Structure of the database
 
-The database schema is highly linked to the
-[General use HTTP URLs](https://spec.torproject.org/dir-spec/general-use-http-urls.html)
-found in the dircache specification, in almost all aspects.
+The database contains a table for each document type the dircache serves.
+Such a table *MUST* contain the following three fields:
+* `rowid`
+	* Serves as the primary key.
+* `sha256`
+	* Uniquely identifies the data by `content`.
+	* Required for caching.
+* `content`
+	* The actual raw content of the document.
+	* *MUST* be valid UTF-8 under all circumstances.
 
-In general, every document type for which there exists a query *MUST* have a
-corresponding table of similar.  Document type hereby references to the document
-format behind each endpoint, such as `consensus`, `consensus-microdesc`, `keys`,
-`server`, `micro`, ...
+Additionally, a table may contain more fields, particularly information
+extracted from the consensus that may be used for addressing certain
+information, such as relay fingerprints, SHA-1 digests, ...
 
-Each table *MUST* contain at least one field named `content` which is of type
-`BLOB`. This field contains the raw document as it is, without any compression
-applied.
+`consensus` and `consensus_md` are special in the sense that they have an
+additional `lzma` column containing the precomputed LZMA compression of
+`content`.
 
-Next to the `content` field, each table *MUST* contain a field named `sha512` of
-type `BLOB`, whose value *MUST* correspond to the SHA-512 checksum of `content`,
-making it therefore content-adressable, as it also *MUST* serve as the primary
-key for this table.
-
-Now, a table *MUST* contain at least as many additional columns, as there are
-ways to query that specific resource.  This means, that if a resource is
-queryable via SHA1 digest or fingerprint, then the table must contain these
-two items as additional columns.
-
-Applying all of this together, we end of up with the following schema:
+Tables that do not represent do not have any requirements.  At the moment, the
+only such table is `vote`, representing an N:M relationship between `authority`
+and `consensus`.
 
 ```sql
-PRAGMA foreign_keys = ON;
-
 -- Stores consensuses.
 --
 -- http://<hostname>/tor/status-vote/current/consensus.z
 -- http://<hostname>/tor/status-vote/current/consensus/<F1>+<F2>+<F3>.z
-CREATE TABLE consensuses(
-	sha512		BLOB NOT NULL UNIQUE,
-	content		BLOB NOT NULL UNIQUE,
-	valid_after	INTEGER NOT NULL, -- Unix timestamp of `valid-after`
-	fresh_until	INTEGER NOT NULL, -- Unix timestamp of `fresh-until`
-	valid_until	INTEGER NOT NULL, -- Unix timestamp of `valid-until`
-	PRIMARY KEY(sha512),
-	CHECK(LENGTH(sha512) == 64)
+CREATE TABLE consensus(
+	rowid		INTEGER NOT NULL,
+	sha256		TEXT NOT NULL UNIQUE,
+	content		TEXT NOT NULL UNIQUE,
+	valid_after	INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
+	fresh_until	INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
+	valid_until	INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
+	lzma		BLOB NOT NULL, -- Precomputed lzma compression of `content`.
+	PRIMARY KEY(rowid),
+	CHECK(LENGTH(sha256) == 64)
 ) STRICT;
 
--- Helper table to model which authority voted on which consensus.
---
--- An entry in this table means that `authority` voted on `consensus`.
---
--- Required to implement:
--- http://<hostname>/tor/status-vote/current/consensus/<F1>+<F2>+<F3>.z
-CREATE TABLE consensuses_votes(
-	sha512		BLOB NOT NULL, -- SHA-512 of the consensus in binary
-	authority	BLOB NOT NULL, -- SHA-1 fingerprint of the authority in binary
-	PRIMARY KEY(sha512, authority),
-	FOREIGN KEY(sha512) REFERENCES consensuses(sha512),
-	CHECK(authority IN (
-		-- Last updated on May 30th, 2024.
-		X'27102BC123E7AF1D4741AE047E160C91ADC76B21', -- bastet
-		X'0232AF901C31A04EE9848595AF9BB7620D4C5B2E', -- dannenberg
-		X'E8A9C45EDE6D711294FADF8E7951F4DE6CA56B58', -- dizum
-		X'70849B868D606BAECFB6128C5E3D782029AA394F', -- faravahar
-		X'ED03BB616EB2F60BEC80151114BB25CEF515B226', -- gabelmoo
-		X'23D15D965BC35114467363C165C4F724B64B4F66', -- longclaw
-		X'49015F787433103580E3B66A1707A00E60F2D15B', -- maatuska
-		X'F533C81CEF0BC0267857C99B2F471ADF249FA232', -- moria1
-		X'2F3DF9CA0E5D36F2685A2DA67184EB8DCB8CBA8C' -- tor26
-	))
-) STRICT;
-
--- Stores the microdescriptor consensus.
+-- Stores microdescriptor consensuses.
 --
 -- http://<hostname>/tor/status-vote/current/consensus-microdesc.z
-CREATE TABLE consensuses_microdesc(
-	sha512		BLOB NOT NULL UNIQUE,
-	content		BLOB NOT NULL UNIQUE,
-	valid_after	INTEGER NOT NULL, -- Unix timestamp of `valid-after`
-	fresh_until	INTEGER NOT NULL, -- Unix timestamp of `fresh-until`
-	valid_until	INTEGER NOT NULL, -- Unix timestamp of `valid-until`
-	PRIMARY KEY(sha512),
-	CHECK(LENGTH(sha512) == 64)
-);
+CREATE TABLE consensus_md(
+	rowid		INTEGER NOT NULL,
+	sha256		TEXT NOT NULL UNIQUE,
+	content		TEXT NOT NULL UNIQUE,
+	valid_after	INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
+	fresh_until	INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
+	valid_until	INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
+	lzma		BLOB NOT NULL, -- Precomputed lzma compression of `content`.
+	PRIMARY KEY(rowid),
+	CHECK(LENGTH(sha256) == 64)
+) STRICT;
 
--- Stores the key certificates.
+-- Stores information about directory authorities.
 --
 -- http://<hostname>/tor/keys/all.z
 -- http://<hostname>/tor/keys/authority.z
 -- http://<hostname>/tor/keys/fp/<F>.z
 -- http://<hostname>/tor/keys/sk/<F>-<S>.z
-CREATE TABLE keys(
-	sha512		BLOB NOT NULL UNIQUE,
-	content		BLOB NOT NULL UNIQUE,
-	fingerprint	BLOB NOT NULL, -- Identity key fingerprint (binary SHA-1)
-	signing_key	BLOB NOT NULL, -- Signing key fingerprint (binary SHA-1)
-	PRIMARY KEY(sha512),
-	CHECK(LENGTH(sha512) == 64),
-	CHECK(LENGTH(fingerprint) == 20),
-	CHECK(LENGTH(signing_key) == 20)
+CREATE TABLE authority(
+	rowid	INTEGER NOT NULL,
+	content	TEXT NOT NULL UNIQUE,
+	fp		TEXT NOT NULL, -- HEX(SHA1(DER(KP_auth_id_rsa))).
+	sk		TEXT NOT NULL, -- HEX(SHA1(DER(KP_auth_sign_rsa))).
+	PRIMARY KEY(rowid),
+	CHECK(LENGTH(fp) == 40),
+	CHECK(LENGTH(sk) == 40)
 ) STRICT;
 
 -- Stores the router descriptors.
@@ -146,50 +115,33 @@ CREATE TABLE keys(
 -- http://<hostname>/tor/server/d/<D>.z
 -- http://<hostname>/tor/server/authority.z
 -- http://<hostname>/tor/server/all.z
-CREATE TABLE servers(
-	sha512		BLOB NOT NULL UNIQUE,
-	content		BLOB NOT NULL UNIQUE,
-	fingerprint	BLOB NOT NULL, -- Identity key fingerprint (binary SHA-1)
-	sha1		BLOB NOT NULL UNIQUE, -- Binary SHA-1 of `content`
-	PRIMARY KEY(sha512),
-	CHECK(LENGTH(sha512) == 64),
-	CHECK(LENGTH(fingerprint) == 20),
-	CHECK(LENGTH(sha1) == 20)
-) STRICT;
-
--- Stores which router descriptors were present in which consensuses.
---
--- This information is required for cleaning up old router descriptors, as we
--- may not delete them the moment they are no longer listed in a consensus.
-CREATE TABLE servers_consensuses(
-	server		BLOB NOT NULL,
-	consensus	BLOB NOT NULL,
-	PRIMARY KEY(server, consensus),
-	FOREIGN KEY(server) REFERENCES servers(sha512),
-	FOREIGN KEY(consensus) REFERENCES consensuses(sha512)
+CREATE TABLE router(
+	rowid			INTEGER NOT NULL,
+	sha256			TEXT NOT NULL UNIQUE,
+	content			TEXT NOT NULL UNIQUE,
+	sha1			TEXT NOT NULL UNIQUE, -- HEX(SHA1(`content`)).
+	fp				TEXT NOT NULL, -- HEX(SHA1(DER(KP_relayid_rsa))).
+	consensus_rowid	INTEGER NOT NULL, -- Last consensus when this router was seen.
+	extra_rowid		INTEGER NOT NULL, -- Extra-info accompanying the router.
+	PRIMARY KEY(rowid),
+	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(extra_rowid) REFERENCES extra(rowid),
+	CHECK(LENGTH(sha256) == 64),
+	CHECK(LENGTH(sha1) == 40),
+	CHECK(LENGTH(fp) == 40)
 ) STRICT;
 
 -- Stores micro router descriptors.
 --
 -- http://<hostname>/tor/micro/d/<D>[.z]
-CREATE TABLE microdescs(
-	sha512	BLOB NOT NULL UNIQUE,
-	content	BLOB NOT NULL UNIQUE,
-	sha256	BLOB NOT NULL UNIQUE, -- Binary SHA-256 of `content`
-	PRIMARY KEY(sha512),
-	CHECK(LENGTH(sha512) == 64),
-	CHECK(LENGTH(sha256) == 32)
-) STRICT;
-
--- Stores which micro router descriptors are present in which microdescriptor consensuses.
---
--- This is required for cleaning up old micro descriptors.
-CREATE TABLE microdescs_consensuses(
-	microdesc	BLOB NOT NULL,
-	consensus	BLOB NOT NULL,
-	PRIMARY KEY(microdesc, consensus),
-	FOREIGN KEY(microdesc) REFERENCES microdescs(sha512),
-	FOREIGN KEY(consensus) REFERENCES consensus_microdescs(sha512)
+CREATE TABLE md(
+	rowid				INTEGER NOT NULL,
+	sha256				TEXT NOT NULL UNIQUE,
+	content				TEXT NOT NULL UNIQUE,
+	consensus_md_rowid	INTEGER NOT NULL, -- Last consensus-md when this md was seen.
+	PRIMARY KEY(rowid),
+	FOREIGN KEY(consensus_md_rowid) REFERENCES consensus_md(rowid),
+	CHECK(LENGTH(sha256) == 64)
 ) STRICT;
 
 -- Stores extra-info documents.
@@ -198,60 +150,79 @@ CREATE TABLE microdescs_consensuses(
 -- http://<hostname>/tor/extra/fp/<FP>.z
 -- http://<hostname>/tor/extra/all.z
 -- http://<hostname>/tor/extra/authority.z
-CREATE TABLE extras(
-	sha512		BLOB NOT NULL UNIQUE,
-	content		BLOB NOT NULL UNIQUE,
-	fingerprint	BLOB NOT NULL, -- Identity key fingerprint (binary SHA-1)
-	sha1		BLOB NOT NULL UNIQUE, -- Binary SHA-1 of `content`
-	PRIMARY KEY(sha512),
-	CHECK(LENGTH(sha512) == 64),
-	CHECK(LENGTH(fingerprint) == 32),
-	CHECK(LENGTH(sha1) == 20)
+CREATE TABLE extra(
+	rowid	INTEGER NOT NULL,
+	sha256	TEXT NOT NULL UNIQUE,
+	content	TEXT NOT NULL UNIQUE,
+	sha1	TEXT NOT NULL UNIQUE, -- HEX(SHA1(`content`)).
+	fp		TEXT NOT NULL, -- HEX(SHA1(DER(KP_relayid_rsa))).
+	PRIMARY KEY(rowid),
+	CHECK(LENGTH(sha256) == 64),
+	CHECK(LENGTH(sha1) == 40),
+	CHECK(LENGTH(fp) == 40)
+) STRICT;
+
+-- Stores which authority voted on which consensus.
+--
+-- Required to implement the consensus retrieval by authority fingerprints.
+CREATE TABLE vote(
+	consensus_rowid	INTEGER NOT NULL,
+	authority_rowid	INTEGER NOT NULL,
+	PRIMARY KEY(consensus_rowid, authority_rowid),
+	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
 ) STRICT;
 ```
 
 ## Cache access to the database
 
-*(cve: I feel like this is not very good, I am currently thinking about a better
-model that simply uses the HTTP paths as the keys, as that makes it trivial
-to also cache things such as `all.z`)*
+The cache is implemented in a `HashMap<Sha256, Arc<[u8]>>` with some respective
+wrappers around it for concurrenct access.  In the cache, the key corresponds to
+the `sha256` column that exists in all document tables.
 
-This section only defines the API that is used for frequent read access to the
-database, further design is needed for other scenarios where the database has
-to be accessed.
+Each `HTTP GET` request is processed as follows (in terms of caching):
+```
+// This is pseudo-code!
 
-Let us begin by defining a new type called `Cache`, which is created using a
-database handle.
+// Search for the requested document and obtain the SHA-256.
+let sha256 = sql("SELECT sha256 FROM table WHERE column_name = ?;");
 
-Internally, the cache consists of a `HashMap<[u8; 64], Vec<u8>>`, where the
-key refers to a SHA-512 hash and the `Vec<u8>` to the actual data adressed by
-that hash.  This serves as the fundament of the cache, as it contains the
-backbone of all data.
+let content;
+if cache.contains_key(sha256) {
+	// Read from cache.
+	content = Arc::clone(&cache.get(sha256));
+} else {
+	// Read from db and insert into cache.
+	let tmp = sql("SELECT content FROM table WHERE sha256 = ?", sha256);
+	cache.insert(sha256, Arc::new(tmp));
+	content = Arc::clone(&cache.get(sha256));
+}
 
-Next to this `HashMap`, there also exist other `HashMap`'s, which mainly map
-other keys to SHA-512 hashes, which is required for lookups, those `HashMap`'s
-are:
-* `HashMap<[u8; 32], [u8; 64]>` -- Maps microdescriptor SHA-2 hashes to SHA-512
-* `HashMap<[u8; 20], [u8; 64]>` -- Maps router descriptor SHA-1 to SHA-512
-* `HashMap<[u8; 20], [u8; 64]>` -- Maps extra-info SHA-1 to SHA-512
-* `HashMap<[u8; 20], [u8; 64]>` -- Maps router desc fingerprints to SHA-512
-* `HashMap<[u8; 20], [u8; 64]>` -- Maps extra-info fingerprints to SHA-512
+// Actually handle the request.
 
-Now when we get an incoming `HTTP GET` request, depending on the request, the
-general procedure for lookups is as follows:
-* Check whether there exists an entry in the corresponding hash map for the given information to a SHA-512 hash.
-    * If so, obtain the SHA-512 hash and look it up in the big hash map above.
-	* If not, query the database first for the corresponding resource and insert it into the respective maps.
+drop(content);
+if cache.get(sha256).ref_count == 1 {
+	cache.remove(sha256);
+}
+```
 
-It remains an open question on how we should store compressed elements.
-Probably an additional layer above the `HashMap<[u8; 64], Vec<u8>>`.
+The purpose of this pseudo-code is to ensure that when parallel requests
+requesting the same resource do not result in having to store the same data
+more than once in memory at the same time.  Once the last request of that
+resource has finished, we delete it from our cache.  This comes of the downside
+that two independent requests that missed a short time window in which they
+could have been parallel will result in a read from the database that might have
+been redundant.  However, we trust in the OS buffer cache and SQLite internals
+here to tackle this problem for us.
 
 ## Cache invalidation
 
-Every time a new consensus has been obtained, the cache has to be cleaned,
-primarily due to fingerprints that must now match to newer SHA-512s.
+Cache invalidation is not a problem because all resources are identified by a
+unique hash.  The moment it is no longer in the database, it will no longer
+be served, because the appropriate SHA256 hash is no longer returned.  Finally,
+it will be eliminated from the cache when the last HTTP request still associated
+with it terminates.
 
 ## Access to the database
 
-It remains an open question on how the code, outside of the cache, accesses the
-database.  Do we use an ORM?  How beefed up should our SQLite provider be?
+It remains an open question which SQL backend to use.
