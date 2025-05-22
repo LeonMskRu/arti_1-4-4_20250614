@@ -42,7 +42,7 @@ The database contains a table for each document type the dircache serves.
 Such a table *MUST* contain the following three fields:
 * `rowid`
 	* Serves as the primary key.
-* `sha256`
+* `content_sha256`
 	* Uniquely identifies the data by `content`.
 	* Required for caching.
 * `content`
@@ -57,9 +57,9 @@ information, such as relay fingerprints, SHA-1 digests, ...
 additional `lzma` column containing the precomputed LZMA compression of
 `content`.
 
-Tables that do not represent do not have any requirements.  At the moment, the
-only such table is `vote`, representing an N:M relationship between `authority`
-and `consensus`.
+Tables that do not represent network documents do not have any requirements.
+At the moment, the only such table is `vote`, representing an N:M relationship
+between `authority` and `consensus`.
 
 ```sql
 -- Stores consensuses.
@@ -67,47 +67,63 @@ and `consensus`.
 -- http://<hostname>/tor/status-vote/current/consensus.z
 -- http://<hostname>/tor/status-vote/current/consensus/<F1>+<F2>+<F3>.z
 CREATE TABLE consensus(
-	rowid		INTEGER NOT NULL,
-	sha256		TEXT NOT NULL UNIQUE,
-	content		TEXT NOT NULL UNIQUE,
-	valid_after	INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
-	fresh_until	INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
-	valid_until	INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
-	lzma		BLOB NOT NULL, -- Precomputed lzma compression of `content`.
+	rowid				INTEGER NOT NULL,
+	content_sha256		TEXT NOT NULL UNIQUE,
+	content				TEXT NOT NULL UNIQUE,
+	content_lzma		BLOB NOT NULL UNIQUE,
+	content_lzma_sha256	TEXT NOT NULL UNIQUE,
+	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
+	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
+	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
 	PRIMARY KEY(rowid),
-	CHECK(LENGTH(sha256) == 64)
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_lzma_sha256) == 64)
 ) STRICT;
+
+CREATE INDEX idx_consensus ON consensus(valid_after, content_sha256, content_lzma_sha256);
 
 -- Stores microdescriptor consensuses.
 --
 -- http://<hostname>/tor/status-vote/current/consensus-microdesc.z
 CREATE TABLE consensus_md(
-	rowid		INTEGER NOT NULL,
-	sha256		TEXT NOT NULL UNIQUE,
-	content		TEXT NOT NULL UNIQUE,
-	valid_after	INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
-	fresh_until	INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
-	valid_until	INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
-	lzma		BLOB NOT NULL, -- Precomputed lzma compression of `content`.
+	rowid				INTEGER NOT NULL,
+	content_sha256		TEXT NOT NULL UNIQUE,
+	content				TEXT NOT NULL UNIQUE,
+	content_lzma		BLOB NOT NULL UNIQUE,
+	content_lzma_sha256	TEXT NOT NULL UNIQUE,
+	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
+	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
+	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
 	PRIMARY KEY(rowid),
-	CHECK(LENGTH(sha256) == 64)
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_lzma_sha256) == 64)
 ) STRICT;
 
--- Stores information about directory authorities.
+CREATE INDEX idx_consensus_md ON consensus_md(valid_after, content_sha256, content_lzma_sha256);
+
+-- Directory authority key certificates.
+--
+-- This information is derived from the consensus documents.
 --
 -- http://<hostname>/tor/keys/all.z
 -- http://<hostname>/tor/keys/authority.z
 -- http://<hostname>/tor/keys/fp/<F>.z
 -- http://<hostname>/tor/keys/sk/<F>-<S>.z
 CREATE TABLE authority(
-	rowid	INTEGER NOT NULL,
-	content	TEXT NOT NULL UNIQUE,
-	fp		TEXT NOT NULL, -- HEX(SHA1(DER(KP_auth_id_rsa))).
-	sk		TEXT NOT NULL, -- HEX(SHA1(DER(KP_auth_sign_rsa))).
+	rowid					INTEGER NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL UNIQUE,
+	kp_auth_id_rsa_sha1		TEXT NOT NULL,
+	kp_auth_sign_rsa_sha1	TEXT NOT NULL,
+	last_consensus_rowid	INTEGER NOT NULL,
 	PRIMARY KEY(rowid),
-	CHECK(LENGTH(fp) == 40),
-	CHECK(LENGTH(sk) == 40)
+	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(kp_auth_id_rsa_sha1) == 40),
+	CHECK(LENGTH(kp_auth_sign_rsa_sha1) == 40)
 ) STRICT;
+
+CREATE INDEX idx_authority ON authority(kp_auth_id_rsa_sha1, kp_auth_sign_rsa_sha1);
 
 -- Stores the router descriptors.
 --
@@ -116,33 +132,37 @@ CREATE TABLE authority(
 -- http://<hostname>/tor/server/authority.z
 -- http://<hostname>/tor/server/all.z
 CREATE TABLE router(
-	rowid			INTEGER NOT NULL,
-	sha256			TEXT NOT NULL UNIQUE,
-	content			TEXT NOT NULL UNIQUE,
-	sha1			TEXT NOT NULL UNIQUE, -- HEX(SHA1(`content`)).
-	fp				TEXT NOT NULL, -- HEX(SHA1(DER(KP_relayid_rsa))).
-	consensus_rowid	INTEGER NOT NULL, -- Last consensus when this router was seen.
-	extra_rowid		INTEGER NOT NULL, -- Extra-info accompanying the router.
+	rowid					INTEGER NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL UNIQUE,
+	content_sha1			TEXT NOT NULL UNIQUE,
+	kp_relay_id_rsa_sha1	TEXT NOT NULL,
+	last_consensus_rowid	INTEGER NOT NULL,
+	router_extra_info_rowid	INTEGER,
 	PRIMARY KEY(rowid),
-	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
-	FOREIGN KEY(extra_rowid) REFERENCES extra(rowid),
-	CHECK(LENGTH(sha256) == 64),
-	CHECK(LENGTH(sha1) == 40),
-	CHECK(LENGTH(fp) == 40)
+	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(router_extra_info_rowid) REFERENCES router_extra_info(rowid),
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_sha1) == 40),
+	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
+
+CREATE INDEX idx_router ON router(kp_relay_id_rsa_sha1, content_sha1);
 
 -- Stores micro router descriptors.
 --
 -- http://<hostname>/tor/micro/d/<D>[.z]
-CREATE TABLE md(
-	rowid				INTEGER NOT NULL,
-	sha256				TEXT NOT NULL UNIQUE,
-	content				TEXT NOT NULL UNIQUE,
-	consensus_md_rowid	INTEGER NOT NULL, -- Last consensus-md when this md was seen.
+CREATE TABLE router_md(
+	rowid					INTEGER NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL UNIQUE,
+	last_consensus_md_rowid	INTEGER NOT NULL,
 	PRIMARY KEY(rowid),
-	FOREIGN KEY(consensus_md_rowid) REFERENCES consensus_md(rowid),
-	CHECK(LENGTH(sha256) == 64)
+	FOREIGN KEY(last_consensus_md_rowid) REFERENCES consensus_md(rowid),
+	CHECK(LENGTH(content_sha256) == 64)
 ) STRICT;
+
+CREATE INDEX idx_router_md ON router_md(content_sha256);
 
 -- Stores extra-info documents.
 --
@@ -150,22 +170,25 @@ CREATE TABLE md(
 -- http://<hostname>/tor/extra/fp/<FP>.z
 -- http://<hostname>/tor/extra/all.z
 -- http://<hostname>/tor/extra/authority.z
-CREATE TABLE extra(
-	rowid	INTEGER NOT NULL,
-	sha256	TEXT NOT NULL UNIQUE,
-	content	TEXT NOT NULL UNIQUE,
-	sha1	TEXT NOT NULL UNIQUE, -- HEX(SHA1(`content`)).
-	fp		TEXT NOT NULL, -- HEX(SHA1(DER(KP_relayid_rsa))).
+CREATE TABLE router_extra_info(
+	rowid			INTEGER NOT NULL,
+	content_sha256	TEXT NOT NULL UNIQUE,
+	content			TEXT NOT NULL UNIQUE,
+	content_sha1	TEXT NOT NULL UNIQUE,
+	kp_relay_id_rsa	TEXT NOT NULL,
 	PRIMARY KEY(rowid),
-	CHECK(LENGTH(sha256) == 64),
-	CHECK(LENGTH(sha1) == 40),
-	CHECK(LENGTH(fp) == 40)
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_sha1) == 40),
+	CHECK(LENGTH(kp_relay_id_rsa) == 40)
 ) STRICT;
+
+CREATE INDEX idx_router_extra_info ON router_extra_info(content_sha1, kp_relay_id_rsa);
 
 -- Stores which authority voted on which consensus.
 --
 -- Required to implement the consensus retrieval by authority fingerprints.
-CREATE TABLE vote(
+-- http://<hostname>/tor/status-vote/current/consensus/<F1>+<F2>+<F3>.z
+CREATE TABLE consensus_authority_voter(
 	consensus_rowid	INTEGER NOT NULL,
 	authority_rowid	INTEGER NOT NULL,
 	PRIMARY KEY(consensus_rowid, authority_rowid),
