@@ -80,10 +80,10 @@ have more general names.
 
 The current crates are:
 
+* [`arti`](../../crates/arti/README.md) -- A minimal command line program for connecting to the Tor network
 * [`arti-bench`](../../crates/arti-bench/README.md) -- A simple benchmarking utility for Arti.
 * [`arti-client`](../../crates/arti-client/README.md) -- High-level functionality for accessing the Tor network as a client.
 * [`arti-config`](../../crates/arti-config/README.md) -- Removed crate.  (Tools for configuration management in Arti)
-* [`arti`](../../crates/arti/README.md) -- A minimal command line program for connecting to the Tor network
 * [`arti-testing`](../../crates/arti-testing/README.md) -- Tool for running an Arti client with unusual behavior or limitations.
 * [`arti-ureq`](../../crates/arti-ureq/README.md) -- Use ureq in combination with ureq to make requests over the Tor network.
 * [`caret`](../../crates/caret/README.md) -- Integers with some named values.
