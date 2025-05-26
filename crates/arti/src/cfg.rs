@@ -20,7 +20,9 @@ use arti_client::TorClientConfig;
 #[cfg(feature = "onion-service-service")]
 use tor_config::define_list_builder_accessors;
 use tor_config::resolve_alternative_specs;
+use tor_config::ConfigurationSource;
 pub(crate) use tor_config::{impl_standard_builder, ConfigBuildError, Listen};
+use tor_config_path::CfgPathError;
 
 use crate::{LoggingConfig, LoggingConfigBuilder};
 
@@ -367,6 +369,20 @@ impl ArtiConfig {
     pub fn rpc(&self) -> &RpcConfig {
         &self.rpc
     }
+}
+
+/// Return the filenames for the default user configuration files
+pub fn default_config_files() -> Result<Vec<ConfigurationSource>, CfgPathError> {
+    // the base path resolver includes the 'ARTI_CONFIG' variable
+    let path_resolver = tor_config_path::arti_client_base_resolver();
+
+    ["${ARTI_CONFIG}/arti.toml", "${ARTI_CONFIG}/arti.d/"]
+        .into_iter()
+        .map(|f| {
+            let path = tor_config_path::CfgPath::new(f.into()).path(&path_resolver)?;
+            Ok(ConfigurationSource::from_path(path))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1845,5 +1861,16 @@ example config file {which:?}, uncommented={uncommented:?}
             &|bld, arg| bld.proxy.dns_port(arg),
             &|bld, arg| bld.proxy.dns_listen(arg),
         );
+    }
+
+    #[test]
+    fn check_default() {
+        // We don't want to second-guess the directories crate too much
+        // here, so we'll just make sure it does _something_ plausible.
+
+        let dflt = default_config_files().unwrap();
+        assert!(dflt[0].as_path().unwrap().ends_with("arti.toml"));
+        assert!(dflt[1].as_path().unwrap().ends_with("arti.d"));
+        assert_eq!(dflt.len(), 2);
     }
 }
