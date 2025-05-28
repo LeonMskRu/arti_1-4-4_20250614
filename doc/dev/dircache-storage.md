@@ -192,7 +192,7 @@ CREATE TABLE router_extra_info(
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
 	last_consensus_rowid	INTEGER NOT NULL UNIQUE,
-	FOREIGN KEY(last_router_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha1) == 40),
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
