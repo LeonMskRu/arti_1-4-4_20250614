@@ -12,6 +12,9 @@ repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 categories = ["rust-patterns"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints]
+    workspace = true
+
 [dependencies]
 derive-deftly = { version = "1.0.0", optional = true }
 derive_more = { version = "2.0.1", features = ["full"] }

@@ -11,6 +11,9 @@ keywords = ["tor", "arti"]
 categories = ["memory-management"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 derive-deftly = { version = "~1.0.0", features = ["full", "beta"] }
 derive_more = { version = "2.0.1", features = ["full"] }

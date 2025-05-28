@@ -5,4 +5,7 @@ edition = "2021"
 repository = "https://gitlab.torproject.org/tpo/core//rust-maint-common"
 publish = false
 
+[lints]
+    workspace = true
+
 [dependencies]

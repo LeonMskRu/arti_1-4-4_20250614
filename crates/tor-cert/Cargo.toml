@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "certificate"]
 categories = ["parser-implementations"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = []
 experimental = ["encode", "experimental-api"]

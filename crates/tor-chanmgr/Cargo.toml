@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "async"]
 categories = ["network-programming", "cryptography"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = []
 experimental = ["experimental-api", "relay", "testing"]

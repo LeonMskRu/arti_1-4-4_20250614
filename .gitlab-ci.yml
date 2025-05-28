@@ -200,6 +200,7 @@ cargo-audit:
 .rust-recent-template:
   script: &rust-recent-script
     - rustup show
+    - export RUSTFLAGS="-A unknown_lints -D renamed_and_removed_lints"
 
     - section_start "cargo check"
     - cargo check --locked --verbose --target x86_64-unknown-linux-gnu
@@ -210,7 +211,7 @@ cargo-audit:
     - section_start "cargo clippy"
     - rustup component add clippy
     - rustup show
-    - ./maint/add_warning --ci-stable
+    - ./maint/add_warning
     - cargo clippy --all-features --all-targets -- -D warnings
 
     - section_start "build arti-bench"
@@ -317,13 +318,14 @@ rust-nightly:
   allow_failure: true
   script:
     - rustup show
+    - export RUSTFLAGS="-D unknown_lints -A renamed_and_removed_lints"
     - cargo build --verbose --target x86_64-unknown-linux-gnu --all-features
     - cargo test --verbose --target x86_64-unknown-linux-gnu --all-features
     - rustup component add clippy
     # We check these extra warnings on CI only, since we don't want to forbid them while developing.
 
     - (echo; cat clippy-nightly.toml) >>clippy.toml
-    - ./maint/add_warning --ci-nightly
+    - ./maint/add_warning
     - cargo clippy --all-features --tests -- -D clippy::dbg_macro
     - RUSTDOCFLAGS="-Dwarnings --cfg docsrs" cargo doc --all-features --document-private-items --no-deps
 

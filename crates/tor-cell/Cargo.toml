@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "protocol"]
 categories = ["parser-implementations", "network-programming"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = []
 conflux = ["__is_experimental"]

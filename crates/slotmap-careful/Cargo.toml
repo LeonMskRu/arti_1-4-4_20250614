@@ -11,6 +11,9 @@ keywords = ["slotmap", "arena"]
 categories = ["data-structures"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 paste = "1"
 serde = "1.0"

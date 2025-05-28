@@ -12,6 +12,9 @@ readme = "README.md"
 categories = ["parser-implementations", "network-programming"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 derive_more = { version = "2.0.1", features = ["full"] }
 rangemap = "1.3"

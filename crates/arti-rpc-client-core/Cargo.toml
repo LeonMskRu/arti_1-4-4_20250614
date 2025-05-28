@@ -15,6 +15,9 @@ repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[lints]
+    workspace = true
+
 [dependencies]
 
 caret = { path = "../caret", version = "0.5.0" }

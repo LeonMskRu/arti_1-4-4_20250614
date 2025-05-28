@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "typestate"]
 categories = ["cryptography", "rust-patterns"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 experimental = ["experimental-api"]
 experimental-api = ["__is_experimental"]

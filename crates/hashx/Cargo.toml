@@ -20,6 +20,9 @@ repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 # are okay with these licensing terms.
 license = "LGPL-3.0-only"
 
+[lints]
+    workspace = true
+
 [features]
 default = ["compiler"]
 full = ["compiler"]

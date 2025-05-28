@@ -11,6 +11,9 @@ keywords = ["tor", "arti"]
 categories = ["network-programming"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 caret = { path = "../caret", version = "0.5.0" }
 paste = "1"

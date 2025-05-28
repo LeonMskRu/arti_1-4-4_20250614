@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "privacy", "anonymity", "networking"]
 categories = ["network-programming", "cryptography"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 full = [
     "fs-mistrust/full",

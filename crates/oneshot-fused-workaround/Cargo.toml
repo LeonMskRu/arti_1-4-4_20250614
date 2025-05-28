@@ -12,6 +12,9 @@ keywords = ["tor", "arti"]
 categories = ["rust-patterns"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 futures = "0.3.14"
 

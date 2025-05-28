@@ -12,6 +12,9 @@ keywords = ["tor", "arti", "logging", "privacy"]
 categories = ["rust-patterns"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = []
 full = []

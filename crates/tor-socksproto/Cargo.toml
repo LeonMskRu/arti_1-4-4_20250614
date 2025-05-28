@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "socks"]
 categories = ["network-programming"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [features]
 default = ["proxy-handshake"]
 

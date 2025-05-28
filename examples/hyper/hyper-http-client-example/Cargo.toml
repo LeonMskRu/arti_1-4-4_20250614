@@ -7,6 +7,9 @@ license = "MIT OR Apache-2.0"
 description = "Example of a HTTP client written with hyper, connecting through Tor"
 publish = false
 
+[lints]
+    workspace = true
+
 [dependencies]
 anyhow = "1.0.75"
 arti-client = { path = "../../../crates/arti-client" }

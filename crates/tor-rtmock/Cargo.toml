@@ -11,6 +11,9 @@ keywords = ["tor", "arti", "async", "testing"]
 categories = ["asynchronous"]
 repository = "https://gitlab.torproject.org/tpo/core/arti.git/"
 
+[lints]
+    workspace = true
+
 [dependencies]
 amplify = { version = "4", default-features = false, features = ["derive"] }
 assert_matches = "1.5.0"

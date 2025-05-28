@@ -6,6 +6,9 @@ publish = false
 license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints]
+    workspace = true
+
 [dependencies]
 anyhow = "1.0.72"
 # Use latest arti-client from GitLab to connect to Tor network
