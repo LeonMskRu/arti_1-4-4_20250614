@@ -71,8 +71,6 @@ CREATE TABLE consensus(
 	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL UNIQUE,
 	content_sha3_256	TEXT NOT NULL UNIQUE,
-	content_lzma		BLOB NOT NULL UNIQUE,
-	content_lzma_sha256	TEXT NOT NULL UNIQUE,
 	flavor				TEXT NOT NULL,
 	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
 	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
@@ -80,15 +78,13 @@ CREATE TABLE consensus(
 	PRIMARY KEY(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha3_256) == 64),
-	CHECK(LENGTH(content_lzma_sha256) == 64),
 	CHECK(flavor IN ('ns', 'md'))
 ) STRICT;
 
 CREATE INDEX idx_consensus ON consensus(
 	valid_after,
 	content_sha256,
-	content_sha3_256,
-	content_lzma_sha256
+	content_sha3_256
 );
 
 -- Stores consensus diffs.
@@ -101,15 +97,12 @@ CREATE TABLE consensus_diff(
 	rowid				INTEGER NOT NULL,
 	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL UNIQUE,
-	content_lzma		BLOB NOT NULL UNIQUE,
-	content_lzma_sha256	TEXT NOT NULL UNIQUE,
 	old_consensus_rowid	INTEGER NOT NULL,
 	new_consensus_rowid	INTEGER NOT NULL,
 	PRIMARY KEY(rowid),
 	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
-	CHECK(LENGTH(content_lzma_sha256) == 64)
 ) STRICT;
 
 -- Directory authority key certificates.
@@ -197,6 +190,20 @@ CREATE TABLE consensus_authority_voter(
 	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
 ) STRICT;
+
+-- Helper table to store compressed documents.
+CREATE TABLE compressed_document(
+	rowid				INTEGER NOT NULL,
+	algorithm			TEXT NOT NULL,
+	identity_sha256		TEXT NOT NULL UNIQUE,
+	compressed_sha256	TEXT NOT NULL,
+	compressed			BLOB NOT NULL,
+	PRIMARY KEY(rowid)
+) STRICT;
+
+CREATE INDEX idx_compressed_document ON compressed_document(
+	algorithm, identity_sha256
+);
 ```
 
 ## Cache access to the database
