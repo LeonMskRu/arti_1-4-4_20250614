@@ -66,6 +66,7 @@ between `authority` and `consensus`.
 --
 -- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>.z
 -- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>.z
 CREATE TABLE consensus(
 	rowid				INTEGER NOT NULL,
 	content_sha256		TEXT NOT NULL UNIQUE,
@@ -82,9 +83,9 @@ CREATE TABLE consensus(
 ) STRICT;
 
 CREATE INDEX idx_consensus ON consensus(
-	valid_after,
 	content_sha256,
-	content_sha3_256
+	content_sha3_256,
+	valid_after
 );
 
 -- Stores consensus diffs.
@@ -102,8 +103,12 @@ CREATE TABLE consensus_diff(
 	PRIMARY KEY(rowid),
 	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
-	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_sha256) == 64)
 ) STRICT;
+
+CREATE INDEX idx_consensus_diff ON consensus_diff(
+	content_sha256
+);
 
 -- Directory authority key certificates.
 --
@@ -127,7 +132,11 @@ CREATE TABLE authority(
 	CHECK(LENGTH(kp_auth_sign_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_authority ON authority(kp_auth_id_rsa_sha1, kp_auth_sign_rsa_sha1);
+CREATE INDEX idx_authority ON authority(
+	content_sha256,
+	kp_auth_id_rsa_sha1,
+	kp_auth_sign_rsa_sha1
+);
 
 -- Stores the router descriptors.
 --
@@ -155,7 +164,11 @@ CREATE TABLE router(
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_router ON router(kp_relay_id_rsa_sha1, content_sha256, content_sha1);
+CREATE INDEX idx_router ON router(
+	content_sha256,
+	content_sha1,
+	kp_relay_id_rsa_sha1
+);
 
 -- Stores extra-info documents.
 --
@@ -177,7 +190,10 @@ CREATE TABLE router_extra_info(
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_router_extra_info ON router_extra_info(content_sha1, kp_relay_id_rsa_sha1);
+CREATE INDEX idx_router_extra_info ON router_extra_info(
+	content_sha1,
+	kp_relay_id_rsa_sha1
+);
 
 -- Stores which authority voted on which consensus.
 --
@@ -198,11 +214,14 @@ CREATE TABLE compressed_document(
 	identity_sha256		TEXT NOT NULL UNIQUE,
 	compressed_sha256	TEXT NOT NULL,
 	compressed			BLOB NOT NULL,
-	PRIMARY KEY(rowid)
+	PRIMARY KEY(rowid),
+	CHECK(LENGTH(identity_sha256) == 64),
+	CHECK(LENGTH(compressed_sha256) == 64)
 ) STRICT;
 
 CREATE INDEX idx_compressed_document ON compressed_document(
-	algorithm, identity_sha256
+	algorithm,
+	identity_sha256
 );
 ```
 
