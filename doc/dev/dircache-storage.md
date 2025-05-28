@@ -64,8 +64,8 @@ between `authority` and `consensus`.
 ```sql
 -- Stores consensuses.
 --
--- http://<hostname>/tor/status-vote/current/consensus.z
--- http://<hostname>/tor/status-vote/current/consensus/<F1>+<F2>+<F3>.z
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>.z
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
 CREATE TABLE consensus(
 	rowid				INTEGER NOT NULL,
 	content_sha256		TEXT NOT NULL UNIQUE,
@@ -73,13 +73,15 @@ CREATE TABLE consensus(
 	content_sha3_256	TEXT NOT NULL UNIQUE,
 	content_lzma		BLOB NOT NULL UNIQUE,
 	content_lzma_sha256	TEXT NOT NULL UNIQUE,
+	flavor				TEXT NOT NULL,
 	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
 	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
 	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
 	PRIMARY KEY(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha3_256) == 64),
-	CHECK(LENGTH(content_lzma_sha256) == 64)
+	CHECK(LENGTH(content_lzma_sha256) == 64),
+	CHECK(flavor IN ('ns', 'md'))
 ) STRICT;
 
 CREATE INDEX idx_consensus ON consensus(
@@ -91,7 +93,10 @@ CREATE INDEX idx_consensus ON consensus(
 
 -- Stores consensus diffs.
 --
--- http://<hostname>/tor/status-vote/current/consensus/diff/<HASH>/<FPRLIST>.z
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>.z
+--
+-- TODO: Enforce on DB level that only diffs of the same flavor may be stored
+-- within the table, old_consensus_rowid.flavor = new_consensus_rowid.flavor.
 CREATE TABLE consensus_diff(
 	rowid				INTEGER NOT NULL,
 	content_sha256		TEXT NOT NULL UNIQUE,
@@ -103,50 +108,6 @@ CREATE TABLE consensus_diff(
 	PRIMARY KEY(rowid),
 	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
-	CHECK(LENGTH(content_sha256) == 64),
-	CHECK(LENGTH(content_lzma_sha256) == 64)
-) STRICT;
-
--- Stores microdescriptor consensuses.
---
--- http://<hostname>/tor/status-vote/current/consensus-microdesc.z
-CREATE TABLE consensus_md(
-	rowid				INTEGER NOT NULL,
-	content_sha256		TEXT NOT NULL UNIQUE,
-	content				TEXT NOT NULL UNIQUE,
-	content_sha3_256	TEXT NOT NULL UNIQUE,
-	content_lzma		BLOB NOT NULL UNIQUE,
-	content_lzma_sha256	TEXT NOT NULL UNIQUE,
-	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
-	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
-	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
-	PRIMARY KEY(rowid),
-	CHECK(LENGTH(content_sha256) == 64),
-	CHECK(LENGTH(content_sha3_256) == 64),
-	CHECK(LENGTH(content_lzma_sha256) == 64)
-) STRICT;
-
-CREATE INDEX idx_consensus_md ON consensus_md(
-	valid_after,
-	content_sha256,
-	content_sha3_256,
-	content_lzma_sha256
-);
-
--- Stores consensus-md diffs.
---
--- http://<hostname>/tor/status-vote/current/consensus-md/diff/<HASH>/<FPRLIST>.z
-CREATE TABLE consensus_md_diff(
-	rowid					INTEGER NOT NULL,
-	content_sha256			TEXT NOT NULL UNIQUE,
-	content					TEXT NOT NULL UNIQUE,
-	content_lzma			BLOB NOT NULL UNIQUE,
-	content_lzma_sha256		TEXT NOT NULL UNIQUE,
-	old_consensus_md_rowid	INTEGER NOT NULL,
-	new_consensus_md_rowid	INTEGER NOT NULL,
-	PRIMARY KEY(rowid),
-	FOREIGN KEY(old_consensus_md_rowid) REFERENCES consensus_md(rowid),
-	FOREIGN KEY(new_consensus_md_rowid) REFERENCES consensus_md(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_lzma_sha256) == 64)
 ) STRICT;
@@ -181,10 +142,13 @@ CREATE INDEX idx_authority ON authority(kp_auth_id_rsa_sha1, kp_auth_sign_rsa_sh
 -- http://<hostname>/tor/server/d/<D>.z
 -- http://<hostname>/tor/server/authority.z
 -- http://<hostname>/tor/server/all.z
+--
+-- TODO: Ensure on DB level that last_consensus_rowid.flavor = flavor.
 CREATE TABLE router(
 	rowid					INTEGER NOT NULL,
 	content_sha256			TEXT NOT NULL UNIQUE,
 	content					TEXT NOT NULL UNIQUE,
+	flavor					TEXT NOT NULL,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
 	last_consensus_rowid	INTEGER NOT NULL,
@@ -193,26 +157,12 @@ CREATE TABLE router(
 	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(router_extra_info_rowid) REFERENCES router_extra_info(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(flavor IN ('ns', 'md')),
 	CHECK(LENGTH(content_sha1) == 40),
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_router ON router(kp_relay_id_rsa_sha1, content_sha1);
-
--- Stores micro router descriptors.
---
--- http://<hostname>/tor/micro/d/<D>[.z]
-CREATE TABLE router_md(
-	rowid					INTEGER NOT NULL,
-	content_sha256			TEXT NOT NULL UNIQUE,
-	content					TEXT NOT NULL UNIQUE,
-	last_consensus_md_rowid	INTEGER NOT NULL,
-	PRIMARY KEY(rowid),
-	FOREIGN KEY(last_consensus_md_rowid) REFERENCES consensus_md(rowid),
-	CHECK(LENGTH(content_sha256) == 64)
-) STRICT;
-
-CREATE INDEX idx_router_md ON router_md(content_sha256);
+CREATE INDEX idx_router ON router(kp_relay_id_rsa_sha1, content_sha256, content_sha1);
 
 -- Stores extra-info documents.
 --
@@ -221,40 +171,30 @@ CREATE INDEX idx_router_md ON router_md(content_sha256);
 -- http://<hostname>/tor/extra/all.z
 -- http://<hostname>/tor/extra/authority.z
 CREATE TABLE router_extra_info(
-	rowid			INTEGER NOT NULL,
-	content_sha256	TEXT NOT NULL UNIQUE,
-	content			TEXT NOT NULL UNIQUE,
-	content_sha1	TEXT NOT NULL UNIQUE,
-	kp_relay_id_rsa	TEXT NOT NULL,
+	rowid					INTEGER NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL UNIQUE,
+	content_sha1			TEXT NOT NULL UNIQUE,
+	kp_relay_id_rsa_sha1	TEXT NOT NULL,
+	last_router_rowid		INTEGER NOT NULL UNIQUE,
 	PRIMARY KEY(rowid),
+	FOREIGN KEY(last_router_rowid) REFERENCES router(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha1) == 40),
-	CHECK(LENGTH(kp_relay_id_rsa) == 40)
+	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_router_extra_info ON router_extra_info(content_sha1, kp_relay_id_rsa);
+CREATE INDEX idx_router_extra_info ON router_extra_info(content_sha1, kp_relay_id_rsa_sha1);
 
 -- Stores which authority voted on which consensus.
 --
 -- Required to implement the consensus retrieval by authority fingerprints.
--- http://<hostname>/tor/status-vote/current/consensus/<F1>+<F2>+<F3>.z
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
 CREATE TABLE consensus_authority_voter(
 	consensus_rowid	INTEGER NOT NULL,
 	authority_rowid	INTEGER NOT NULL,
 	PRIMARY KEY(consensus_rowid, authority_rowid),
 	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
-	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
-) STRICT;
-
--- Stores which authority voted on which consensus-md.
---
--- Required to implement the consensus-md diff retrieval by authority fingerprints.
--- http://<hostname>/tor/status-vote/current/consensus-md/diff/<HASH>/<FPRLIST>.z
-CREATE TABLE consensus_md_authority_voter(
-	consensus_md_rowid	INTEGER NOT NULL,
-	authority_rowid		INTEGER NOT NULL,
-	PRIMARY KEY(consensus_md_rowid, authority_rowid),
-	FOREIGN KEY(consensus_md_rowid) REFERENCES consensus_md(rowid),
 	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
 ) STRICT;
 ```
