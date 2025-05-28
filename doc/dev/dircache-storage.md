@@ -81,7 +81,7 @@ The actual SQL schema is outlined below:
 -- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
 -- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>.z
 CREATE TABLE consensus(
-	rowid				INTEGER NOT NULL,
+	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL UNIQUE,
 	content_sha3_256	TEXT NOT NULL UNIQUE,
@@ -89,7 +89,6 @@ CREATE TABLE consensus(
 	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
 	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
 	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
-	PRIMARY KEY(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha3_256) == 64),
 	CHECK(flavor IN ('ns', 'md'))
@@ -108,12 +107,11 @@ CREATE INDEX idx_consensus ON consensus(
 -- TODO: Enforce on DB level that only diffs of the same flavor may be stored
 -- within the table, old_consensus_rowid.flavor = new_consensus_rowid.flavor.
 CREATE TABLE consensus_diff(
-	rowid				INTEGER NOT NULL,
+	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL UNIQUE,
 	old_consensus_rowid	INTEGER NOT NULL,
 	new_consensus_rowid	INTEGER NOT NULL,
-	PRIMARY KEY(rowid),
 	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64)
@@ -132,13 +130,12 @@ CREATE INDEX idx_consensus_diff ON consensus_diff(
 -- http://<hostname>/tor/keys/fp/<F>.z
 -- http://<hostname>/tor/keys/sk/<F>-<S>.z
 CREATE TABLE authority(
-	rowid					INTEGER NOT NULL,
+	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256			TEXT NOT NULL UNIQUE,
 	content					TEXT NOT NULL UNIQUE,
 	kp_auth_id_rsa_sha1		TEXT NOT NULL,
 	kp_auth_sign_rsa_sha1	TEXT NOT NULL,
 	last_consensus_rowid	INTEGER NOT NULL,
-	PRIMARY KEY(rowid),
 	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(kp_auth_id_rsa_sha1) == 40),
@@ -160,7 +157,7 @@ CREATE INDEX idx_authority ON authority(
 --
 -- TODO: Ensure on DB level that last_consensus_rowid.flavor = flavor.
 CREATE TABLE router(
-	rowid					INTEGER NOT NULL,
+	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256			TEXT NOT NULL UNIQUE,
 	content					TEXT NOT NULL UNIQUE,
 	flavor					TEXT NOT NULL,
@@ -168,7 +165,6 @@ CREATE TABLE router(
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
 	last_consensus_rowid	INTEGER NOT NULL,
 	router_extra_info_rowid	INTEGER,
-	PRIMARY KEY(rowid),
 	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(router_extra_info_rowid) REFERENCES router_extra_info(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
@@ -190,13 +186,12 @@ CREATE INDEX idx_router ON router(
 -- http://<hostname>/tor/extra/all.z
 -- http://<hostname>/tor/extra/authority.z
 CREATE TABLE router_extra_info(
-	rowid					INTEGER NOT NULL,
+	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256			TEXT NOT NULL UNIQUE,
 	content					TEXT NOT NULL UNIQUE,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
 	last_consensus_rowid	INTEGER NOT NULL UNIQUE,
-	PRIMARY KEY(rowid),
 	FOREIGN KEY(last_router_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha1) == 40),
@@ -223,12 +218,11 @@ CREATE TABLE consensus_authority_voter(
 
 -- Helper table to store compressed documents.
 CREATE TABLE compressed_document(
-	rowid				INTEGER NOT NULL,
+	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	algorithm			TEXT NOT NULL,
 	identity_sha256		TEXT NOT NULL UNIQUE,
 	compressed_sha256	TEXT NOT NULL,
 	compressed			BLOB NOT NULL,
-	PRIMARY KEY(rowid),
 	CHECK(LENGTH(identity_sha256) == 64),
 	CHECK(LENGTH(compressed_sha256) == 64)
 ) STRICT;
