@@ -70,6 +70,7 @@ CREATE TABLE consensus(
 	rowid				INTEGER NOT NULL,
 	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL UNIQUE,
+	content_sha3_256	TEXT NOT NULL UNIQUE,
 	content_lzma		BLOB NOT NULL UNIQUE,
 	content_lzma_sha256	TEXT NOT NULL UNIQUE,
 	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
@@ -77,10 +78,34 @@ CREATE TABLE consensus(
 	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
 	PRIMARY KEY(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_sha3_256) == 64),
 	CHECK(LENGTH(content_lzma_sha256) == 64)
 ) STRICT;
 
-CREATE INDEX idx_consensus ON consensus(valid_after, content_sha256, content_lzma_sha256);
+CREATE INDEX idx_consensus ON consensus(
+	valid_after,
+	content_sha256,
+	content_sha3_256,
+	content_lzma_sha256
+);
+
+-- Stores consensus diffs.
+--
+-- http://<hostname>/tor/status-vote/current/consensus/diff/<HASH>/<FPRLIST>.z
+CREATE TABLE consensus_diff(
+	rowid				INTEGER NOT NULL,
+	content_sha256		TEXT NOT NULL UNIQUE,
+	content				TEXT NOT NULL UNIQUE,
+	content_lzma		BLOB NOT NULL UNIQUE,
+	content_lzma_sha256	TEXT NOT NULL UNIQUE,
+	old_consensus_rowid	INTEGER NOT NULL,
+	new_consensus_rowid	INTEGER NOT NULL,
+	PRIMARY KEY(rowid),
+	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_lzma_sha256) == 64)
+) STRICT;
 
 -- Stores microdescriptor consensuses.
 --
@@ -89,6 +114,7 @@ CREATE TABLE consensus_md(
 	rowid				INTEGER NOT NULL,
 	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL UNIQUE,
+	content_sha3_256	TEXT NOT NULL UNIQUE,
 	content_lzma		BLOB NOT NULL UNIQUE,
 	content_lzma_sha256	TEXT NOT NULL UNIQUE,
 	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
@@ -96,10 +122,34 @@ CREATE TABLE consensus_md(
 	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
 	PRIMARY KEY(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_sha3_256) == 64),
 	CHECK(LENGTH(content_lzma_sha256) == 64)
 ) STRICT;
 
-CREATE INDEX idx_consensus_md ON consensus_md(valid_after, content_sha256, content_lzma_sha256);
+CREATE INDEX idx_consensus_md ON consensus_md(
+	valid_after,
+	content_sha256,
+	content_sha3_256,
+	content_lzma_sha256
+);
+
+-- Stores consensus-md diffs.
+--
+-- http://<hostname>/tor/status-vote/current/consensus-md/diff/<HASH>/<FPRLIST>.z
+CREATE TABLE consensus_md_diff(
+	rowid					INTEGER NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL UNIQUE,
+	content_lzma			BLOB NOT NULL UNIQUE,
+	content_lzma_sha256		TEXT NOT NULL UNIQUE,
+	old_consensus_md_rowid	INTEGER NOT NULL,
+	new_consensus_md_rowid	INTEGER NOT NULL,
+	PRIMARY KEY(rowid),
+	FOREIGN KEY(old_consensus_md_rowid) REFERENCES consensus_md(rowid),
+	FOREIGN KEY(new_consensus_md_rowid) REFERENCES consensus_md(rowid),
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(content_lzma_sha256) == 64)
+) STRICT;
 
 -- Directory authority key certificates.
 --
@@ -193,6 +243,18 @@ CREATE TABLE consensus_authority_voter(
 	authority_rowid	INTEGER NOT NULL,
 	PRIMARY KEY(consensus_rowid, authority_rowid),
 	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
+) STRICT;
+
+-- Stores which authority voted on which consensus-md.
+--
+-- Required to implement the consensus-md diff retrieval by authority fingerprints.
+-- http://<hostname>/tor/status-vote/current/consensus-md/diff/<HASH>/<FPRLIST>.z
+CREATE TABLE consensus_md_authority_voter(
+	consensus_md_rowid	INTEGER NOT NULL,
+	authority_rowid		INTEGER NOT NULL,
+	PRIMARY KEY(consensus_md_rowid, authority_rowid),
+	FOREIGN KEY(consensus_md_rowid) REFERENCES consensus_md(rowid),
 	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
 ) STRICT;
 ```
