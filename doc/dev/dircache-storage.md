@@ -1,7 +1,7 @@
 # Dircache Storage
 
-This document tries to document the storage model on how the (future) dircache
-module stores data internally.
+This document tries to explain the storage model on how the dirache model stores
+data internally.
 
 ## Requirements
 
@@ -15,52 +15,65 @@ module stores data internally.
 *SQLite* has been chosen as the primitive data storage back-end, because it
 offers a neat read performance and acceptable write performance, although the
 latter one is more critical for dirauths rather than dircaches due to the
-frequently uploaded descriptors and data, besides it satisfies the first two
-requirements trivially and the latter two if we add additional constraints
-and middleware (more on that later).
+frequently uploaded descriptors and data; besides it satisfies the first two
+requirements trivially and the latter two if we add certain constraints outlined
+below.
 
 ## Future extension towards a dirauth
 
 A dircache forms the basis of a dirauth.  The current plan is to design the
 dircache as an independent component of which the dirauth related code is merely
 an extension.  Due to this design decision, all dirauth related data structures
-*SHOULD* have to be in their own tables.
+*SHOULD* have their own tables.
 
 ## Caching as a middle layer
 
-Right now, there is a problem that we avoid redundant copies of the same data
-in memory.  Let's say 10,000 clients request the same piece of data.  In that
-sense, we should not store the same data 10,000 times in memory but only once
-and read from the same reference in 10,000 different contextes.
+As outlined above, we want to avoid having the same data multiple times in
+memory.  Let's say we serve the same request a thousand times in parallel,
+then we do not want to store the same data 10,000 times in memory but rather
+only once.
 
-To achieve this, various techniques in the database scheme and database access
-are being used, which is being explained later in the document.
+The goal of the cache *IS NOT* to reduce the number of disk reads for frequently
+requested data.  We rely on SQLite internals and the operating system's buffer
+cache to handle this well-enough for us.  Besides, in times of solid state
+drives, disk access is in the microseconds and no longer a bottle neck as it
+once used to be.
+
+The cache is implemented by a
+```rust
+RwLock<HashMap<Sha256, Arc<[u8]>>>
+```
+
+## Compression
 
 ## Structure of the database
 
-The database contains a table for each document type the dircache serves.
-Such a table *MUST* contain the following three fields:
+The database schema consists of two types of tables:
+* Document tables
+	* Represent actual documents that are served by the dircache
+	* Those documents are: consensuses, consensus diffs, authority information,
+	  router descriptors, and extra-info documents
+* Helper tables
+	* Tables that contain additional information about documents we serve
+	* For example: compressed data, authority votes on consensuses, ...
+
+A *document table* has a few mandatory columns, whereas *helper tables* are too
+domain specific to impose any restrictions on them.
+
+A *document table* *MUST* the following columns:
 * `rowid`
-	* Serves as the primary key.
+	* Serves as the primary key
 * `content_sha256`
-	* Uniquely identifies the data by `content`.
-	* Required for caching.
+	* Uniquely identifies and addresses the data by `content`
 * `content`
-	* The actual raw content of the document.
-	* *MUST* be valid UTF-8 under all circumstances.
+	* The actual raw content of the document
+	* *MUST* be valid UTF-8 under all circumstandes
 
-Additionally, a table may contain more fields, particularly information
-extracted from the consensus that may be used for addressing certain
-information, such as relay fingerprints, SHA-1 digests, ...
+Besides, every document table *MUST* have an index on `content_sha256` as well
+as any other key by which clients may query it. (Such as the fingerprint for
+router descriptors).
 
-`consensus` and `consensus_md` are special in the sense that they have an
-additional `lzma` column containing the precomputed LZMA compression of
-`content`.
-
-Tables that do not represent network documents do not have any requirements.
-At the moment, the only such table is `vote`, representing an N:M relationship
-between `authority` and `consensus`.
-
+The actual SQL schema is outlined below:
 ```sql
 -- Stores consensuses.
 --
@@ -182,20 +195,21 @@ CREATE TABLE router_extra_info(
 	content					TEXT NOT NULL UNIQUE,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
-	last_router_rowid		INTEGER NOT NULL UNIQUE,
+	last_consensus_rowid	INTEGER NOT NULL UNIQUE,
 	PRIMARY KEY(rowid),
-	FOREIGN KEY(last_router_rowid) REFERENCES router(rowid),
+	FOREIGN KEY(last_router_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha1) == 40),
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
 
 CREATE INDEX idx_router_extra_info ON router_extra_info(
+	content_sha256,
 	content_sha1,
 	kp_relay_id_rsa_sha1
 );
 
--- Stores which authority voted on which consensus.
+-- Helper table to store which authority voted on which consensus.
 --
 -- Required to implement the consensus retrieval by authority fingerprints.
 -- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
@@ -225,55 +239,174 @@ CREATE INDEX idx_compressed_document ON compressed_document(
 );
 ```
 
-## Cache access to the database
+## General operations
 
-The cache is implemented in a `HashMap<Sha256, Arc<[u8]>>` with some respective
-wrappers around it for concurrenct access.  In the cache, the key corresponds to
-the `sha256` column that exists in all document tables.
+The following outlines some pseudo code for common operations.
 
-Each `HTTP GET` request is processed as follows (in terms of caching):
+### Request of an arbitrary document
+
+The following models in pseudo code on how a network document is queried and
+served:
+* Search for the appropriate document and store `content_sha256`
+	* Query a consensus:
+		```sql
+		SELECT content_sha256
+		FROM consensus
+		WHERE flavor = 'ns'
+		ORDER BY valid_after DESC
+		LIMIT 1;
+		```
+	* Query a consensus diff from a given hash `XXX` to the newest consensus:
+		```sql
+		SELECT content_sha256
+		FROM consensus_diff
+		WHERE old_consensus_rowid = (
+			SELECT rowid
+			FROM consensus
+			WHERE flavor = 'ns' AND content_sha3_256 = 'XXX'
+		) AND new_consensus_rowid = (
+			SELECT rowid
+			FROM consensus
+			WHERE flavor = 'ns'
+			ORDER BY valid_after DESC
+			LIMIT 1
+		);
+		```
+	* Obtain the key certificate of a certain authority:
+		```sql
+		SELECT content_sha256
+		FROM authority
+		INNER JOIN consensus ON consensus.rowid = authority.last_consensus_rowid
+		WHERE authority.kp_auth_id_rsa_sha1 = 'XXX'
+		ORDER BY valid_after DESC
+		LIMIT 1;
+		```
+	* Obtain a specific router descriptor:
+		```sql
+		SELECT content_sha256
+		FROM router
+		INNER JOIN consensus ON consensus.rowid = router.last_consensus_rowid
+		WHERE router.kp_relay_id_rsa_sha1 = 'XXX'
+		AND router.flavor = 'ns'
+		AND consensus.flavor = 'ns'
+		ORDER BY valid_after DESC
+		LIMIT 1;
+		```
+	* Obtain extra-info:
+		```sql
+		SELECT content_sha256
+		FROM router_extra_info
+
+		```
+* Check whether the `content_sha256` is in the cache
+	* If so, clone the `Arc`
+	* If not, query `content` with `WHERE content_sha256 = ?` and insert it into
+	  the cache
+* Transmit the data to the client
+* Check whether the reference counter is `1`
+	* If so, remove `content_sha256` entirely from the cache, as we are the last
+	  active server of the resource.
+	* If not, do nothing except.
+
+TODO: Do this for caching, I doubt it will be much different though ...
+
+### Insertion of a new consensus
+
+1. Download the consensus and consensus-md from an authority
+2. Parse and validate it accordingly to the specification
+3. Figure out the missing router descriptors and extra-info documents
+4. Download the missing router descriptors and extra-info documents from
+   directory authorities
+5. Compute consensus diffs
+6. Compute compressions
+7. Insert everything in one transaction into the database and update the
+   `last_consensus_rowid` fields.
+
+### Garbage Collection
+
+Over time, the dircache will collect some garbage.  This is intentional,
+as various documents are not deleted the moment they are no longer listed in
+a consensus.
+
+Regularly, the following SQL transaction is executed:
+```sql
+BEGIN TRANSACTION;
+
+-- Temporary table storing all old consensuses we will delete.
+CREATE TEMP TABLE old_consensus(
+	consensus_rowid	INTEGER NOT NULL
+);
+
+-- Populate `old_consensus` with all consensuses older than seven days.
+INSERT INTO old_consensus(consensus_rowid)
+SELECT rowid
+FROM consensus
+WHERE valid_until <= (NOW - 7 DAYS); -- Pseudo-code I know
+
+-- Temporary table storing all old authorities we will delete.
+CREATE TEMP TABLE old_authority(
+	authority_rowid	INTEGER NOT NULL
+);
+
+-- Populate `old_authority`.
+INSERT INTO old_authority(authority_rowid)
+SELECT rowid
+FROM authority
+WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+
+-- Temporary table storing all old router descriptors we will delete.
+CREATE TEMP TABLE old_router(
+	router_rowid INTEGER NOT NULL
+);
+
+-- Populate `old_router` with all routers who were last seen in a consensus that
+-- will be deleted.
+INSERT INTO old_router(router_rowid)
+SELECT rowid
+FROM router
+WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+
+-- Now actually delete data.
+DELETE
+FROM router
+WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+
+DELETE
+FROM router_extra_info
+WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+
+DELETE
+FROM consensus_authority_voter
+WHERE consensus_rowid IN (SELECT consensus_rowid FROM old_consensus) OR
+authority_rowid IN (SELECT authority_rowid FROM old_authority);
+
+DELETE
+FROM authority
+WHERE rowid IN (SELECT authority_rowid FROM old_authority);
+
+DELETE
+FROM consensus_diff
+WHERE old_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus) OR
+new_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+
+DELETE
+FROM consensus
+WHERE rowid IN (SELECT consensus_rowid FROM old_consensus);
+
+DELETE FROM compressed_document
+WHERE identity_sha256 NOT IN
+(SELECT content_sha256 FROM consensus) OR
+(SELECT content_sha256 FROM authority) OR
+(SELECT content_sha256 FROM router) OR
+(SELECT content_sha256 FROM router_extra_info);
+
+END TRANSACTION;
 ```
-// This is pseudo-code!
 
-// Search for the requested document and obtain the SHA-256.
-let sha256 = sql("SELECT sha256 FROM table WHERE column_name = ?;");
+## HTTP backend
 
-let content;
-if cache.contains_key(sha256) {
-	// Read from cache.
-	content = Arc::clone(&cache.get(sha256));
-} else {
-	// Read from db and insert into cache.
-	let tmp = sql("SELECT content FROM table WHERE sha256 = ?", sha256);
-	cache.insert(sha256, Arc::new(tmp));
-	content = Arc::clone(&cache.get(sha256));
-}
+The current plan is to use warp as the HTTP backend.
 
-// Actually handle the request.
+## SQL backend
 
-drop(content);
-if cache.get(sha256).ref_count == 1 {
-	cache.remove(sha256);
-}
-```
-
-The purpose of this pseudo-code is to ensure that when parallel requests
-requesting the same resource do not result in having to store the same data
-more than once in memory at the same time.  Once the last request of that
-resource has finished, we delete it from our cache.  This comes of the downside
-that two independent requests that missed a short time window in which they
-could have been parallel will result in a read from the database that might have
-been redundant.  However, we trust in the OS buffer cache and SQLite internals
-here to tackle this problem for us.
-
-## Cache invalidation
-
-Cache invalidation is not a problem because all resources are identified by a
-unique hash.  The moment it is no longer in the database, it will no longer
-be served, because the appropriate SHA256 hash is no longer returned.  Finally,
-it will be eliminated from the cache when the last HTTP request still associated
-with it terminates.
-
-## Access to the database
-
-It remains an open question which SQL backend to use.
+The current plan is to use SQLx as the SQL backend.
