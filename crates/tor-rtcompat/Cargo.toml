@@ -46,6 +46,10 @@ arbitrary = { version = "1.3.2", optional = true, features = ["derive"] }
 async-io = { version = "2.2.1", optional = true }
 async-native-tls = { version = "0.5.0", optional = true }
 async-std-crate = { package = "async-std", version = "1.7.0", optional = true }
+# We don't use `async-task` directly, but dependency `blocking` only specifies version "4.0.2" of `async-task`
+# while it actually requires a newer version. We force a newer version here to prevent the build from breaking
+# when downgrading dependencies (like in `maint/downgrade_dependencies`).
+# TODO: Remove explicit declaration when this is fixed, see: https://github.com/smol-rs/blocking/issues/69
 async-task = { version = "4.7.1", optional = true }
 async-trait = "0.1.54"
 async_executors = { version = "0.7.0", default-features = false }
