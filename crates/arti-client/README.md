@@ -246,7 +246,6 @@ match tor_client.connect(("example.com", 80)).await {
   crate for TLS support.  This is not included in `full`, since it uses the
   `ring` crate, which uses the old (3BSD/SSLEay) OpenSSL license, which may
   introduce licensing compatibility issues.
-* `smol` -- build with [smol](https://github.com/smol-rs/smol) support (experimental).
 
 Note that flags `tokio`, `native-tls`, `async-std`, `smol`, `rustls` and `static`
 will enable the flags of the same name on the [`tor_rtcompat`] crate.
@@ -283,6 +282,7 @@ implementation with another.
   directory before it is used.
 * `experimental` -- Build with all experimental features above, along with
   all experimental features from other arti crates.
+* `smol` -- Build with [smol](https://github.com/smol-rs/smol) support.
 
 [^1]: Remember, semantic versioning is what makes various `cargo` features
 work reliably. To be explicit: if you want `cargo update` to _only_ make safe
