@@ -280,9 +280,9 @@ implementation with another.
 * `error_detail` -- expose the `arti_client::Error` inner error type.
 * `dirfilter` -- expose the `DirFilter` API, which lets you modify a network
   directory before it is used.
-* `experimental` -- Build with all experimental features above, along with
+* `experimental` -- build with all experimental features above, along with
   all experimental features from other arti crates.
-* `smol` -- Build with [smol](https://github.com/smol-rs/smol) support.
+* `smol` -- build with [smol](https://github.com/smol-rs/smol) support.
 
 [^1]: Remember, semantic versioning is what makes various `cargo` features
 work reliably. To be explicit: if you want `cargo update` to _only_ make safe
