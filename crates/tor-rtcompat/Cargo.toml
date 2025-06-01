@@ -17,6 +17,7 @@ default = []
 full = ["arbitrary", "async-std", "tokio", "native-tls", "tor-error/full", "tor-general-addr/full"]
 
 experimental = ["smol"]
+__is_experimental = []
 
 async-std = ["async-std-crate", "async-io", "async_executors/async_std"]
 tokio = [
@@ -30,6 +31,7 @@ smol = [
     "dep:smol",
     "async-io",
     "blocking",
+    "__is_experimental",
 ]
 static = ["native-tls-crate?/vendored", "__is_nonadditive"]
 native-tls = ["native-tls-crate", "async-native-tls"]
