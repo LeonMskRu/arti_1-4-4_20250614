@@ -239,6 +239,21 @@ CREATE UNIQUE INDEX idx_compressed_document ON compressed_document(
 
 The following outlines some pseudo code for common operations.
 
+### Insertion of a new consensus
+
+This one explains how we insert a new consensus into the dircache.
+It works similarly for `consensus-md`.
+
+1. Download the consensus from an authority
+2. Parse and validate it accordingly to the specification
+3. Figure out the missing router descriptors and extra-info documents
+4. Compute consensus diffs
+5. Compute compressions
+6. Insert everything in one transaction into the database and update the
+   `last_seen` fields.
+7. Asnchronously download missing router descriptors and extra-info documents
+   from the directory authorities and modify the database as it goes along.
+
 ### Request of an arbitrary document
 
 The following models in pseudo code on how a network document is queried and
@@ -263,16 +278,15 @@ It follows a locking hierarchy where none of the locks (db and cache) may be
 held simultanously.
 ```rust
 // (1)
-let sha256 = db.lock().query("SELECT content_sha256 FROM table WHERE column_name = column_value");
+let sha256 = db.transaction().query("SELECT content_sha256 FROM table WHERE column_name = column_value");
 
-let content = if cache.read().contains_key(sha256) {
-	// Read from the cache.
-	Arc::clone(&cache.read().get(sha256))
+let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
+	content
 } else {
 	// Read from db and insert into cache.
 	// `db` and `cache` are not hold simultanously but only for each operation.
-	let content = Arc::new(db.lock().query(format!("SELECT content FROM table WHERE content_sha256 = {sha256}")));
-	cache.write().insert(sha256, Arc::clone(&content));
+	let content = Arc::new(db.transaction().query(format!("SELECT content FROM table WHERE content_sha256 = {sha256}")));
+	cache.write().entry(sha256).or_insert(Arc::clone(&content));
 	content
 };
 ```
@@ -377,22 +391,6 @@ WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
 
 END TRANSACTION;
 ```
-
-### Insertion of a new consensus
-
-This one explains how we insert a new consensus into the dircache.
-It works similarly for `consensus-md`.
-
-1. Download the consensus from an authority
-2. Parse and validate it accordingly to the specification
-3. Figure out the missing router descriptors and extra-info documents
-4. Download the missing router descriptors and extra-info documents from
-   directory authorities in an asynchronous task that modifies the database
-   as it goes along.
-5. Compute consensus diffs
-6. Compute compressions
-7. Insert everything in one transaction into the database and update the
-   `last_seen` fields.
 
 ## Cleaning the cache
 
