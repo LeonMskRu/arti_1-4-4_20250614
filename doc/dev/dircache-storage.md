@@ -281,11 +281,14 @@ held simultanously.
 let sha256 = db.transaction().query("SELECT content_sha256 FROM table WHERE column_name = column_value");
 
 let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
+	// We have to use `get` here if we want to use temporary locks.
 	content
 } else {
 	// Read from db and insert into cache.
 	// `db` and `cache` are not hold simultanously but only for each operation.
 	let content = Arc::new(db.transaction().query(format!("SELECT content FROM table WHERE content_sha256 = {sha256}")));
+	// We have to use entry here in order to avoid duplicate cache writes in the
+	// case of a parallel cache miss.
 	cache.write().entry(sha256).or_insert(Arc::clone(&content));
 	content
 };
