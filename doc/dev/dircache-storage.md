@@ -1,6 +1,6 @@
 # Dircache Storage
 
-This document tries to explain the storage model on how the dirache model stores
+This document tries to explain the storage model on how the dircache stores
 data internally.
 
 ## Requirements
@@ -73,6 +73,10 @@ Besides, every document table *MUST* have an index on `content_sha256` as well
 as any other key by which clients may query it. (Such as the fingerprint for
 router descriptors).
 
+Below, we suggest various `CREATE INDEX` to help with queries.
+The precise set of indices we will create is not yet finalised.
+We'll adjust those after we see the query code and the resulting query plans.
+
 The actual SQL schema is outlined below:
 ```sql
 -- Stores consensuses.
@@ -83,7 +87,7 @@ The actual SQL schema is outlined below:
 CREATE TABLE consensus(
 	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256		TEXT NOT NULL UNIQUE,
-	content				TEXT NOT NULL UNIQUE,
+	content				TEXT NOT NULL,
 	content_sha3_256	TEXT NOT NULL UNIQUE,
 	flavor				TEXT NOT NULL,
 	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
@@ -109,9 +113,10 @@ CREATE INDEX idx_consensus ON consensus(
 CREATE TABLE consensus_diff(
 	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256		TEXT NOT NULL UNIQUE,
-	content				TEXT NOT NULL UNIQUE,
+	content				TEXT NOT NULL,
 	old_consensus_rowid	INTEGER NOT NULL,
 	new_consensus_rowid	INTEGER NOT NULL,
+	last_seen			INTEGER NOT NULL,
 	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64)
@@ -129,20 +134,19 @@ CREATE INDEX idx_consensus_diff ON consensus_diff(
 -- http://<hostname>/tor/keys/authority.z
 -- http://<hostname>/tor/keys/fp/<F>.z
 -- http://<hostname>/tor/keys/sk/<F>-<S>.z
-CREATE TABLE authority(
+CREATE TABLE authority_key_certificate(
 	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256			TEXT NOT NULL UNIQUE,
-	content					TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL,
 	kp_auth_id_rsa_sha1		TEXT NOT NULL,
 	kp_auth_sign_rsa_sha1	TEXT NOT NULL,
-	last_consensus_rowid	INTEGER NOT NULL,
-	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
+	last_seen				INTEGER NOT NULL,
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(kp_auth_id_rsa_sha1) == 40),
 	CHECK(LENGTH(kp_auth_sign_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_authority ON authority(
+CREATE INDEX idx_authority ON authority_key_certificate(
 	content_sha256,
 	kp_auth_id_rsa_sha1,
 	kp_auth_sign_rsa_sha1
@@ -154,18 +158,15 @@ CREATE INDEX idx_authority ON authority(
 -- http://<hostname>/tor/server/d/<D>.z
 -- http://<hostname>/tor/server/authority.z
 -- http://<hostname>/tor/server/all.z
---
--- TODO: Ensure on DB level that last_consensus_rowid.flavor = flavor.
 CREATE TABLE router(
 	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256			TEXT NOT NULL UNIQUE,
-	content					TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL,
 	flavor					TEXT NOT NULL,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
-	last_consensus_rowid	INTEGER NOT NULL,
+	last_seen				INTEGER NOT NULL,
 	router_extra_info_rowid	INTEGER,
-	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(router_extra_info_rowid) REFERENCES router_extra_info(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(flavor IN ('ns', 'md')),
@@ -188,11 +189,10 @@ CREATE INDEX idx_router ON router(
 CREATE TABLE router_extra_info(
 	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
 	content_sha256			TEXT NOT NULL UNIQUE,
-	content					TEXT NOT NULL UNIQUE,
+	content					TEXT NOT NULL,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
-	last_consensus_rowid	INTEGER NOT NULL UNIQUE,
-	FOREIGN KEY(last_consensus_rowid) REFERENCES consensus(rowid),
+	last_seen				INTEGER NOT NULL,
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha1) == 40),
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
@@ -211,23 +211,25 @@ CREATE INDEX idx_router_extra_info ON router_extra_info(
 CREATE TABLE consensus_authority_voter(
 	consensus_rowid	INTEGER NOT NULL,
 	authority_rowid	INTEGER NOT NULL,
+	last_seen		INTEGER NOT NULL,
 	PRIMARY KEY(consensus_rowid, authority_rowid),
 	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
-	FOREIGN KEY(authority_rowid) REFERENCES authority(rowid)
+	FOREIGN KEY(authority_rowid) REFERENCES authority_key_certificate(rowid)
 ) STRICT;
 
 -- Helper table to store compressed documents.
 CREATE TABLE compressed_document(
 	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	algorithm			TEXT NOT NULL,
-	identity_sha256		TEXT NOT NULL UNIQUE,
+	identity_sha256		TEXT NOT NULL,
 	compressed_sha256	TEXT NOT NULL,
 	compressed			BLOB NOT NULL,
+	last_seen			INTEGER NOT NULL,
 	CHECK(LENGTH(identity_sha256) == 64),
 	CHECK(LENGTH(compressed_sha256) == 64)
 ) STRICT;
 
-CREATE INDEX idx_compressed_document ON compressed_document(
+CREATE UNIQUE INDEX idx_compressed_document ON compressed_document(
 	algorithm,
 	identity_sha256
 );
@@ -242,56 +244,6 @@ The following outlines some pseudo code for common operations.
 The following models in pseudo code on how a network document is queried and
 served:
 * Search for the appropriate document and store `content_sha256`
-	* Query a consensus:
-		```sql
-		SELECT content_sha256
-		FROM consensus
-		WHERE flavor = 'ns'
-		ORDER BY valid_after DESC
-		LIMIT 1;
-		```
-	* Query a consensus diff from a given hash `XXX` to the newest consensus:
-		```sql
-		SELECT content_sha256
-		FROM consensus_diff
-		WHERE old_consensus_rowid = (
-			SELECT rowid
-			FROM consensus
-			WHERE flavor = 'ns' AND content_sha3_256 = 'XXX'
-		) AND new_consensus_rowid = (
-			SELECT rowid
-			FROM consensus
-			WHERE flavor = 'ns'
-			ORDER BY valid_after DESC
-			LIMIT 1
-		);
-		```
-	* Obtain the key certificate of a certain authority:
-		```sql
-		SELECT content_sha256
-		FROM authority
-		INNER JOIN consensus ON consensus.rowid = authority.last_consensus_rowid
-		WHERE authority.kp_auth_id_rsa_sha1 = 'XXX'
-		ORDER BY valid_after DESC
-		LIMIT 1;
-		```
-	* Obtain a specific router descriptor:
-		```sql
-		SELECT content_sha256
-		FROM router
-		INNER JOIN consensus ON consensus.rowid = router.last_consensus_rowid
-		WHERE router.kp_relay_id_rsa_sha1 = 'XXX'
-		AND router.flavor = 'ns'
-		AND consensus.flavor = 'ns'
-		ORDER BY valid_after DESC
-		LIMIT 1;
-		```
-	* Obtain extra-info:
-		```sql
-		SELECT content_sha256
-		FROM router_extra_info
-
-		```
 * Check whether the `content_sha256` is in the cache
 	* If so, clone the `Arc`
 	* If not, query `content` with `WHERE content_sha256 = ?` and insert it into
@@ -301,20 +253,84 @@ served:
 	* If so, remove `content_sha256` entirely from the cache, as we are the last
 	  active server of the resource.
 	* If not, do nothing except.
+	* For improving the development experience, it is probably best to implement
+	  that in a `Drop` trait.
 
 TODO: Do this for caching, I doubt it will be much different though ...
 
 ### Insertion of a new consensus
 
-1. Download the consensus and consensus-md from an authority
+This one explains how we insert a new consensus into the dircache.
+It works similarly for `consensus-md`.
+
+1. Download the consensus from an authority
 2. Parse and validate it accordingly to the specification
 3. Figure out the missing router descriptors and extra-info documents
 4. Download the missing router descriptors and extra-info documents from
-   directory authorities
+   directory authorities in an asynchronous task that modifies the database
+   as it goes along.
 5. Compute consensus diffs
 6. Compute compressions
 7. Insert everything in one transaction into the database and update the
-   `last_consensus_rowid` fields.
+   `last_seen` fields.
+
+### Example `SELECT` queries
+
+* Query a consensus:
+	```sql
+	SELECT content_sha256
+	FROM consensus
+	WHERE flavor = 'ns'
+	ORDER BY valid_after DESC
+	LIMIT 1;
+	```
+* Query a consensus diff from a given hash `HHH` to the newest consensus:
+	```sql
+	SELECT content_sha256
+	FROM consensus_diff
+	WHERE old_consensus_rowid = (
+		SELECT rowid
+		FROM consensus
+		WHERE flavor = 'ns' AND content_sha3_256 = 'HHH'
+	) AND new_consensus_rowid = (
+		SELECT rowid
+		FROM consensus
+		WHERE flavor = 'ns'
+		ORDER BY valid_after DESC
+		LIMIT 1
+	);
+	```
+* Obtain the key certificate of a certain authority:
+	```sql
+	SELECT content_sha256
+	FROM authority_key_certificate
+	WHERE kp_auth_id_rsa_sha1 = 'HHH'
+	ORDER BY last_seen DESC
+	LIMIT 1;
+	```
+* Obtain a specific router descriptor:
+	```sql
+	SELECT content_sha256
+	FROM router
+	WHERE kp_relay_id_rsa_sha1 = 'HHH'
+	AND flavor = 'ns'
+	ORDER BY last_seen DESC
+	LIMIT 1;
+	```
+* Obtain extra-info:
+	```sql
+	SELECT content_sha256
+	FROM router_extra_info
+	WHERE rowid = (
+		SELECT router_extra_info_rowid
+		FROM router
+		WHERE kp_relayid_rsa_sha1 = 'HHH'
+		ORDER BY last_seen DESC
+		LIMIT 1
+	)
+	ORDER BY last_seen
+	LIMIT 1;
+	```
 
 ### Garbage Collection
 
@@ -322,80 +338,54 @@ Over time, the dircache will collect some garbage.  This is intentional,
 as various documents are not deleted the moment they are no longer listed in
 a consensus.
 
-Regularly, the following SQL transaction is executed:
 ```sql
 BEGIN TRANSACTION;
 
--- Temporary table storing all old consensuses we will delete.
-CREATE TEMP TABLE old_consensus(
-	consensus_rowid	INTEGER NOT NULL
-);
-
--- Populate `old_consensus` with all consensuses older than seven days.
-INSERT INTO old_consensus(consensus_rowid)
-SELECT rowid
-FROM consensus
-WHERE valid_until <= (NOW - 7 DAYS); -- Pseudo-code I know
-
--- Temporary table storing all old authorities we will delete.
-CREATE TEMP TABLE old_authority(
-	authority_rowid	INTEGER NOT NULL
-);
-
--- Populate `old_authority`.
-INSERT INTO old_authority(authority_rowid)
-SELECT rowid
-FROM authority
-WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
-
--- Temporary table storing all old router descriptors we will delete.
-CREATE TEMP TABLE old_router(
-	router_rowid INTEGER NOT NULL
-);
-
--- Populate `old_router` with all routers who were last seen in a consensus that
--- will be deleted.
-INSERT INTO old_router(router_rowid)
-SELECT rowid
-FROM router
-WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
-
--- Now actually delete data.
 DELETE
-FROM router
-WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
-
-DELETE
-FROM router_extra_info
-WHERE last_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+FROM consensus_diff
+WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
 
 DELETE
 FROM consensus_authority_voter
-WHERE consensus_rowid IN (SELECT consensus_rowid FROM old_consensus) OR
-authority_rowid IN (SELECT authority_rowid FROM old_authority);
+WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
 
-DELETE
-FROM authority
-WHERE rowid IN (SELECT authority_rowid FROM old_authority);
-
-DELETE
-FROM consensus_diff
-WHERE old_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus) OR
-new_consensus_rowid IN (SELECT consensus_rowid FROM old_consensus);
+DELETE FROM
+consensus_authority_voter
+INNER JOIN consensus AS cons ON consensus_rowid = cons.rowid
+INNER JOIN authority_key_certificate AS auth ON authority_rowid = auth.rowid
+WHERE auth.last_seen <= unixepoch() - (60 * 60 * 24 * 7)
+OR cons.last_seen <= unixepoch() - (60 * 60 * 24 * 7);
 
 DELETE
 FROM consensus
-WHERE rowid IN (SELECT consensus_rowid FROM old_consensus);
+WHERE valid_after <= unixepoch() - (60 * 60 * 24 * 7);
 
-DELETE FROM compressed_document
-WHERE identity_sha256 NOT IN
-(SELECT content_sha256 FROM consensus) OR
-(SELECT content_sha256 FROM authority) OR
-(SELECT content_sha256 FROM router) OR
-(SELECT content_sha256 FROM router_extra_info);
+DELETE
+FROM authority_key_certificate
+WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
+
+DELETE
+FROM router
+WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
+
+DELETE
+FROM compressed_documents
+WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
 
 END TRANSACTION;
 ```
+
+## Cleaning the cache
+
+Right now, there are two proposals for cleaning the cache:
+
+1. Utilize `Drop` traits
+	* A wrapper around the end of each HTTP callback which checks the `Arc`'s
+	  reference count and deletes it in the case that it is currently no longer
+	  used by any other active HTTP request.
+2. Have an asynchronous task
+	* An asynchronous task that periodically removes all `Arc`'s in the hash
+	  map whose reference count implies that it is no longer in active use.
 
 ## HTTP backend
 
