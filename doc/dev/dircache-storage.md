@@ -30,7 +30,7 @@ an extension.  Due to this design decision, all dirauth related data structures
 
 As outlined above, we want to avoid having the same data multiple times in
 memory.  Let's say we serve the same request a thousand times in parallel,
-then we do not want to store the same data 10,000 times in memory but rather
+then we do not want to store the same data 1,000 times in memory but rather
 only once.
 
 The goal of the cache *IS NOT* to reduce the number of disk reads for frequently
@@ -289,8 +289,7 @@ let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
 	let content = Arc::new(db.transaction().query(format!("SELECT content FROM table WHERE content_sha256 = {sha256}")));
 	// We have to use entry here in order to avoid duplicate cache writes in the
 	// case of a parallel cache miss.
-	cache.write().entry(sha256).or_insert(Arc::clone(&content));
-	content
+	cache.write().entry(sha256).or_insert(content).clone()
 };
 ```
 
