@@ -230,8 +230,8 @@ CREATE TABLE compressed_document(
 ) STRICT;
 
 CREATE UNIQUE INDEX idx_compressed_document ON compressed_document(
+	identity_sha256,
 	algorithm,
-	identity_sha256
 );
 ```
 
@@ -243,36 +243,39 @@ The following outlines some pseudo code for common operations.
 
 The following models in pseudo code on how a network document is queried and
 served:
-* Search for the appropriate document and store `content_sha256`
-* Check whether the `content_sha256` is in the cache
+1. Search for the appropriate document and store `content_sha256`
+2. Check whether the `content_sha256` is in the cache
 	* If so, clone the `Arc`
 	* If not, query `content` with `WHERE content_sha256 = ?` and insert it into
 	  the cache
-* Transmit the data to the client
-* Check whether the reference counter is `1`
+3. Transmit the data to the client
+4. Check whether the reference counter is `1` (Controversial, see "Cleaning the cache")
 	* If so, remove `content_sha256` entirely from the cache, as we are the last
 	  active server of the resource.
 	* If not, do nothing except.
 	* For improving the development experience, it is probably best to implement
 	  that in a `Drop` trait.
 
-TODO: Do this for caching, I doubt it will be much different though ...
+TODO: Do this for compression, I doubt it will be much different though ...
 
-### Insertion of a new consensus
+Below is some Rust-like pseudo code demonstrating it.
+It follows a locking hierarchy where none of the locks (db and cache) may be
+held simultanously.
+```rust
+// (1)
+let sha256 = db.lock().query("SELECT content_sha256 FROM table WHERE column_name = column_value");
 
-This one explains how we insert a new consensus into the dircache.
-It works similarly for `consensus-md`.
-
-1. Download the consensus from an authority
-2. Parse and validate it accordingly to the specification
-3. Figure out the missing router descriptors and extra-info documents
-4. Download the missing router descriptors and extra-info documents from
-   directory authorities in an asynchronous task that modifies the database
-   as it goes along.
-5. Compute consensus diffs
-6. Compute compressions
-7. Insert everything in one transaction into the database and update the
-   `last_seen` fields.
+let content = if cache.read().contains_key(sha256) {
+	// Read from the cache.
+	Arc::clone(&cache.read().get(sha256))
+} else {
+	// Read from db and insert into cache.
+	// `db` and `cache` are not hold simultanously but only for each operation.
+	let content = Arc::new(db.lock().query(format!("SELECT content FROM table WHERE content_sha256 = {sha256}")));
+	cache.write().insert(sha256, Arc::clone(&content));
+	content
+};
+```
 
 ### Example `SELECT` queries
 
@@ -375,17 +378,37 @@ WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
 END TRANSACTION;
 ```
 
+### Insertion of a new consensus
+
+This one explains how we insert a new consensus into the dircache.
+It works similarly for `consensus-md`.
+
+1. Download the consensus from an authority
+2. Parse and validate it accordingly to the specification
+3. Figure out the missing router descriptors and extra-info documents
+4. Download the missing router descriptors and extra-info documents from
+   directory authorities in an asynchronous task that modifies the database
+   as it goes along.
+5. Compute consensus diffs
+6. Compute compressions
+7. Insert everything in one transaction into the database and update the
+   `last_seen` fields.
+
 ## Cleaning the cache
 
 Right now, there are two proposals for cleaning the cache:
 
 1. Utilize `Drop` traits
-	* A wrapper around the end of each HTTP callback which checks the `Arc`'s
+* A wrapper around the end of each HTTP callback which checks the `Arc`'s
 	  reference count and deletes it in the case that it is currently no longer
 	  used by any other active HTTP request.
-2. Have an asynchronous task
-	* An asynchronous task that periodically removes all `Arc`'s in the hash
-	  map whose reference count implies that it is no longer in active use.
+	  The wrapper must contain a clone of the `Arc<RwLock<HashMap<..>>>`.
+	  This is the approach presented in the text above.
+2. Put `Weak` in the hash map.  Clean up dangling entries later.
+    * Using `Weak` in the map means data is discarded as soon as it's no
+          longer being served, but leaves dangling entries in the `HashMap`.
+	* Periodically scan the `HashMap` for dangling `Weak`s.  This could
+	  be done with an asynchronous task, or after database garbage collection..
 
 ## HTTP backend
 
