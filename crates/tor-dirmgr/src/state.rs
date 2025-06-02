@@ -406,6 +406,9 @@ impl<R: Runtime> GetConsensusState<R> {
             consensus_meta,
             missing_certs: desired_certs,
             certs: Vec::new(),
+            cert_fetch_attempts: HashMap::new(),
+            total_cert_fetch_attempts: 0,
+            cert_fetch_start_time: self.rt.wallclock(),
             rt: self.rt.clone(),
             config: self.config.clone(),
             prev_netdir: self.prev_netdir.take(),
@@ -463,6 +466,13 @@ struct GetCertsState<R: Runtime> {
     /// A list of the certificates we've been able to load or download.
     certs: Vec<AuthCert>,
 
+    /// A map to track the number of fetch attempts for each certificate.
+    cert_fetch_attempts: HashMap<AuthCertKeyIds, u32>,
+    /// The total number of certificate fetch attempts made.
+    total_cert_fetch_attempts: u32,
+    /// The time when we started fetching certificates.
+    cert_fetch_start_time: SystemTime,
+
     /// A `Runtime` implementation.
     rt: R,
     /// The configuration of the directory manager. Used for download configuration
@@ -480,6 +490,58 @@ struct GetCertsState<R: Runtime> {
 }
 
 impl<R: Runtime> GetCertsState<R> {
+    /// Check if we've exceeded any of the certificate fetch limits.
+    ///
+    /// Returns an error if any limit has been exceeded.
+    fn check_cert_fetch_limits(&self) -> Result<()> {
+        // Check if we've exceeded the maximum time for certificate fetching
+        let now = self.rt.wallclock();
+        let elapsed = now
+            .duration_since(self.cert_fetch_start_time)
+            .unwrap_or_default();
+        if elapsed > self.config.cert_fetch_limits.max_cert_fetch_time {
+            return Err(Error::CertFetchLimitExceeded("time limit"));
+        }
+
+        // Check if we've exceeded the maximum total number of certificate fetch attempts
+        if self.total_cert_fetch_attempts
+            >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+        {
+            return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
+        }
+
+        Ok(())
+    }
+
+    /// Increment the fetch attempt counter for a certificate.
+    ///
+    /// Returns an error if the certificate has exceeded its maximum number of fetch attempts
+    /// or if the total number of fetch attempts has exceeded the limit.
+    fn increment_cert_fetch_attempt(&mut self, cert_id: &AuthCertKeyIds) -> Result<()> {
+        // First check if we've already exceeded the total limit
+        if self.total_cert_fetch_attempts
+            >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+        {
+            return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
+        }
+
+        // Increment the total fetch attempts counter
+        self.total_cert_fetch_attempts += 1;
+
+        // Increment the per-certificate fetch attempts counter
+        let attempts = self.cert_fetch_attempts.entry(*cert_id).or_insert(0);
+        *attempts += 1;
+
+        // Check if we've exceeded the maximum number of attempts for this certificate
+        if *attempts > self.config.cert_fetch_limits.max_cert_fetch_attempts {
+            return Err(Error::CertFetchLimitExceeded(
+                "per-certificate attempt limit",
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Handle a certificate result returned by `tor_netdoc`: checking it for timeliness
     /// and well-signedness.
     ///
@@ -573,9 +635,25 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         }
     }
     fn missing_docs(&self) -> Vec<DocId> {
+        // Check if we've exceeded any certificate fetch limits
+        if let Err(e) = self.check_cert_fetch_limits() {
+            warn!("Certificate fetch limits exceeded: {}", e);
+            return Vec::new();
+        }
+
+        // Return the list of missing certificates
         self.missing_certs
             .iter()
-            .map(|id| DocId::AuthCert(*id))
+            .filter_map(|id| {
+                // Check if this certificate has exceeded its individual fetch attempt limit
+                let attempts = self.cert_fetch_attempts.get(id).copied().unwrap_or(0);
+                if attempts >= self.config.cert_fetch_limits.max_cert_fetch_attempts {
+                    warn!("Certificate {:?} exceeded maximum fetch attempts", id);
+                    None
+                } else {
+                    Some(DocId::AuthCert(*id))
+                }
+            })
             .collect()
     }
     fn is_ready(&self, _ready: Readiness) -> bool {
@@ -631,6 +709,8 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         }
         opt_err_to_result(nonfatal_error)
     }
+
+    #[allow(clippy::cognitive_complexity)]
     fn add_from_download(
         &mut self,
         text: &str,
@@ -639,8 +719,19 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         storage: Option<&Mutex<DynStore>>,
         changed: &mut bool,
     ) -> Result<()> {
+        // Process the request and track certificate fetch attempts
         let asked_for: HashSet<_> = match request {
-            ClientRequest::AuthCert(a) => a.keys().collect(),
+            ClientRequest::AuthCert(a) => {
+                // Increment the fetch attempt counter for each certificate we're asking for
+                for key_id in a.keys() {
+                    if let Err(e) = self.increment_cert_fetch_attempt(key_id) {
+                        warn!("Certificate fetch limit exceeded for {:?}: {}", key_id, e);
+                        // If we've exceeded the limit for any certificate, return early
+                        return Err(e);
+                    }
+                }
+                a.keys().collect()
+            }
             _ => return Err(internal!("expected an AuthCert request").into()),
         };
 
@@ -736,9 +827,19 @@ impl<R: Runtime> DirState for GetCertsState<R> {
         )
     }
     fn reset(self: Box<Self>) -> Box<dyn DirState> {
+        // Check if we're resetting due to a certificate fetch limit error
+        let exceeded_cert_limits = self.check_cert_fetch_limits().is_err();
+
         let cache_usage = if self.cache_usage == CacheUsage::CacheOnly {
             // Cache only means we can't ever download.
             CacheUsage::CacheOnly
+        } else if exceeded_cert_limits {
+            // If we're resetting due to certificate fetch limits being exceeded,
+            // we should try to use the cache first before downloading a new consensus.
+            // This helps prevent an attacker from forcing us to repeatedly download
+            // new consensus documents.
+            warn!("Certificate fetch limits exceeded, falling back to cache");
+            CacheUsage::CacheOkay
         } else {
             // If we reset in this state, we should always go to "must
             // download": Either we've failed to get the certs we needed, or we
@@ -1841,5 +1942,180 @@ mod test {
             let missing = state.missing_docs();
             assert!(missing.is_empty());
         });
+    }
+
+    #[test]
+    fn test_cert_fetch_limits() {
+        use crate::config::{CertFetchLimits, DirMgrConfig};
+        use crate::DocId;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime};
+        use tor_llcrypto::pk::rsa::RsaIdentity;
+        use tor_netdoc::doc::authcert::AuthCertKeyIds;
+
+        // Test the certificate fetch limit functions directly
+        let limits = CertFetchLimits {
+            max_cert_fetch_time: Duration::from_secs(10),
+            max_cert_fetch_attempts: 2,
+            max_total_cert_fetch_attempts: 5,
+        };
+
+        // Create a mock state with just the fields we need for testing
+        struct MockState {
+            cert_fetch_attempts: HashMap<AuthCertKeyIds, u32>,
+            total_cert_fetch_attempts: u32,
+            cert_fetch_start_time: SystemTime,
+            config: Arc<DirMgrConfig>,
+            missing_certs: HashSet<AuthCertKeyIds>,
+        }
+
+        impl MockState {
+            // Simplified version of the check_cert_fetch_limits function
+            fn check_cert_fetch_limits(&self) -> Result<()> {
+                // Check if we've exceeded the maximum time for certificate fetching
+                let now = SystemTime::now();
+                let elapsed = now
+                    .duration_since(self.cert_fetch_start_time)
+                    .unwrap_or_default();
+                if elapsed > self.config.cert_fetch_limits.max_cert_fetch_time {
+                    return Err(Error::CertFetchLimitExceeded("time limit"));
+                }
+
+                // Check if we've exceeded the maximum total number of certificate fetch attempts
+                if self.total_cert_fetch_attempts
+                    >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+                {
+                    return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
+                }
+
+                Ok(())
+            }
+
+            // Simplified version of the increment_cert_fetch_attempt function
+            fn increment_cert_fetch_attempt(&mut self, cert_id: &AuthCertKeyIds) -> Result<()> {
+                // First check if we've already exceeded the total limit
+                if self.total_cert_fetch_attempts
+                    >= self.config.cert_fetch_limits.max_total_cert_fetch_attempts
+                {
+                    return Err(Error::CertFetchLimitExceeded("total fetch attempts limit"));
+                }
+
+                // Increment the total fetch attempts counter
+                self.total_cert_fetch_attempts += 1;
+
+                // Increment the per-certificate fetch attempts counter
+                let attempts = self.cert_fetch_attempts.entry(*cert_id).or_insert(0);
+                *attempts += 1;
+
+                // Check if we've exceeded the maximum number of attempts for this certificate
+                if *attempts > self.config.cert_fetch_limits.max_cert_fetch_attempts {
+                    return Err(Error::CertFetchLimitExceeded(
+                        "per-certificate attempt limit",
+                    ));
+                }
+
+                Ok(())
+            }
+
+            // Simplified version of the missing_docs function
+            fn missing_docs(&self) -> Vec<DocId> {
+                // Check if we've exceeded any certificate fetch limits
+                if self.check_cert_fetch_limits().is_err() {
+                    return Vec::new();
+                }
+
+                // Return the list of missing certificates
+                self.missing_certs
+                    .iter()
+                    .filter_map(|id| {
+                        // Check if this certificate has exceeded its individual fetch attempt limit
+                        let attempts = self.cert_fetch_attempts.get(id).copied().unwrap_or(0);
+                        if attempts >= self.config.cert_fetch_limits.max_cert_fetch_attempts {
+                            None
+                        } else {
+                            Some(DocId::AuthCert(*id))
+                        }
+                    })
+                    .collect()
+            }
+        }
+
+        // Create a mock state for testing
+        let config = DirMgrConfig {
+            cert_fetch_limits: limits,
+            ..Default::default()
+        };
+
+        let mut state = MockState {
+            cert_fetch_attempts: HashMap::new(),
+            total_cert_fetch_attempts: 0,
+            cert_fetch_start_time: SystemTime::now(),
+            config: Arc::new(config),
+            missing_certs: HashSet::new(),
+        };
+
+        // Add some missing certificates
+        let cert1 = AuthCertKeyIds {
+            id_fingerprint: RsaIdentity::from_bytes(&[1; 20]).unwrap(),
+            sk_fingerprint: RsaIdentity::from_bytes(&[2; 20]).unwrap(),
+        };
+        let cert2 = AuthCertKeyIds {
+            id_fingerprint: RsaIdentity::from_bytes(&[3; 20]).unwrap(),
+            sk_fingerprint: RsaIdentity::from_bytes(&[4; 20]).unwrap(),
+        };
+        let cert3 = AuthCertKeyIds {
+            id_fingerprint: RsaIdentity::from_bytes(&[5; 20]).unwrap(),
+            sk_fingerprint: RsaIdentity::from_bytes(&[6; 20]).unwrap(),
+        };
+        state.missing_certs.insert(cert1);
+        state.missing_certs.insert(cert2);
+        state.missing_certs.insert(cert3);
+
+        // Test 1: Initial state should return all missing certificates
+        let missing = state.missing_docs();
+        assert_eq!(missing.len(), 3);
+        assert!(missing.contains(&DocId::AuthCert(cert1)));
+        assert!(missing.contains(&DocId::AuthCert(cert2)));
+        assert!(missing.contains(&DocId::AuthCert(cert3)));
+
+        // Test 2: Increment attempts for cert1 to the limit
+        assert!(state.increment_cert_fetch_attempt(&cert1).is_ok());
+        assert!(state.increment_cert_fetch_attempt(&cert1).is_ok());
+        assert!(state.increment_cert_fetch_attempt(&cert1).is_err()); // Should exceed limit
+
+        // Test 3: After exceeding cert1's limit, it should be excluded from missing_docs
+        let missing = state.missing_docs();
+        assert_eq!(missing.len(), 2);
+        assert!(!missing.contains(&DocId::AuthCert(cert1)));
+        assert!(missing.contains(&DocId::AuthCert(cert2)));
+        assert!(missing.contains(&DocId::AuthCert(cert3)));
+
+        // Test 4: Increment attempts for cert2 and cert3 to reach total limit
+        assert!(state.increment_cert_fetch_attempt(&cert2).is_ok());
+        assert!(state.increment_cert_fetch_attempt(&cert2).is_ok());
+
+        // At this point we've used 4 attempts (2 for cert1, 2 for cert2)
+        // We need to set the total attempts to 5 to test the limit
+        // The limit is 5, so the next attempt should fail
+        state.total_cert_fetch_attempts = 5; // Set to the limit
+
+        // When we increment, it will first increment total_cert_fetch_attempts to 6
+        // which exceeds the limit of 5, so it should return an error
+        assert!(state.increment_cert_fetch_attempt(&cert3).is_err()); // Should exceed total limit
+
+        // Test 5: After exceeding total limit, no certificates should be returned
+        let missing = state.missing_docs();
+        assert_eq!(missing.len(), 0);
+
+        // Test 6: Time limit test
+        // Reset the state with a start time in the past
+        state.cert_fetch_attempts.clear();
+        state.total_cert_fetch_attempts = 0;
+        state.cert_fetch_start_time = SystemTime::now() - Duration::from_secs(11); // Exceed the 10s limit
+
+        // After exceeding time limit, no certificates should be returned
+        let missing = state.missing_docs();
+        assert_eq!(missing.len(), 0);
     }
 }

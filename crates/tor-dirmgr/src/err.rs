@@ -23,6 +23,9 @@ pub enum Error {
     /// This DirMgr doesn't support downloads.
     #[error("Tried to download information on a DirMgr with no download support")]
     NoDownloadSupport,
+    /// Certificate fetching exceeded time or attempt limits.
+    #[error("Certificate fetching exceeded {0}")]
+    CertFetchLimitExceeded(&'static str),
     /// We couldn't read something from disk that we should have been
     /// able to read.
     #[error("Corrupt cache: {0}")]
@@ -182,7 +185,7 @@ pub(crate) enum BootstrapAction {
     /// The error isn't fatal.  We should blame it on its source (if any), and
     /// continue bootstrapping.
     Nonfatal,
-    /// The error requires that we restart bootstrapping from scratch.  
+    /// The error requires that we restart bootstrapping from scratch.
     ///
     /// This kind of error typically means that we've downloaded a consensus
     /// that turned out to be useless at a later stage, and so we need to
@@ -230,6 +233,7 @@ impl Error {
             | Error::ConsensusDiffError(_)
             | Error::SignatureError(_)
             | Error::ConsensusInvalid { .. }
+            | Error::CertFetchLimitExceeded(_)
             | Error::UntimelyObject(_) => true,
 
             // These errors cannot come from a directory cache.
@@ -302,6 +306,7 @@ impl Error {
             | Error::UntimelyObject(_)
             | Error::DirClientError(_)
             | Error::SignatureError(_)
+            | Error::CertFetchLimitExceeded(_)
             | Error::NetDocError { .. } => BootstrapAction::Nonfatal,
 
             Error::ConsensusInvalid { .. } | Error::CantAdvanceState => BootstrapAction::Reset,
@@ -351,6 +356,7 @@ impl HasKind for Error {
         match self {
             E::Unwanted(_) => EK::TorProtocolViolation,
             E::NoDownloadSupport => EK::NotImplemented,
+            E::CertFetchLimitExceeded(_) => EK::TorAccessFailed,
             E::CacheCorruption(_) => EK::CacheCorrupted,
             E::CachePermissions(e) => e.cache_error_kind(),
             E::CacheAccess(e) => e.cache_error_kind(),
