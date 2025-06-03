@@ -18,6 +18,33 @@ use tor_rtcompat::{tls::TlsConnector, Runtime, TlsProvider};
 use async_trait::async_trait;
 use futures::task::SpawnExt;
 
+/// Configuration for channel connection timeouts.
+///
+/// This struct controls how long we're willing to wait when establishing
+/// channel connections.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ChannelTimeoutConfig {
+    /// Timeout for direct connections (in seconds).
+    ///
+    /// This is used when connecting directly to a relay.
+    pub direct_timeout: Duration,
+
+    /// Timeout for indirect connections (in seconds).
+    ///
+    /// This is used when connecting through a bridge or other indirect method.
+    pub indirect_timeout: Duration,
+}
+
+impl Default for ChannelTimeoutConfig {
+    fn default() -> Self {
+        Self {
+            direct_timeout: Duration::from_secs(5),
+            indirect_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
 /// TLS-based channel builder.
 ///
 /// This is a separate type so that we can keep our channel management code
@@ -40,20 +67,31 @@ where
     transport: H,
     /// Object to build TLS connections.
     tls_connector: <R as TlsProvider<H::Stream>>::Connector,
+    /// Configuration for connection timeouts.
+    timeout_config: ChannelTimeoutConfig,
 }
 
 impl<R: Runtime, H: TransportImplHelper> ChanBuilder<R, H>
 where
     R: TlsProvider<H::Stream>,
 {
-    /// Construct a new ChanBuilder.
+    /// Construct a new ChanBuilder with default timeout configuration.
     pub fn new(runtime: R, transport: H) -> Self {
         let tls_connector = <R as TlsProvider<H::Stream>>::tls_connector(&runtime);
         ChanBuilder {
             runtime,
             transport,
             tls_connector,
+            timeout_config: ChannelTimeoutConfig::default(),
         }
+    }
+
+    /// Set the timeout configuration for this channel builder.
+    ///
+    /// Returns a new builder with the specified timeout configuration.
+    pub fn with_timeout_config(mut self, config: ChannelTimeoutConfig) -> Self {
+        self.timeout_config = config;
+        self
     }
 }
 #[async_trait]
@@ -70,11 +108,11 @@ where
     ) -> crate::Result<Arc<tor_proto::channel::Channel>> {
         use tor_rtcompat::SleepProviderExt;
 
-        // TODO: make this an option.  And make a better value.
+        // Use the configured timeout values based on the connection method
         let delay = if target.chan_method().is_direct() {
-            std::time::Duration::new(5, 0)
+            self.timeout_config.direct_timeout
         } else {
-            std::time::Duration::new(10, 0)
+            self.timeout_config.indirect_timeout
         };
 
         let connect_future = self.connect_no_timeout(target, reporter.0, memquota);
@@ -390,5 +428,56 @@ mod test {
         })
     }
 
-    // TODO: Write tests for timeout logic, once there is smarter logic.
+    // Test that the timeout configuration is respected
+    #[test]
+    fn test_timeout_config() {
+        // Instead of trying to create real connections that timeout,
+        // we'll directly test the timeout configuration by checking
+        // that the ChanBuilder correctly uses the configured timeout values
+
+        // Create a timeout configuration
+        let timeout_config = ChannelTimeoutConfig {
+            direct_timeout: Duration::from_secs(30),
+            indirect_timeout: Duration::from_secs(60),
+        };
+
+        // Create a mock runtime and transport
+        let runtime = tor_rtmock::MockRuntime::new();
+        let transport = crate::transport::DefaultTransport::new(runtime.clone());
+
+        // Create a builder with the timeout configuration
+        let builder = ChanBuilder::new(runtime.clone(), transport)
+            .with_timeout_config(timeout_config.clone());
+
+        // We don't actually need to create a target for this test
+        // since we're just checking the timeout configuration
+
+        // Check that the builder uses the correct timeout for direct connections
+        assert_eq!(
+            builder.timeout_config.direct_timeout,
+            timeout_config.direct_timeout
+        );
+
+        // Check that the builder uses the correct timeout for indirect connections
+        assert_eq!(
+            builder.timeout_config.indirect_timeout,
+            timeout_config.indirect_timeout
+        );
+
+        // Create a builder with default timeout configuration
+        let default_builder = ChanBuilder::new(
+            runtime.clone(),
+            crate::transport::DefaultTransport::new(runtime),
+        );
+
+        // Check that the default timeout values are as expected
+        assert_eq!(
+            default_builder.timeout_config.direct_timeout,
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            default_builder.timeout_config.indirect_timeout,
+            Duration::from_secs(10)
+        );
+    }
 }
