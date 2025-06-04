@@ -18,6 +18,12 @@ allow_running_as_root = true
 
 [logging]
 log_sensitive_information = true
+files = [
+    { path = "arti.log.txt", filter = "debug" }
+]
+# Disable logging directly to console, since we're logging to files.  This makes
+# it easier to spot any non-logging output, such as rust panics in stderr.
+console = ""
 
 [override_net_params]
 # When TestingTorNetwork is enabled, tor uses a hard-coded value
