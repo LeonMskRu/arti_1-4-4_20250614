@@ -23,6 +23,9 @@ full = [
     "tor-general-addr/full",
 ]
 
+experimental = ["smol"]
+__is_experimental = []
+
 async-std = ["async-std-crate", "async-io", "async_executors/async_std"]
 tokio = [
     "tokio-crate",
@@ -30,6 +33,12 @@ tokio = [
     "async_executors/tokio_tp",
     "async_executors/tokio_timer",
     "async_executors/tokio_io",
+]
+smol = [
+    "dep:smol",
+    "async-io",
+    "blocking",
+    "__is_experimental",
 ]
 static = ["native-tls-crate?/vendored", "__is_nonadditive"]
 native-tls = ["native-tls-crate", "async-native-tls"]
@@ -52,9 +61,15 @@ arbitrary = { version = "1.3.2", optional = true, features = ["derive"] }
 async-io = { version = "2.2.1", optional = true }
 async-native-tls = { version = "0.5.0", optional = true }
 async-std-crate = { package = "async-std", version = "1.7.0", optional = true }
+# We don't use `async-task` directly, but dependency `blocking` only specifies version "4.0.2" of `async-task`
+# while it actually requires a newer version. We force a newer version here to prevent the build from breaking
+# when downgrading dependencies (like in `maint/downgrade_dependencies`).
+# TODO: Remove explicit declaration when this is fixed, see: https://github.com/smol-rs/blocking/issues/69
+async-task = { version = "4.7.1", optional = true }
 async-trait = "0.1.54"
 async_executors = { version = "0.7.0", default-features = false }
 asynchronous-codec = "0.7.0"
+blocking = { version = "1.6.1", optional = true }
 coarsetime = "0.1.20"
 derive_more = { version = "2.0.1", features = ["full"] }
 dyn-clone = "1.0.17"
@@ -74,6 +89,7 @@ pin-project = "1"
 rustls = { version = "0.23.21", optional = true }
 rustls-pki-types = { version = "1.8", optional = true }
 rustls-webpki = { version = "0.103.1", optional = true }
+smol = { version = "2.0.2", optional = true }
 thiserror = "2"
 tokio-crate = { package = "tokio", version = "1.7", optional = true, features = [
     "rt",

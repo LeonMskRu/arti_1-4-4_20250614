@@ -65,6 +65,7 @@ full = [
 #   * Features which may introduce unnecessary licensing restrictions.
 
 async-std = ["tor-rtcompat/async-std"]
+smol = ["tor-rtcompat/smol", "__is_experimental"]
 bridge-client = ["tor-guardmgr/bridge-client", "tor-dirmgr/bridge-client"]
 memquota = ["tor-memquota/memquota"]
 tokio = ["tor-rtcompat/tokio", "tor-proto/tokio"]
@@ -128,6 +129,7 @@ experimental = [
     "tor-hsservice/experimental",
     "tor-keymgr/experimental",
     "restricted-discovery",
+    "smol",
 ]
 
 # Enable experimental APIs that are not yet officially supported.
