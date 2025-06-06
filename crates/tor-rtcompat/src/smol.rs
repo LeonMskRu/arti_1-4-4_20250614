@@ -92,12 +92,6 @@ impl SmolNativeTlsRuntime {
         })
     }
 
-    /// Return a `SmolNativeTlsRuntime` for the current smol executor.
-    pub fn current() -> IoResult<Self> {
-        // smol executors are global, so this is same as `create()`
-        Self::create()
-    }
-
     /// Run a single test function in a fresh runtime (Arti-internal API).
     #[doc(hidden)]
     pub fn run_test<P, F, O>(func: P) -> O
@@ -129,11 +123,6 @@ impl SmolRustlsRuntime {
         })
     }
 
-    /// Return a `SmolRustlsRuntime` for the current smol executor.
-    pub fn current() -> IoResult<Self> {
-        Self::create()
-    }
-
     #[doc(hidden)]
     pub fn run_test<P, F, O>(func: P) -> O
     where
@@ -161,20 +150,6 @@ mod test {
     #![allow(clippy::needless_pass_by_value)]
     //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
     use super::*;
-
-    #[test]
-    fn current() {
-        // Now start a SmolRuntime and make sure that the `current` functions do work in that case.
-
-        let runtime = PreferredRuntime::create().unwrap();
-        runtime.block_on(async {
-            #[cfg(feature = "native-tls")]
-            assert!(SmolNativeTlsRuntime::current().is_ok());
-
-            #[cfg(feature = "rustls")]
-            assert!(SmolRustlsRuntime::current().is_ok());
-        });
-    }
 
     #[test]
     fn debug() {
