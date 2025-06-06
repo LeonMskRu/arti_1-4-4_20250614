@@ -110,12 +110,6 @@ pub use compound::{CompoundRuntime, RuntimeSubstExt};
     not(any(feature = "tokio", feature = "smol"))
 ))]
 use async_std as preferred_backend_mod;
-#[cfg(all(
-    any(feature = "native-tls", feature = "rustls"),
-    feature = "smol",
-    not(any(feature = "async-std", feature = "tokio"))
-))]
-use smol as preferred_backend_mod;
 #[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio"))]
 use tokio as preferred_backend_mod;
 
@@ -132,7 +126,7 @@ use tokio as preferred_backend_mod;
 /// after creating this or any other `Runtime`.
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio", feature = "smol")
+    any(feature = "async-std", feature = "tokio")
 ))]
 #[derive(Clone)]
 pub struct PreferredRuntime {
@@ -142,7 +136,7 @@ pub struct PreferredRuntime {
 
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio", feature = "smol")
+    any(feature = "async-std", feature = "tokio")
 ))]
 crate::opaque::implement_opaque_runtime! {
     PreferredRuntime { inner : preferred_backend_mod::PreferredRuntime }
@@ -150,7 +144,7 @@ crate::opaque::implement_opaque_runtime! {
 
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "async-std", feature = "tokio", feature = "smol")
+    any(feature = "async-std", feature = "tokio")
 ))]
 impl PreferredRuntime {
     /// Obtain a [`PreferredRuntime`] from the currently running asynchronous runtime.
@@ -390,7 +384,7 @@ macro_rules! test_with_all_runtimes {
 #[macro_export]
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
-    any(feature = "tokio", feature = "async-std", feature = "smol"),
+    any(feature = "tokio", feature = "async-std"),
 ))]
 macro_rules! test_with_one_runtime {
     ( $fn:expr ) => {{
