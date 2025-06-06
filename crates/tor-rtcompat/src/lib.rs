@@ -107,7 +107,7 @@ pub use compound::{CompoundRuntime, RuntimeSubstExt};
 #[cfg(all(
     any(feature = "native-tls", feature = "rustls"),
     feature = "async-std",
-    not(any(feature = "tokio", feature = "smol"))
+    not(feature = "tokio")
 ))]
 use async_std as preferred_backend_mod;
 #[cfg(all(any(feature = "native-tls", feature = "rustls"), feature = "tokio"))]
