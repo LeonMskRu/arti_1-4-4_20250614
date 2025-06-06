@@ -834,7 +834,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     /// Switch from having an unowned persistent state to having an owned one.
     ///
     /// Requires that we hold the lock on the state files.
-    pub(crate) fn upgrade_to_owned_persistent_state(&self) -> Result<()> {
+    fn upgrade_to_owned_persistent_state(&self) -> Result<()> {
         self.mgr.peek_builder().upgrade_to_owned_state()?;
         Ok(())
     }
@@ -843,7 +843,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     ///
     /// We only call this method if we _don't_ have the lock on the state
     /// files.  If we have the lock, we only want to save.
-    pub(crate) fn reload_persistent_state(&self) -> Result<()> {
+    fn reload_persistent_state(&self) -> Result<()> {
         self.mgr.peek_builder().reload_state()?;
         Ok(())
     }
@@ -1021,7 +1021,7 @@ impl<B: AbstractCircBuilder<R> + 'static, R: Runtime> CircMgrInner<B, R> {
     /// we have the lock.
     ///
     /// Return true if we saved something; false if we didn't have the lock.
-    pub(crate) fn store_persistent_state(&self) -> Result<bool> {
+    fn store_persistent_state(&self) -> Result<bool> {
         self.mgr.peek_builder().save_state()
     }
 
@@ -1213,6 +1213,35 @@ mod test {
             });
             runtime.advance_by(Duration::from_millis(60)).await;
             ret_rx.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn test_get_or_launch_dir() {
+        tor_rtmock::MockRuntime::test_with_various(|runtime| async move {
+            let circmgr = make_circmgr(runtime.clone());
+
+            runtime.spawn_identified("get_or_launch_dir", async move {
+                let circ1 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+                let circ2 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+                assert_eq!(circ1, circ2);
+
+                circmgr.retire_all_circuits();
+
+                let circ3 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+
+                assert_ne!(circ1, circ3);
+                assert_ne!(circ2, circ3);
+
+                circmgr.retire_circ(&circ3.id);
+
+                let circ4 = circmgr.get_or_launch_dir(DirInfo::Nothing).await.unwrap();
+
+                assert_ne!(circ1, circ4);
+                assert_ne!(circ2, circ4);
+                assert_ne!(circ3, circ4);
+            });
+            runtime.advance_until_stalled().await;
         });
     }
 }

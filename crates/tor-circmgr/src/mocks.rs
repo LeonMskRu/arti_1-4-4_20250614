@@ -145,6 +145,7 @@ impl<RT: Runtime> AbstractCircBuilder<RT> for FakeBuilder<RT> {
             },
             #[cfg(feature = "hs-common")]
             TargetCircUsage::HsCircBase { .. } => SupportedCircUsage::HsOnly,
+            TargetCircUsage::Dir => SupportedCircUsage::Dir,
             _ => unimplemented!(),
         };
         let plan = FakePlan {
