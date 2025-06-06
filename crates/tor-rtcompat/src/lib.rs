@@ -678,7 +678,10 @@ mod test {
             mod async_std_runtime_tests {
                 tests_with_runtime! { &crate::async_std::PreferredRuntime::create()? => $($id),* }
             }
-            #[cfg(any(feature="tokio", feature = "async-std"))]
+            #[cfg(feature="smol")]
+            mod smol_runtime_tests {
+                tests_with_runtime! { &crate::smol::PreferredRuntime::create()? => $($id),* }
+            }
             mod default_runtime_tests {
                 tests_with_runtime! { &crate::PreferredRuntime::create()? => $($id),* }
             }
