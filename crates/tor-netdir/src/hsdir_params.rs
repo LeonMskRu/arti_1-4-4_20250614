@@ -82,6 +82,22 @@ impl HsDirParams {
         self.srv_lifespan.start
     }
 
+    #[cfg(feature = "hs-service")]
+    /// Return the starting time for the shared-random-value protocol with an
+    /// specified offset.
+    pub fn offset_within_sr(&self, offset: SystemTime) -> SrvPeriodOffset {
+        let srv_start = self.start_of_shard_rand_period();
+        self.offset_within_srv_period(offset)
+            .ok_or_else(|| {
+                tor_error::internal!(
+                    "specified time not within SRV range?! (specified={:?}, SRV_start={:?})",
+                    offset,
+                    srv_start
+                )
+            })
+            .expect("could not calculate the offset")
+    }
+
     /// Return an opaque offset for `when` from the start of the shared-random-value protocol
     /// period corresponding to the SRV for this time period.
     ///
