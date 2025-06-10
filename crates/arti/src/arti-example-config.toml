@@ -541,6 +541,7 @@
 # Can only be enabled if the `restricted-discovery` feature is enabled.
 #
 # If you enable this, you must also specify the authorized clients (via `static_keys`),
+# the authorized key files containing the client keys (via `static_key_paths`),
 # or the directories where the authorized client keys should be read from (via `key_dirs`).
 #
 # Restricted discovery mode is disabled by default.
@@ -555,6 +556,15 @@
 # where `<nickname>` is a valid client nickname.
 #
 #    path = "/var/lib/tor/hidden_service/authorized_clients"
+
+#    [[onion_services."allium-cepa".restricted_discovery.static_key_paths]]
+# Directories containing the client keys, each in the
+# `descriptor:x25519:<base32-encoded-x25519-public-key>` format.
+#
+# Each file specified must have a file name of the form `<nickname>.auth`, where
+# `<nickname>` is a valid client nickname.
+#
+#    path = "/var/lib/tor/hidden_service/authorized_clients/allium-cepa.auth"
 
 # A static mapping from client nicknames to keys.
 #
