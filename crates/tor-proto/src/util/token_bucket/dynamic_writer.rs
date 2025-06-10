@@ -1,4 +1,4 @@
-//! An [`AsyncWrite`] rate limiter which receives rate limit changes from a [`Stream`].
+//! An [`AsyncWrite`] rate limiter which receives rate limit changes from a [`FusedStream`].
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
