@@ -55,6 +55,63 @@ let guard = if debug_mode {
 with_safe_logging_suppressed(|| log_encrypted_data(big_secret));
 ```
 
+### Common Patterns
+
+#### Logging Network Operations Safely
+```rust
+use safelog::{Sensitive, sensitive};
+use std::net::SocketAddr;
+use tracing::info;
+
+fn handle_socks_request(command: &str, client_addr: SocketAddr, port: u16) {
+    // Command type is safe, but client address is sensitive 
+    info!("Processing {} request from {} on port {}", 
+          command,                         // "CONNECT", "RESOLVE" - operational context
+          sensitive(client_addr.ip()),     // Hide client IP
+          port                             // Port is often OK to show
+    );
+}
+```
+
+*Based on the SOCKS request logging pattern in [`crates/arti/src/socks.rs:512-514`](../arti/src/socks.rs)*
+
+#### Protecting Sensitive Data in Structs
+```rust
+use safelog::Sensitive;
+use std::net::SocketAddr;
+use std::time::SystemTime;
+
+#[derive(Debug)]  
+struct ConnectionAttempt {
+    pub connection_id: u64,               // Safe - just an identifier
+    pub action: &'static str,             // Safe - "connecting", "authenticating"
+    pub target_addr: Sensitive<SocketAddr>, // Hidden - destination is sensitive
+    pub bridge_addr: Sensitive<SocketAddr>, // Hidden - bridge location is sensitive
+    pub attempt_time: SystemTime,         // Safe - just a timestamp
+}
+
+// When logged, only connection_id, action, and attempt_time will be visible
+```
+
+*Based on error struct patterns with sensitive fields in [`crates/arti-client/src/err.rs:182`](../arti-client/src/err.rs) and [`crates/tor-chanmgr/src/err.rs:60,75`](../tor-chanmgr/src/err.rs)*
+
+#### Safe Error Reporting  
+```rust
+use safelog::sensitive;
+
+fn connection_failed(action: &str, client_addr: SocketAddr, error: std::io::Error) {
+    // Include operational context while protecting user identity
+    tracing::error!(
+        "Connection failed during {} from {}: {}", 
+        action,                     // "handshake", "data_transfer" - operational context
+        sensitive(client_addr),     // Hide client address
+        error                       // Error details are usually safe to log
+    );
+}
+```
+
+*Based on the connection error handling pattern in [`examples/axum/axum-hello-world/src/main.rs:65`](../../examples/axum/axum-hello-world/src/main.rs)*
+
 ### An example deployment
 
 This crate was originally created for use in the `arti` project, which tries
