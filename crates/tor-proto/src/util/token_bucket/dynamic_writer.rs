@@ -4,7 +4,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::io::Error;
-use futures::{AsyncWrite, Stream};
+use futures::stream::FusedStream;
+use futures::AsyncWrite;
 use tor_rtcompat::SleepProvider;
 
 use super::writer::{RateLimitedWriter, RateLimitedWriterConfig};
@@ -47,7 +48,7 @@ where
 impl<W, S, P> AsyncWrite for DynamicRateLimitedWriter<W, S, P>
 where
     W: AsyncWrite,
-    S: Stream<Item = RateLimitedWriterConfig>,
+    S: FusedStream<Item = RateLimitedWriterConfig>,
     P: SleepProvider,
 {
     fn poll_write(
@@ -63,6 +64,9 @@ where
         // shouldn't receive any more updates. The latter indicates that there aren't currently more
         // to read, and that we've registered the waker with the stream so that we'll wake when the
         // rate limit is later updated.
+        //
+        // Since `S` is a `FusedStream`, it's fine to call `poll_next()` even if `Ready(None)` was
+        // returned in the past.
         let mut iters = 0;
         while let Poll::Ready(Some(config)) = self_.updates.as_mut().poll_next(cx) {
             // update the writer's configuration
@@ -109,7 +113,7 @@ mod tokio_impl {
     impl<W, S, P> TokioAsyncWrite for DynamicRateLimitedWriter<W, S, P>
     where
         W: AsyncWrite,
-        S: Stream<Item = RateLimitedWriterConfig>,
+        S: FusedStream<Item = RateLimitedWriterConfig>,
         P: SleepProvider,
     {
         fn poll_write(
