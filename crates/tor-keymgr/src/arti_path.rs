@@ -7,7 +7,9 @@ use derive_more::{Deref, Display, Into};
 use serde::{Deserialize, Serialize};
 use tor_persist::slug::{self, BadSlug};
 
-use crate::{ArtiPathRange, ArtiPathSyntaxError, KeySpecifierComponent};
+#[cfg(feature = "experimental-api")]
+use crate::KeySpecifierComponent;
+use crate::{ArtiPathRange, ArtiPathSyntaxError};
 
 // TODO: this is only used for ArtiPaths (we should consider turning this
 // intro a regular impl ArtiPath {} and removing the macro).
@@ -161,7 +163,7 @@ impl ArtiPath {
     /// (the denotators are encoded as described in the [`ArtiPath`] docs).
     ///
     /// Returns an error if any of the specified denotators are not valid `Slug`s.
-    //
+    ///
     /// ### Example
     /// ```nocompile
     /// # // `nocompile` because this function is not pub
@@ -196,6 +198,9 @@ impl ArtiPath {
     /// #
     /// # demo().unwrap();
     /// ```
+    // This is behind the "experimental-api" feature flag since it is (at the time of writing) only
+    // used by "experimental-api" code paths.
+    #[cfg(feature = "experimental-api")]
     pub(crate) fn from_path_and_denotators(
         path: ArtiPath,
         cert_denotators: &[&dyn KeySpecifierComponent],
