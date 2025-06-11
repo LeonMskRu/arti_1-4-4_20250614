@@ -61,16 +61,19 @@ with_safe_logging_suppressed(|| log_encrypted_data(big_secret));
 ```rust
 use safelog::{Sensitive, sensitive};
 use std::net::SocketAddr;
-use tracing::info;
 
 fn handle_socks_request(command: &str, client_addr: SocketAddr, port: u16) {
     // Command type is safe, but client address is sensitive 
-    info!("Processing {} request from {} on port {}", 
+    println!("Processing {} request from {} on port {}", 
           command,                         // "CONNECT", "RESOLVE" - operational context
-          sensitive(client_addr.ip()),     // Hide client IP
+          sensitive(client_addr.ip()),     // Hide client IP - shows as [scrubbed]
           port                             // Port is often OK to show
     );
 }
+
+// Example usage:
+# let addr: SocketAddr = "192.168.1.100:8080".parse().unwrap();
+# handle_socks_request("CONNECT", addr, 443);
 ```
 
 *Based on the SOCKS request logging pattern in [`crates/arti/src/socks.rs:512-514`](../arti/src/socks.rs)*
@@ -98,16 +101,22 @@ struct ConnectionAttempt {
 #### Safe Error Reporting  
 ```rust
 use safelog::sensitive;
+use std::net::SocketAddr;
 
 fn connection_failed(action: &str, client_addr: SocketAddr, error: std::io::Error) {
     // Include operational context while protecting user identity
-    tracing::error!(
+    eprintln!(
         "Connection failed during {} from {}: {}", 
         action,                     // "handshake", "data_transfer" - operational context
-        sensitive(client_addr),     // Hide client address
+        sensitive(client_addr),     // Hide client address - shows as [scrubbed]
         error                       // Error details are usually safe to log
     );
 }
+
+// Example usage:
+# let addr: SocketAddr = "10.0.0.1:9150".parse().unwrap();
+# let error = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection refused");
+# connection_failed("handshake", addr, error);
 ```
 
 *Based on the connection error handling pattern in [`examples/axum/axum-hello-world/src/main.rs:65`](../../examples/axum/axum-hello-world/src/main.rs)*
