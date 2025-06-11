@@ -63,11 +63,11 @@ domain specific to impose any restrictions on them.
 A *document table* *MUST* the following columns:
 * `rowid`
 	* Serves as the primary key
-* `content_sha256`
-	* Uniquely identifies and addresses the data by `content`
 * `content`
 	* The actual raw content of the document
 	* *MUST* be valid UTF-8 under all circumstandes
+* `content_sha256`
+	* Uniquely identifies and addresses the data by `content`
 
 Besides, every document table *MUST* have an index on `content_sha256` as well
 as any other key by which clients may query it. (Such as the fingerprint for
@@ -79,44 +79,43 @@ We'll adjust those after we see the query code and the resulting query plans.
 
 The actual SQL schema is outlined below:
 ```sql
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode=WAL;
+
 -- Stores consensuses.
 --
--- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>.z
--- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
--- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>.z
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>
 CREATE TABLE consensus(
 	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
-	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL,
-	content_sha3_256	TEXT NOT NULL UNIQUE,
+	content_sha256		TEXT NOT NULL UNIQUE,
+	unsigned_sha3_256	TEXT NOT NULL UNIQUE,
 	flavor				TEXT NOT NULL,
-	valid_after			INTEGER NOT NULL, -- Unix timestamp of `valid-after`.
-	fresh_until			INTEGER NOT NULL, -- Unix timestamp of `fresh-until`.
-	valid_until			INTEGER NOT NULL, -- Unix timestamp of `valid-until`.
+	valid_after			INTEGER NOT NULL,
+	fresh_until			INTEGER NOT NULL,
+	valid_until			INTEGER NOT NULL,
 	CHECK(LENGTH(content_sha256) == 64),
-	CHECK(LENGTH(content_sha3_256) == 64),
+	CHECK(LENGTH(unsigned_sha3_256) == 64),
 	CHECK(flavor IN ('ns', 'md'))
 ) STRICT;
 
 CREATE INDEX idx_consensus ON consensus(
 	content_sha256,
-	content_sha3_256,
+	unsigned_sha3_256,
 	valid_after
 );
 
 -- Stores consensus diffs.
 --
--- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>.z
---
--- TODO: Enforce on DB level that only diffs of the same flavor may be stored
--- within the table, old_consensus_rowid.flavor = new_consensus_rowid.flavor.
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>
 CREATE TABLE consensus_diff(
 	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
-	content_sha256		TEXT NOT NULL UNIQUE,
 	content				TEXT NOT NULL,
+	content_sha256		TEXT NOT NULL UNIQUE,
 	old_consensus_rowid	INTEGER NOT NULL,
 	new_consensus_rowid	INTEGER NOT NULL,
-	last_seen			INTEGER NOT NULL,
 	FOREIGN KEY(old_consensus_rowid) REFERENCES consensus(rowid),
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64)
@@ -126,55 +125,28 @@ CREATE INDEX idx_consensus_diff ON consensus_diff(
 	content_sha256
 );
 
--- Directory authority key certificates.
---
--- This information is derived from the consensus documents.
---
--- http://<hostname>/tor/keys/all.z
--- http://<hostname>/tor/keys/authority.z
--- http://<hostname>/tor/keys/fp/<F>.z
--- http://<hostname>/tor/keys/sk/<F>-<S>.z
-CREATE TABLE authority_key_certificate(
-	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
-	content_sha256			TEXT NOT NULL UNIQUE,
-	content					TEXT NOT NULL,
-	kp_auth_id_rsa_sha1		TEXT NOT NULL,
-	kp_auth_sign_rsa_sha1	TEXT NOT NULL,
-	last_seen				INTEGER NOT NULL,
-	CHECK(LENGTH(content_sha256) == 64),
-	CHECK(LENGTH(kp_auth_id_rsa_sha1) == 40),
-	CHECK(LENGTH(kp_auth_sign_rsa_sha1) == 40)
-) STRICT;
-
-CREATE INDEX idx_authority ON authority_key_certificate(
-	content_sha256,
-	kp_auth_id_rsa_sha1,
-	kp_auth_sign_rsa_sha1
-);
-
 -- Stores the router descriptors.
 --
--- http://<hostname>/tor/server/fp/<F>.z
--- http://<hostname>/tor/server/d/<D>.z
--- http://<hostname>/tor/server/authority.z
--- http://<hostname>/tor/server/all.z
-CREATE TABLE router(
+-- http://<hostname>/tor/server/fp/<F>
+-- http://<hostname>/tor/server/d/<D>
+-- http://<hostname>/tor/server/authority
+-- http://<hostname>/tor/server/all
+CREATE TABLE router_descriptor(
 	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
-	content_sha256			TEXT NOT NULL UNIQUE,
 	content					TEXT NOT NULL,
-	flavor					TEXT NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
-	last_seen				INTEGER NOT NULL,
+	flavor					TEXT NOT NULL,
 	router_extra_info_rowid	INTEGER,
 	FOREIGN KEY(router_extra_info_rowid) REFERENCES router_extra_info(rowid),
 	CHECK(LENGTH(content_sha256) == 64),
-	CHECK(flavor IN ('ns', 'md')),
 	CHECK(LENGTH(content_sha1) == 40),
-	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
+	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40),
+	CHECK(flavor IN ('ns', 'md'))
 ) STRICT;
 
-CREATE INDEX idx_router ON router(
+CREATE INDEX idx_router_descriptor ON router_descriptor(
 	content_sha256,
 	content_sha1,
 	kp_relay_id_rsa_sha1
@@ -182,57 +154,91 @@ CREATE INDEX idx_router ON router(
 
 -- Stores extra-info documents.
 --
--- http://<hostname>/tor/extra/d/<D>.z
--- http://<hostname>/tor/extra/fp/<FP>.z
--- http://<hostname>/tor/extra/all.z
--- http://<hostname>/tor/extra/authority.z
+-- http://<hostname>/tor/extra/d/<D>
+-- http://<hostname>/tor/extra/fp/<FP>
+-- http://<hostname>/tor/extra/all
+-- http://<hostname>/tor/extra/authority
 CREATE TABLE router_extra_info(
 	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
-	content_sha256			TEXT NOT NULL UNIQUE,
 	content					TEXT NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
 	content_sha1			TEXT NOT NULL UNIQUE,
 	kp_relay_id_rsa_sha1	TEXT NOT NULL,
-	last_seen				INTEGER NOT NULL,
 	CHECK(LENGTH(content_sha256) == 64),
 	CHECK(LENGTH(content_sha1) == 40),
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40)
 ) STRICT;
 
-CREATE INDEX idx_router_extra_info ON router_extra_info(
-	content_sha256,
-	content_sha1,
-	kp_relay_id_rsa_sha1
-);
-
--- Helper table to store which authority voted on which consensus.
+-- Directory authority key certificates.
 --
--- Required to implement the consensus retrieval by authority fingerprints.
--- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>.z
-CREATE TABLE consensus_authority_voter(
-	consensus_rowid	INTEGER NOT NULL,
-	authority_rowid	INTEGER NOT NULL,
-	last_seen		INTEGER NOT NULL,
-	PRIMARY KEY(consensus_rowid, authority_rowid),
-	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
-	FOREIGN KEY(authority_rowid) REFERENCES authority_key_certificate(rowid)
+-- This information is derived from the consensus documents.
+--
+-- http://<hostname>/tor/keys/all
+-- http://<hostname>/tor/keys/authority
+-- http://<hostname>/tor/keys/fp/<F>
+-- http://<hostname>/tor/keys/sk/<F>-<S>
+CREATE TABLE authority_key_certificate(
+	rowid					INTEGER PRIMARY KEY AUTOINCREMENT,
+	content					TEXT NOT NULL,
+	content_sha256			TEXT NOT NULL UNIQUE,
+	kp_auth_id_rsa_sha1		TEXT NOT NULL,
+	kp_auth_sign_rsa_sha1	TEXT NOT NULL,
+	dir_key_expires			INTEGER NOT NULL,
+	CHECK(LENGTH(content_sha256) == 64),
+	CHECK(LENGTH(kp_auth_id_rsa_sha1) == 40),
+	CHECK(LENGTH(kp_auth_sign_rsa_sha1) == 40)
+
 ) STRICT;
 
--- Helper table to store compressed documents.
+CREATE INDEX idx_authority_key_certificate ON authority_key_certificate(
+	content_sha256,
+	kp_auth_id_rsa_sha1,
+	kp_auth_sign_rsa_sha1
+);
+
+-- Stores compressed network documents.
+--
+-- Garbage collection works by scanning all `content_sha256` columns in the
+-- relevant tables and then deleting all rows in `compressed_document` whose
+-- `identity_sha256` is not in the set retrieved prior.
 CREATE TABLE compressed_document(
 	rowid				INTEGER PRIMARY KEY AUTOINCREMENT,
 	algorithm			TEXT NOT NULL,
 	identity_sha256		TEXT NOT NULL,
 	compressed_sha256	TEXT NOT NULL,
 	compressed			BLOB NOT NULL,
-	last_seen			INTEGER NOT NULL,
 	CHECK(LENGTH(identity_sha256) == 64),
 	CHECK(LENGTH(compressed_sha256) == 64)
 ) STRICT;
 
 CREATE UNIQUE INDEX idx_compressed_document ON compressed_document(
-	identity_sha256,
 	algorithm,
+	identity_sha256
 );
+
+-- Stores the N:M cardinality of which router descriptors are contained in which
+-- consensuses.
+CREATE TABLE consensus_router_descriptor_member(
+	consensus_rowid			INTEGER,
+	router_descriptor_rowid INTEGER,
+	PRIMARY KEY(consensus_rowid, router_descriptor_rowid),
+	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(router_descriptor_rowid) REFERENCES router_descriptor(rowid)
+) STRICT;
+
+-- Stores which authority key signed which consensuses.
+
+-- Required to implement the consensus retrieval by authority fingerprints as
+-- well as the garbage collection of authority key certificates.
+--
+-- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/<F1>+<F2>+<F3>
+CREATE TABLE consensus_authority_voter(
+	consensus_rowid	INTEGER,
+	authority_rowid	INTEGER,
+	PRIMARY KEY(consensus_rowid, authority_rowid),
+	FOREIGN KEY(consensus_rowid) REFERENCES consensus(rowid),
+	FOREIGN KEY(authority_rowid) REFERENCES authority_key_certificate(rowid)
+) STRICT;
 ```
 
 ## General operations
@@ -325,16 +331,16 @@ let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
 	SELECT content_sha256
 	FROM authority_key_certificate
 	WHERE kp_auth_id_rsa_sha1 = 'HHH'
-	ORDER BY last_seen DESC
+	ORDER BY rowid DESC
 	LIMIT 1;
 	```
 * Obtain a specific router descriptor:
 	```sql
 	SELECT content_sha256
-	FROM router
+	FROM router_descriptor
 	WHERE kp_relay_id_rsa_sha1 = 'HHH'
 	AND flavor = 'ns'
-	ORDER BY last_seen DESC
+	ORDER BY rowid DESC
 	LIMIT 1;
 	```
 * Obtain extra-info:
@@ -345,10 +351,10 @@ let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
 		SELECT router_extra_info_rowid
 		FROM router
 		WHERE kp_relayid_rsa_sha1 = 'HHH'
-		ORDER BY last_seen DESC
+		ORDER BY rowid DESC
 		LIMIT 1
 	)
-	ORDER BY last_seen
+	ORDER BY rowid DESC
 	LIMIT 1;
 	```
 
@@ -361,36 +367,34 @@ a consensus.
 ```sql
 BEGIN TRANSACTION;
 
-DELETE
-FROM consensus_diff
-WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
+-- GC the consensus.
+-- Store the rowids of all consensuses older than seven days.
+SELECT rowid FROM consensus WHERE valid_after <= (UNIXEPOCH() - 604800);
+DELETE FROM consensus_router_descriptor_member WHERE consensus_rowid IN (???);
+DELETE FROM consensus_authority_voter WHERE consensus_rowid IN (???);
+DELETE FROM consensus_diff WHERE old_consensus_rowid IN (???) OR new_consensus_rowid IN (???);
+DELETE FROM consensus WHERE rowid IN (???);
 
-DELETE
-FROM consensus_authority_voter
-WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
+-- GC the router descriptors.
+-- Store the rowids of all router descriptors not listed in a consensus.
+-- TODO: We need an additional column when we are going to add dirauth stuff.
+SELECT rowid FROM router_descriptor WHERE rowid NOT IN (
+	SELECT router_descriptor_rowid FROM consensus_router_descriptor_member
+);
+DELETE FROM router_descriptor WHERE rowid IN (???);
 
-DELETE FROM
-consensus_authority_voter
-INNER JOIN consensus AS cons ON consensus_rowid = cons.rowid
-INNER JOIN authority_key_certificate AS auth ON authority_rowid = auth.rowid
-WHERE auth.last_seen <= unixepoch() - (60 * 60 * 24 * 7)
-OR cons.last_seen <= unixepoch() - (60 * 60 * 24 * 7);
+-- GC the extra info documents.
+DELETE FROM router_extra_info WHERE rowid NOT IN (
+	SELECT router_extra_info FROM router_descriptor
+);
 
-DELETE
-FROM consensus
-WHERE valid_after <= unixepoch() - (60 * 60 * 24 * 7);
+-- GC the authority_key_certificates.
+DELETE FROM authority_key_certificate WHERE dir_key_expires <= UNIXEPOCH();
 
-DELETE
-FROM authority_key_certificate
-WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
-
-DELETE
-FROM router
-WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
-
-DELETE
-FROM compressed_documents
-WHERE last_seen <= unixepoch() - (60 * 60 * 24 * 7);
+-- GC the compressed documents.
+DELETE FROM compressed_document WHERE identity_sha256 NOT IN (
+	SELECT content_sha256 FROM consensus UNION SELECT content_sha256 FROM consensus_diff
+);
 
 END TRANSACTION;
 ```
@@ -418,3 +422,155 @@ The current plan is to use warp as the HTTP backend.
 ## SQL backend
 
 The current plan is to use SQLx as the SQL backend.
+
+## Appendix - Memory usage and DoS; the case against mmap
+
+A dircache is very exposed and must be as resistant to DoS as we can
+make it.  We here analyse the memory usage and access patterns of the
+planned design.  We consider the alternative of using mmap to
+explicitly map persistent disk files containing the network documents.
+
+### Terminology and concepts
+
+* **in-memory cache**: The in memory `HashMap` indexed by document
+  SHA256, as proposed above.
+
+* **page cache**: The operating system's use of actual RAM as backing
+  for process memory pages (ie, memory from malloc etc.), file data
+  (whether accessed by `read`/`write` or `mmap`), etc.
+  Most modern operating systems have one page cache, unifying the
+  filesystem buffer cache with memory allocated by programs.
+
+* **working set**: The data that a program accesses during
+  operation, as opposed to data which is technically mapped or
+  available, but in practice not frequnetly used.  The working set
+  can include parts of disk files; conversely, not all allocated
+  pages are part of the working set.
+
+* **malloc**: We speak (rather loosely) of malloc when we mean
+  process memory allocated from the OS or language general purpose
+  allocator, including Rust's global allocator.  The memory obtained
+  this way itself mmap'd.  (On Linux, but it has has similar
+  performance characteristics on other systems.)
+
+* **explicit mmap*: alternative designs (eg as found in tor-dirmgr)
+  where document data (including expensively-compressed documents and
+  diffs) is stored in persistent disk files, and queries are served
+  by explicitly mmapping those files.
+
+* **superpage**: page table entry, and therefore TLB entry, which
+  covers a large (typically Mb rather than Kb) amount of virtual
+  address space and a large amount of physical memory.  Modern
+  systems use these when possible, because they reduce TLB misses.
+
+* **TLB**: Translation Lookaside Buffer.  The cache of
+  virtual-to-physical mappings maintained by the virtual memory
+  system.  A TLB miss is typically expensive.
+
+### Memory usage - in-memory cache size
+
+In a worst case scenario, a combination of clients could force us to
+populate the in-memory cache with every router descriptor, consensus
+and extra-info document we are willing so serve.
+
+In more detail:
+
+* The total size of a current consensus plus all of its routerdescs and
+  extra-infos is around 100Mbytes.
+
+* We must also maintain old router documents for a period of time,
+  along with old consensuses.  The total proportion of churn is
+  considerably smaller than the whole consensus.
+
+* We must also store the micordesc flavour documents.
+  Again, these are smaller.
+
+* We will store consensus document diffs between various versions,
+  and compressed versions of these, but even a whole full consensus
+  is only a few Mb so this is not very significant.  (We do not store
+  compressed routerdescs or extra-infos.)
+
+We don't expect the overall size of all these documents to exceed
+200Mby (scaling with the Tor network size).  This seems reasonable.
+
+### Working set, the buffer/page cache, and mmap
+
+If the total size of documents we might be serving exceeds the
+server's available actual RAM, then the operating system will need to
+page out some of our data, so that it later has to be re-read from
+slow storage (hopefully SSD).  This is not desirable, but it is
+inevitable, no matter the storage and data access approach.
+
+It would be possible to use mmap explicitly, instead of sqlite queries
+which copy the data.
+
+That would reduce the amount of memory we obtain from malloc.  But it
+has a limited effect on the program's working set: with mmap, the
+operating system still needs to load the data into memory to be able
+to transmit it, and if it doesn't all fit, it will need to repeatedly
+read it from the disk into the buffer/page cache, as it serves each
+request.
+
+The main benefit of explicit mmap files would be to reduces the number
+of copies of the document data.  The current design drops a document
+from the in-memory cache as soon as no request is streaming it out any
+more.
+
+So documents are frequently copied out of the database (ie, in
+practice, from the page cache) into the in-memory cache (another set
+of pages in the page cache), possibly once on every request.
+
+This means the effective working set of the program is doubled: one
+copy for the database's pages, and one copy from malloc.
+
+### Working set and copy reduction - cache entry lifetime extension
+
+We could extend the lifetime of entries in the in-memory cache, using
+time-based expiry based on something near the lifetime of a consensus.
+
+With such a design, steady state operation does not involve
+significant amounts of copying of document text out of the db.
+
+The working set would be the in-memory cache plus the pages for the
+database *indexes* only, so about half of the current design.
+
+We will implement this if experience shows that it's necessary.
+
+#### Comparison with explicit mmap
+
+This extension to the current design would offer performance
+characteristics very similar to those of explicitly mmap.
+
+The main difference is the effects of a restart: explicit mmap would
+avoids the need for (on-demand) population of the in-memory cache.  So
+its performance after restart would be better, until it reaches steady
+state, and it would impose less wear on the system's storage.
+
+Another performance-relevant difference is that mmaping many
+persistent files corresponding to network documents would fragment the
+process memory map.  There would be less use of superpages and greater
+TLB pressure.  Performance in the steady state might be worse than the
+current design with cache entry lifetime extension.
+
+We do not consider the possible benefits to warrant the considerable
+additional complexity needed to manage outside-database persistent
+files, that we explicitly mmap.
+
+### Implicit mmap by sqlite
+
+sqlite3 is [capable of mmapping its database file](https://www.sqlite.org/mmap.html).
+Using this feature might improve performance.
+
+A possible downside is that we need to be using a pool of sqlite3
+connections since a sqlite3 connection is not threadsafe, and each
+connection would need its own mmap region.  Tuning this seems not
+entirely obvious.
+
+We might consider this as part of future perf work.
+
+But note that this question is entirely separate from alternative
+dircache designs using explicit mmap.  Even if sqlite is using mmap
+internally, it does not expose its mmapped data to the calling
+application.  That would be difficult for sqlite to expose, because
+interactions with SQL concurrent transactions would require complex
+and error-prone map invalidation and/or garbage collection.
