@@ -24,8 +24,8 @@ variables:
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   RECENT_RUST_IMAGE: "${DOCKER_REGISTRY_URL}/amd64/rust:1.86.0-bookworm"
   # Pinned chutney version.
-  # Last updated 2025-05-29
-  CHUTNEY_COMMIT: "81644208aa7367857693a60addee3e792a6c9625"
+  # main @ 2025-06-12
+  CHUTNEY_COMMIT: "c8366e6ccc62dcc475f8f1f1b84f109d99b01251"
 
 default:
   image:
@@ -541,6 +541,10 @@ integration-chutney:
     - python3 -m pip install
         git+https://gitlab.torproject.org/tpo/core/chutney.git@"$CHUTNEY_COMMIT"
 
+    # Use the "arti-extra" bin for HS support
+    # XXX we should test the "vanilla" chutney too.
+    - export CHUTNEY_BIN=./target/x86_64-unknown-linux-gnu/debug/arti-extra
+
     - tests/chutney/integration-e2e
   artifacts:
     paths:
@@ -585,6 +589,10 @@ integration-chutney-shadow:
     # Set up shadow, built in build-shadow
     - maint/common/apt-install libglib2.0-0
     - stow -d opt -t $HOME/.local shadow
+
+    # Use the "arti-extra" bin for HS support
+    # XXX we should test the "vanilla" chutney too.
+    - export CHUTNEY_BIN=./target/x86_64-unknown-linux-gnu/debug/arti-extra
 
     - tests/chutney/integration-e2e-shadow
   artifacts:

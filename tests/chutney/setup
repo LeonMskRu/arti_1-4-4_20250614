@@ -100,5 +100,9 @@ echo "export CHUTNEY_ARTI=\"$CHUTNEY_ARTI\"" >> tests/chutney/arti.run
 
 "${CHUTNEY_BIN}" configure "$target"
 "${CHUTNEY_BIN}" start "$target"
-CHUTNEY_START_TIME=180 "${CHUTNEY_BIN}" wait_for_bootstrap "$target"
+CHUTNEY_START_TIME=300 "${CHUTNEY_BIN}" wait_for_bootstrap "$target"
+
+# Tell "chutney verify" to test connection to hidden services with every client
+export CHUTNEY_HS_MULTI_CLIENT=1
+
 "${CHUTNEY_BIN}" verify "$target"
