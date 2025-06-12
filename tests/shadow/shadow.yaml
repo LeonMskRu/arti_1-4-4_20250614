@@ -84,7 +84,7 @@ hosts:
       - -p=0
       - -d=0
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -112,7 +112,7 @@ hosts:
       - -p=0
       - -d=0
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -141,7 +141,7 @@ hosts:
       - -p=0
       - -d=0
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -171,7 +171,7 @@ hosts:
       - -p=0
       - -d=0
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -276,7 +276,7 @@ hosts:
       - -c=./arti.d/arti.common.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l debug,tor_proto=trace
+      - -l debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -300,7 +300,7 @@ hosts:
       - -c=./arti.d/arti.extra.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -327,7 +327,7 @@ hosts:
       - -c=./arti.d/arti.bridge.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -355,7 +355,7 @@ hosts:
       - -c=./arti.d/arti.obfs4-client.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -377,7 +377,7 @@ hosts:
       - -c=./arti.d/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l debug,tor_proto=trace
+      - -l debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -399,7 +399,7 @@ hosts:
       - -c=./arti.d/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l debug,tor_proto=trace
+      - -l debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -421,7 +421,7 @@ hosts:
       - -c=./arti.d/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l debug,tor_proto=trace
+      - -l debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -451,7 +451,7 @@ hosts:
       - -c=./arti.d/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -482,7 +482,7 @@ hosts:
       - -c=./arti.d/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -505,7 +505,7 @@ hosts:
       - -c=./arti.d/arti.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
@@ -529,7 +529,7 @@ hosts:
       - -c=./arti.d/arti-auth-ctor.onion.toml
       - -o=proxy.socks_listen="127.0.0.1:9000"
       - --disable-fs-permission-checks
-      - -l=debug,tor_proto=trace
+      - -l=debug
       environment:
         RUST_BACKTRACE: "1"
         HOME: ./home
