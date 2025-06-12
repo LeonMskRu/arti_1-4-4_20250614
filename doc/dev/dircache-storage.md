@@ -73,14 +73,17 @@ Besides, every document table *MUST* have an index on `content_sha256` as well
 as any other key by which clients may query it. (Such as the fingerprint for
 router descriptors).
 
-Below, we suggest various `CREATE INDEX` to help with queries.
-The precise set of indices we will create is not yet finalised.
-We'll adjust those after we see the query code and the resulting query plans.
+All hash values are stored in upper-case hexadecimal.
 
 The actual SQL schema is outlined below:
 ```sql
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode=WAL;
+
+-- Meta table to store the current schema version.
+CREATE TABLE arti_dircache_schema_version(
+	version	TEXT NOT NULL -- currently, always `1`
+) STRICT;
 
 -- Stores consensuses.
 --
@@ -101,12 +104,6 @@ CREATE TABLE consensus(
 	CHECK(flavor IN ('ns', 'md'))
 ) STRICT;
 
-CREATE INDEX idx_consensus ON consensus(
-	content_sha256,
-	unsigned_sha3_256,
-	valid_after
-);
-
 -- Stores consensus diffs.
 --
 -- http://<hostname>/tor/status-vote/current/consensus-<FLAVOR>/diff/<HASH>/<FPRLIST>
@@ -120,10 +117,6 @@ CREATE TABLE consensus_diff(
 	FOREIGN KEY(new_consensus_rowid) REFERENCES consensus(rowid),
 	CHECK(LENGTH(content_sha256) == 64)
 ) STRICT;
-
-CREATE INDEX idx_consensus_diff ON consensus_diff(
-	content_sha256
-);
 
 -- Stores the router descriptors.
 --
@@ -145,12 +138,6 @@ CREATE TABLE router_descriptor(
 	CHECK(LENGTH(kp_relay_id_rsa_sha1) == 40),
 	CHECK(flavor IN ('ns', 'md'))
 ) STRICT;
-
-CREATE INDEX idx_router_descriptor ON router_descriptor(
-	content_sha256,
-	content_sha1,
-	kp_relay_id_rsa_sha1
-);
 
 -- Stores extra-info documents.
 --
@@ -190,12 +177,6 @@ CREATE TABLE authority_key_certificate(
 
 ) STRICT;
 
-CREATE INDEX idx_authority_key_certificate ON authority_key_certificate(
-	content_sha256,
-	kp_auth_id_rsa_sha1,
-	kp_auth_sign_rsa_sha1
-);
-
 -- Stores compressed network documents.
 --
 -- Garbage collection works by scanning all `content_sha256` columns in the
@@ -208,13 +189,9 @@ CREATE TABLE compressed_document(
 	compressed_sha256	TEXT NOT NULL,
 	compressed			BLOB NOT NULL,
 	CHECK(LENGTH(identity_sha256) == 64),
-	CHECK(LENGTH(compressed_sha256) == 64)
+	CHECK(LENGTH(compressed_sha256) == 64),
+	UNIQUE(algorithm, identity_sha256)
 ) STRICT;
-
-CREATE UNIQUE INDEX idx_compressed_document ON compressed_document(
-	algorithm,
-	identity_sha256
-);
 
 -- Stores the N:M cardinality of which router descriptors are contained in which
 -- consensuses.
@@ -331,16 +308,20 @@ let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
 	SELECT content_sha256
 	FROM authority_key_certificate
 	WHERE kp_auth_id_rsa_sha1 = 'HHH'
-	ORDER BY rowid DESC
+	ORDER BY dir_key_expires DESC
 	LIMIT 1;
 	```
-* Obtain a specific router descriptor:
+* Obtain a specific router's descriptor:
 	```sql
 	SELECT content_sha256
-	FROM router_descriptor
-	WHERE kp_relay_id_rsa_sha1 = 'HHH'
-	AND flavor = 'ns'
-	ORDER BY rowid DESC
+	FROM router_descriptor AS rd
+	INNER JOIN consensus_router_descriptor_member AS crdm
+	ON rd.rowid = crdm.router_descriptor_rowid
+	INNER JOIN consensus AS c
+	ON crdm.consensus_rowid = c.rowid
+	WHERE rd.kp_relay_id_rsa_sha1 = 'HHH'
+	AND rd.flavor = 'ns'
+	ORDER BY c.valid_after DESC
 	LIMIT 1;
 	```
 * Obtain extra-info:
@@ -348,14 +329,17 @@ let content = if let Some(content) = cache.read().get(sha256).map(Arc::clone) {
 	SELECT content_sha256
 	FROM router_extra_info
 	WHERE rowid = (
-		SELECT router_extra_info_rowid
-		FROM router
-		WHERE kp_relayid_rsa_sha1 = 'HHH'
-		ORDER BY rowid DESC
-		LIMIT 1
-	)
-	ORDER BY rowid DESC
-	LIMIT 1;
+		SELECT content_sha256
+		FROM router_descriptor AS rd
+		INNER JOIN consensus_router_descriptor_member AS crdm
+		ON rd.rowid = crdm.router_descriptor_rowid
+		INNER JOIN consensus AS c
+		ON crdm.consensus_rowid = c.rowid
+		WHERE rd.kp_relay_id_rsa_sha1 = 'HHH'
+		AND rd.flavor = 'ns'
+		ORDER BY c.valid_after DESC
+		LIMIT 1;
+	);
 	```
 
 ### Garbage Collection
@@ -396,7 +380,7 @@ DELETE FROM compressed_document WHERE identity_sha256 NOT IN (
 	SELECT content_sha256 FROM consensus UNION SELECT content_sha256 FROM consensus_diff
 );
 
-END TRANSACTION;
+COMMIT;
 ```
 
 ## Cleaning the cache
