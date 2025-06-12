@@ -24,8 +24,8 @@ variables:
   # Using "amd64/" single-arch variant to work around https://gitlab.torproject.org/tpo/tpa/team/-/issues/41621.
   RECENT_RUST_IMAGE: "${DOCKER_REGISTRY_URL}/amd64/rust:1.86.0-bookworm"
   # Pinned chutney version.
-  # Last updated 2025-05-29
-  CHUTNEY_COMMIT: "81644208aa7367857693a60addee3e792a6c9625"
+  # Last updated 2025-06-11
+  CHUTNEY_COMMIT: "ffb3ca2f0f2ff419cca422f1876c9427ad311588"
 
 default:
   image:
