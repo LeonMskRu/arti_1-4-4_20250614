@@ -18,4 +18,9 @@ ConfigureNodes(
     + Node(tag="br", bridge=1, relay=1).getN(1)
     # arti bridge client
     + Node(tag="bc", client=1, backend=NodeBackend.ARTI, bridgeclient=1).getN(1)
+
+    # arti hs
+    + Node(tag="ha", client=1, hs=1, backend=NodeBackend.ARTI).getN(1)
+    # tor hs
+    + Node(tag="ht", client=1, hs=1, backend=NodeBackend.TOR).getN(1)
 )
