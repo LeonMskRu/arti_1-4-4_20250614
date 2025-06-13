@@ -1552,6 +1552,7 @@ mod test {
     #[allow(deprecated)] // TODO #1885
     use tor_rtmock::MockSleepRuntime;
 
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static FALLBACKS_EMPTY: Lazy<FallbackList> = Lazy::new(|| [].into());
 
     fn di() -> DirInfo<'static> {

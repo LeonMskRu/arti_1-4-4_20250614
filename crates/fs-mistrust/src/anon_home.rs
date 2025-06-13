@@ -14,6 +14,8 @@ use std::{
 use once_cell::sync::Lazy;
 
 /// Cached value of our observed home directory.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static HOMEDIRS: Lazy<Vec<PathBuf>> = Lazy::new(default_homedirs);
 
 /// Return a list of home directories in official and canonical forms.

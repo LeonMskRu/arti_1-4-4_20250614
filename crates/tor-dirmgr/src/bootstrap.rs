@@ -296,6 +296,8 @@ async fn fetch_single<R: Runtime>(
 ///
 /// Note that only one test uses this: otherwise there would be a race
 /// condition. :p
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 #[cfg(test)]
 static CANNED_RESPONSE: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(vec![]));
 

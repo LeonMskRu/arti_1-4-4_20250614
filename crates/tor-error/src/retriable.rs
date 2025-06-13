@@ -197,6 +197,7 @@ impl RetryTime {
         I: Iterator<Item = RetryTime>,
         F: FnOnce() -> Duration,
     {
+        // TODO MSRV 1.80: Replace with LazyCell (#1996)
         let chosen_delay =
             once_cell::unsync::Lazy::new(|| AbsRetryTime::from_sum(now, choose_delay()));
 

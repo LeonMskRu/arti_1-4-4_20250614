@@ -90,6 +90,8 @@ fn get_program_dir() -> Result<PathBuf, CfgPathError> {
 /// A `ProjectDirs` object for Arti relays.
 fn project_dirs() -> Result<&'static ProjectDirs, CfgPathError> {
     /// lazy cell holding the ProjectDirs object.
+    //
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static PROJECT_DIRS: Lazy<Option<ProjectDirs>> =
         Lazy::new(|| ProjectDirs::from("org", "torproject", "Arti-Relay"));
 

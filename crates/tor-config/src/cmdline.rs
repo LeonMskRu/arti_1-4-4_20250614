@@ -108,6 +108,8 @@ impl figment::Provider for CmdLine {
 /// pretty happy to convert strings to other stuff.
 fn tweak_toml_bareword(s: &str) -> Option<String> {
     /// Regex to match a keyword=bareword item.
+    //
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(
             r#"(?x:

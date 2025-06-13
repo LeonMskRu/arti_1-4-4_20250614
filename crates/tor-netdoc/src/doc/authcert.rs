@@ -46,6 +46,8 @@ decl_keyword! {
 
 /// Rules about entries that must appear in an AuthCert, and how they must
 /// be formed.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static AUTHCERT_RULES: Lazy<SectionRules<AuthCertKwd>> = Lazy::new(|| {
     use AuthCertKwd::*;
 

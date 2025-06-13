@@ -40,6 +40,8 @@ pub struct RendRequest {
     ///
     /// TODO: This also contains `raw`, which is maybe not so great; it would be
     /// neat to implement more efficiently.
+    //
+    // TODO MSRV TBD: Replace with std OnceCell (#1996)
     expanded: once_cell::unsync::OnceCell<rend_handshake::IntroRequest>,
 }
 

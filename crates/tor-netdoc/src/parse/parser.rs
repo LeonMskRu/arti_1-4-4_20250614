@@ -327,6 +327,8 @@ mod test {
     use once_cell::sync::Lazy;
 
     /// Rules for parsing a set of router annotations.
+    //
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static FRUIT_SALAD: Lazy<SectionRules<Fruit>> = Lazy::new(|| {
         use Fruit::*;
         let mut rules = SectionRules::builder();

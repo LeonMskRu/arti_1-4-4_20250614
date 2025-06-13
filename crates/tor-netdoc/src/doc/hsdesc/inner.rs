@@ -63,6 +63,8 @@ decl_keyword! {
 
 /// Rules about how keywords appear in the header part of an onion service
 /// descriptor.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static HS_INNER_HEADER_RULES: Lazy<SectionRules<HsInnerKwd>> = Lazy::new(|| {
     use HsInnerKwd::*;
 
@@ -78,6 +80,8 @@ static HS_INNER_HEADER_RULES: Lazy<SectionRules<HsInnerKwd>> = Lazy::new(|| {
 
 /// Rules about how keywords appear in each introduction-point section of an
 /// onion service descriptor.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static HS_INNER_INTRO_RULES: Lazy<SectionRules<HsInnerKwd>> = Lazy::new(|| {
     use HsInnerKwd::*;
 

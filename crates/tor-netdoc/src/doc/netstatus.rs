@@ -865,6 +865,8 @@ decl_keyword! {
 }
 
 /// Shared parts of rules for all kinds of netstatus headers
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_HEADER_RULES_COMMON_: Lazy<SectionRulesBuilder<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = SectionRules::builder();
@@ -885,6 +887,8 @@ static NS_HEADER_RULES_COMMON_: Lazy<SectionRulesBuilder<NetstatusKwd>> = Lazy::
     rules
 });
 /// Rules for parsing the header of a consensus.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_HEADER_RULES_CONSENSUS: Lazy<SectionRules<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = NS_HEADER_RULES_COMMON_.clone();
@@ -924,6 +928,8 @@ static NS_VOTERINFO_RULES_VOTE: SectionRules<NetstatusKwd> = {
 };
  */
 /// Rules for parsing a single voter's information in a consensus
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_VOTERINFO_RULES_CONSENSUS: Lazy<SectionRules<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = SectionRules::builder();
@@ -934,6 +940,8 @@ static NS_VOTERINFO_RULES_CONSENSUS: Lazy<SectionRules<NetstatusKwd>> = Lazy::ne
     rules.build()
 });
 /// Shared rules for parsing a single routerstatus
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_ROUTERSTATUS_RULES_COMMON_: Lazy<SectionRulesBuilder<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = SectionRules::builder();
@@ -948,6 +956,8 @@ static NS_ROUTERSTATUS_RULES_COMMON_: Lazy<SectionRulesBuilder<NetstatusKwd>> = 
 });
 
 /// Rules for parsing a single routerstatus in an NS consensus
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_ROUTERSTATUS_RULES_NSCON: Lazy<SectionRules<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = NS_ROUTERSTATUS_RULES_COMMON_.clone();
@@ -967,6 +977,8 @@ static NS_ROUTERSTATUS_RULES_VOTE: SectionRules<NetstatusKwd> = {
     };
 */
 /// Rules for parsing a single routerstatus in a microdesc consensus
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_ROUTERSTATUS_RULES_MDCON: Lazy<SectionRules<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = NS_ROUTERSTATUS_RULES_COMMON_.clone();
@@ -975,6 +987,8 @@ static NS_ROUTERSTATUS_RULES_MDCON: Lazy<SectionRules<NetstatusKwd>> = Lazy::new
     rules.build()
 });
 /// Rules for parsing consensus fields from a footer.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static NS_FOOTER_RULES: Lazy<SectionRules<NetstatusKwd>> = Lazy::new(|| {
     use NetstatusKwd::*;
     let mut rules = SectionRules::builder();

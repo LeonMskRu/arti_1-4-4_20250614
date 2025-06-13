@@ -174,6 +174,8 @@ mod backup {
     type BackupRng = ReseedingRng<ChaCha20Core, Box<dyn RngCore + Send>>;
 
     /// Static instance of our BackupRng; None if we failed to construct one.
+    //
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     static JITTER_BACKUP: Lazy<Option<Mutex<BackupRng>>> = Lazy::new(new_backup_rng);
 
     /// Construct a new instance of our backup Rng;

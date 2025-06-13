@@ -177,6 +177,8 @@ decl_keyword! {
 
 /// Rules about how keywords appear in the middle document of an onion service
 /// descriptor.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static HS_MIDDLE_RULES: Lazy<SectionRules<HsMiddleKwd>> = Lazy::new(|| {
     use HsMiddleKwd::*;
 

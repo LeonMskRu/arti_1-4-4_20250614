@@ -117,6 +117,8 @@ decl_keyword! {
 
 /// Rules about how keywords appear in the outer document of an onion service
 /// descriptor.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static HS_OUTER_RULES: Lazy<SectionRules<HsOuterKwd>> = Lazy::new(|| {
     use HsOuterKwd::*;
 

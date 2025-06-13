@@ -16,6 +16,8 @@ use crate::config::default_config_paths;
 /// A cached copy of the default config paths.
 ///
 /// We cache the values to ensure they are consistent between the help text and the values used.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 static DEFAULT_CONFIG_PATHS: Lazy<Result<Vec<PathBuf>, CfgPathError>> =
     Lazy::new(default_config_paths);
 

@@ -86,6 +86,7 @@ pub mod macro_prelude {
         ratelim::{rt::rt_support, RateLim},
         Activity, Loggable,
     };
+    // TODO MSRV 1.80: Replace with LazyLock (#1996)
     pub use once_cell::sync::Lazy;
     pub use std::sync::{Arc, Mutex, Weak};
     pub use tor_error::ErrorReport;

@@ -177,6 +177,8 @@ impl CastTable {
 ///
 /// Because this table doesn't support any casting, it is okay to use it with
 /// any concrete type.
+//
+// TODO MSRV 1.80: Replace with LazyLock (#1996)
 pub(super) static EMPTY_CAST_TABLE: Lazy<CastTable> = Lazy::new(|| CastTable {
     table: HashMap::new(),
 });
