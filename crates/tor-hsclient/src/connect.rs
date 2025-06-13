@@ -193,7 +193,7 @@ struct Context<'c, R: Runtime, M: MocksForConnect<R>> {
     /// Secret keys to use
     secret_keys: HsClientSecretKeys,
     /// HS ID
-    hsid: HsId,
+    hsid: Sensitive<HsId>,
     /// Blinded HS ID
     hs_blind_id: HsBlindId,
     /// The subcredential to use during this time period
@@ -380,7 +380,7 @@ impl<'c, R: Runtime, M: MocksForConnect<R>> Context<'c, R, M> {
         Ok(Context {
             netdir,
             config,
-            hsid,
+            hsid: hsid.into(),
             hs_blind_id,
             subcredential,
             circpool,
@@ -1670,7 +1670,7 @@ mod test {
         let mglobal = Arc::new(Mutex::new(MocksGlobal::default()));
         let mocks = Mocks { mglobal, id: () };
         // From C Tor src/test/test_hs_common.c test_build_address
-        let hsid = test_data::TEST_HSID_2.into();
+        let hsid: HsId = test_data::TEST_HSID_2.into();
         let mut data = Data::default();
 
         let pk: HsClientDescEncKey = curve25519::PublicKey::from(test_data::TEST_PUBKEY_2).into();
