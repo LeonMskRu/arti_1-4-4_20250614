@@ -114,10 +114,7 @@ impl<T: Keyword> TokenFmt<T> {
 /// // There must be exactly one "ROUTER" entry, with 5 or more arguments.
 /// section_rules.add(D.rule().required().args(5..));
 /// ```
-///
-/// TODO: I'd rather have this be pub(crate), but I haven't figured out
-/// how to make that work.  There are complicated cascading side-effects.
-pub struct TokenFmtBuilder<T: Keyword>(TokenFmt<T>);
+pub(crate) struct TokenFmtBuilder<T: Keyword>(TokenFmt<T>);
 
 impl<T: Keyword> From<TokenFmtBuilder<T>> for TokenFmt<T> {
     fn from(builder: TokenFmtBuilder<T>) -> Self {
