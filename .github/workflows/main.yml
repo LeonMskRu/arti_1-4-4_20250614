@@ -1,0 +1,49 @@
+name: rust-msvc
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: Build and upload
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        # You can add more, for any target you'd like!
+        include:
+          - build: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get the release version from the tag
+        shell: bash
+        run: echo "VERSION=1.4.3" >> $GITHUB_ENV
+
+      - name: Install Rust
+        # Or @nightly if you want
+        uses: dtolnay/rust-toolchain@stable
+        # Arguments to pass in
+        with:
+          # Make Rust compile to our target (defined in the matrix)
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+#         use-cross: true
+          command: build
+          args: --release --target ${{ matrix.target }} --features static-sqlite -p arti -p tor-circmgr -p tor-cell -p tor-proto --bin arti
+          
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arti
+          path: target/${{ matrix.target }}/release/arti.exe
